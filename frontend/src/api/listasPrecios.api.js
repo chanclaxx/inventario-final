@@ -35,12 +35,17 @@ export const getPreciosProducto = (productoId) =>
 // exige el mismo permiso que escribir — ofrecerle el archivo a quien después va
 // a recibir un 403 al aplicarlo no le sirve a nadie.
 
-/** El .xlsx con los precios actuales. `responseType: blob` o llega corrupto. */
-export const descargarPlantillaPrecios = ({ sucursales = [], incluirVariantes = false } = {}) =>
+/**
+ * El .xlsx con los precios actuales. `responseType: blob` o llega corrupto.
+ *
+ * `incluirVariantes` sin definir NO manda el parámetro: el backend decide con
+ * `variantes_activo` del negocio, que es lo correcto cuando nadie eligió.
+ */
+export const descargarPlantillaPrecios = ({ sucursales = [], incluirVariantes } = {}) =>
   api.get('/listas-precios/plantilla', {
     params: {
       sucursales: sucursales.join(','),
-      variantes:  incluirVariantes ? '1' : '0',
+      ...(incluirVariantes === undefined ? null : { variantes: incluirVariantes ? '1' : '0' }),
     },
     responseType: 'blob',
   });

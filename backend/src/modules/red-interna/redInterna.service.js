@@ -3411,6 +3411,10 @@ const _formatoSerial = (s) => ({
   nombre: [s.nombre, s.marca, s.modelo].filter(Boolean).join(' '),
   valor_interno: _num(s.costo_compra),
   precio_venta: _num(s.precio_venta),
+  // Los precios de sus listas (feature opt-in; `null` sin ella). Son precios de
+  // VENTA, nunca costos: con ellos la pantalla manda TODO el envío al precio de
+  // «Al por mayor» de un toque, en vez de teclear línea por línea.
+  precios: s.precios ?? null,
   sin_costo: _num(s.costo_compra) === 0,
   cantidad: 1,
 });
@@ -3431,6 +3435,7 @@ const _formatoCantidad = (p) => ({
   stock: Number(p.stock || 0),
   valor_interno: _num(p.costo_unitario),
   precio_venta: _num(p.precio_venta),
+  precios: p.precios ?? null,
   sin_costo: _num(p.costo_unitario) === 0,
   cantidad: 1,
 });

@@ -1,5 +1,5 @@
 const XLSX = require('xlsx');
-const { COLUMNAS_FIJAS } = require('./listasPrecios.plantilla');
+const { COLUMNAS_CONOCIDAS } = require('./listasPrecios.plantilla');
 const { MAX_PRECIO } = require('../../utils/listasPrecios.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,8 +144,11 @@ function resolverLibro(buffer, { listas, porSucursal }) {
         mensaje: `La hoja «${nombreHoja}» no tiene la columna «${l.nombre}»: esa lista se deja como está.`,
       });
     }
+    // `COLUMNAS_CONOCIDAS` lleva también el nombre viejo de la columna de
+    // variante («Detalle»): un archivo bajado antes de sep-2026 tiene que poder
+    // subirse sin que su propia columna salga como «se ignora».
     const desconocidas = cabeceras.filter((c) =>
-      !COLUMNAS_FIJAS.some((f) => NORM(f) === NORM(c))
+      !COLUMNAS_CONOCIDAS.some((f) => NORM(f) === NORM(c))
       && !listas.some((l) => NORM(l.nombre) === NORM(c)));
     for (const c of desconocidas) {
       informe.avisos.push({
@@ -157,9 +160,20 @@ function resolverLibro(buffer, { listas, porSucursal }) {
     const yaVistos = new Set();
 
     for (const [i, fila] of filas.entries()) {
-      informe.total_filas++;
       const numFila = i + 2;   // +1 por la cabecera, +1 porque Excel cuenta desde 1
-      const etiqueta = [fila.Producto, fila.Detalle].filter(Boolean).join(' · ') || `fila ${numFila}`;
+
+      // Una fila COMPLETAMENTE vacía no es un error que reportar: es lo que
+      // deja Excel cuando alguien borra el contenido de una línea, o una fila
+      // de separación. Antes caía en el respaldo por nombre y salía como
+      // «no hay ningún producto llamado ""», llenando el informe de conflictos
+      // que no lo son.
+      if (Object.values(fila).every((v) => v === null || String(v).trim() === '')) continue;
+
+      informe.total_filas++;
+      // La columna se llama «Variante» desde sep-2026 y «Detalle» antes; las dos
+      // valen, y ninguna decide a qué nodo va la fila: eso lo hace el ID.
+      const detalle  = fila.Variante ?? fila.Detalle;
+      const etiqueta = [fila.Producto, detalle].filter(Boolean).join(' · ') || `fila ${numFila}`;
 
       // ── A qué nodo va esta fila ──────────────────────────────────────────
       let nodo = null;

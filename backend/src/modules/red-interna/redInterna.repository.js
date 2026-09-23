@@ -4,6 +4,9 @@ const { pool } = require('../../config/db');
 // —la operación diaria de un módulo que ya está en producción—, así que se
 // interpolan solo cuando existen. Ver src/config/columnas.js.
 const { hayPedidosInternos } = require('../../config/columnas');
+// Los precios de las listas de cada nodo (feature opt-in). La expresión de
+// herencia se comparte con la búsqueda del carrito: ver el util.
+const { selPreciosNodo } = require('../../utils/listasPreciosSql.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RED INTERNA — repositorio
@@ -1397,6 +1400,7 @@ const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
              pc.nombre, NULL::text AS variante_label, pc.codigo, pc.stock,
              COALESCE(pc.costo_unitario, 0) AS costo_unitario,
              COALESCE(pc.precio, 0) AS precio_venta,
+             ${selPreciosNodo('producto')},
              pc.unidad_medida, pc.linea_id, 0 AS orden
       FROM productos_cantidad pc
       JOIN sucursales su ON su.id = pc.sucursal_id
@@ -1411,6 +1415,7 @@ const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
              pc.nombre, ap.valor, ap.codigo, ap.stock,
              COALESCE(ap.costo_unitario, pc.costo_unitario, 0),
              COALESCE(ap.precio, pc.precio, 0),
+             ${selPreciosNodo('atributo')},
              pc.unidad_medida, pc.linea_id, 1
       FROM atributos_producto ap
       JOIN productos_cantidad pc ON pc.id = ap.producto_id
@@ -1427,6 +1432,7 @@ const buscarCantidadPorCodigo = async (negocioId, sucursalOrigenId, codigo) => {
              pc.nombre, ap.valor || ' / ' || v.valor, v.codigo, v.stock,
              COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0),
              COALESCE(v.precio, ap.precio, pc.precio, 0),
+             ${selPreciosNodo('variante')},
              pc.unidad_medida, pc.linea_id, 2
       FROM variantes_atributo v
       JOIN atributos_producto ap ON ap.id = v.atributo_id
@@ -1671,7 +1677,9 @@ const findCantidadById = async (negocioId, sucursalOrigenId, productoId) => {
   const { rows } = await pool.query(`
     SELECT pc.id AS producto_id, pc.nombre, pc.codigo, pc.stock,
            COALESCE(pc.costo_unitario, 0) AS costo_unitario,
-           COALESCE(pc.precio, 0) AS precio_venta, pc.unidad_medida,
+           COALESCE(pc.precio, 0) AS precio_venta,
+           ${selPreciosNodo('producto')},
+           pc.unidad_medida,
            EXISTS (SELECT 1 FROM atributos_producto x
                    WHERE x.producto_id = pc.id AND x.activo = true) AS tiene_variantes
     FROM productos_cantidad pc
@@ -1774,6 +1782,7 @@ const findNodoCantidadById = async (negocioId, sucursalOrigenId, { productoId, a
              v.codigo, v.stock,
              COALESCE(v.costo_unitario, ap.costo_unitario, pc.costo_unitario, 0) AS costo_unitario,
              COALESCE(v.precio, ap.precio, pc.precio, 0) AS precio_venta,
+             ${selPreciosNodo('variante')},
              pc.unidad_medida
       FROM variantes_atributo v
       JOIN atributos_producto ap ON ap.id = v.atributo_id
@@ -1791,6 +1800,7 @@ const findNodoCantidadById = async (negocioId, sucursalOrigenId, { productoId, a
              pc.nombre, ap.valor AS variante_label, ap.codigo, ap.stock,
              COALESCE(ap.costo_unitario, pc.costo_unitario, 0) AS costo_unitario,
              COALESCE(ap.precio, pc.precio, 0) AS precio_venta,
+             ${selPreciosNodo('atributo')},
              pc.unidad_medida
       FROM atributos_producto ap
       JOIN productos_cantidad pc ON pc.id = ap.producto_id
@@ -1812,6 +1822,7 @@ const findSerialById = async (negocioId, sucursalOrigenId, serialId) => {
     SELECT s.id AS serial_id, s.imei, s.vendido, s.prestado,
            COALESCE(s.costo_compra, 0) AS costo_compra,
            COALESCE(s.precio, ps.precio, 0) AS precio_venta,
+           ${selPreciosNodo('serial')},
            ps.id AS producto_id, ps.nombre, ps.marca, ps.modelo,
            EXISTS (
              SELECT 1 FROM lineas_remision lr
@@ -1830,6 +1841,7 @@ const buscarSerialDisponible = async (negocioId, sucursalOrigenId, imei) => {
     SELECT s.id AS serial_id, s.imei, s.vendido, s.prestado,
            COALESCE(s.costo_compra, 0) AS costo_compra,
            COALESCE(s.precio, ps.precio, 0) AS precio_venta,
+           ${selPreciosNodo('serial')},
            ps.id AS producto_id, ps.nombre, ps.marca, ps.modelo, ps.linea_id,
            EXISTS (
              SELECT 1 FROM lineas_remision lr

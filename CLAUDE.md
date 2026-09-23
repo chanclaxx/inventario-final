@@ -195,6 +195,43 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > el punto de venta ni las pestañas de Reportes pinten costo de obsequios — las
 > seis barandas marcadas con ★ fallan contra la versión con la fuga).
 
+> **La plantilla de precios trae las TALLAS** (`listas-precios/`,
+> `leerNodosSucursal`; reportado desde producción, sep-2026: «descarga los
+> productos pero no las variantes de esos mismos productos»). El Excel es el
+> mismo archivo de ida y de vuelta —se baja con los precios de hoy, se edita y
+> se vuelve a subir—, pero las tallas dependían de una casilla APAGADA por
+> defecto. Con `variantes_activo` el precio vive en la HOJA y el producto es un
+> contenedor —igual que el stock, el código escaneable y la remisión—, así que
+> una plantilla sin tallas no puede tarifar lo que de verdad se vende.
+> Ahora **el default lo decide el negocio**: `variantes_activo === '1'` ⇒ vienen
+> las tallas. El parámetro `variantes` AUSENTE significa «decide tú», no «no»
+> (un frontend viejo, o el enlace guardado, bajan bien); `0`/`1` explícitos
+> siguen mandando. La casilla de la pantalla arranca en `null` —el usuario no
+> ha elegido— y por eso no se fija mientras la config carga.
+> Entran también las **referencias con IMEI** (`productos_serial.precios`
+> existe desde la misma migración y el editor de un producto ya las tarifaba,
+> pero por Excel no había forma).
+> **El ORDEN es el del árbol**: cada talla bajo su producto y cada color bajo SU
+> talla, con `tipos_caracteristica.orden` mandando dentro de cada nivel —el
+> mismo criterio del árbol de inventario y del export, donde ordenar
+> alfabéticamente pondría las tallas como L, M, S, XL. Antes el `ORDER BY` ponía
+> todos los atributos y después todas las variantes, así que «38MM» y
+> «38MM / Negro» quedaban separadas por las otras tallas.
+> La hoja gana columnas **«Variante»** (con sangría por nivel) y **«Nivel»**
+> (Producto / Talla / Color / Referencia), un aviso en el producto que tiene
+> tallas, y el filtro de Excel. **«Variante» se llamaba «Detalle»**: el lector
+> acepta los DOS nombres (`COLUMNAS_CONOCIDAS`) porque la gente guarda los
+> archivos que bajó, y si su propia columna saliera como «se ignora» el informe
+> acusaría al usuario de un cambio que hicimos nosotros.
+> Dos arreglos de paso: una casilla de precio sin valor ya **no se escribe**
+> (una celda de texto vacío es, para Excel, una celda CON contenido: estorba al
+> filtrar y al arrastrar), y una **fila completamente vacía se salta** en vez de
+> caer en el respaldo por nombre y llenar el informe de «no hay ningún producto
+> llamado ""».
+> Prueba: `58-plantilla-precios` (38; genera el .xlsx DE VERDAD y le lee las
+> celdas — la sección 2 es la del orden, y la 4 la que de verdad protege: subir
+> el archivo recién bajado, sin tocar nada, no cambia NI UNA fila).
+
 > **El PIN de administrador lo usan otros roles SOLO si el admin los autoriza**
 > (`config.service.verificarPinDeUsuario`, `middlewares/pinAdmin.middleware.js`,
 > Ajustes → Seguridad → «Quién puede usar el PIN»): los modales de PIN (reducir
@@ -1854,17 +1891,43 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > ajenos, la 8 un envío de 70 líneas sin saltos de PDFKit, la 9 que ningún
 > carácter impreso quede fuera de WinAnsi).
 
-> **El despacho PREGRABA el precio de venta** (decisión del negocio, sep-2026;
-> `ModalDespachar.conValorInicial`): el valor de cada línea sale con el precio
-> de venta de la bodega —variante > atributo > producto; en un serial el precio
-> de la unidad gana sobre el de la referencia— y cae al costo si no hay precio.
-> Sigue siendo editable. El backend NO cambió `valor_interno` (sigue siendo el
-> costo) y manda `precio_venta` aparte: con despliegues separados, un frontend
+> **El despacho SALE AL PRECIO DEL CARRITO** (decisión del negocio, sep-2026;
+> `ModalDespachar.conValorInicial`, `valorSegunLista`): el valor de cada línea
+> se pregraba en este orden — **`precio_carrito`** (el precio con el que el ítem
+> venía del carrito: la lista, la tarifa o lo escrito a mano; el carrito ya
+> resolvió cuál manda y aquí no se vuelve a decidir), el **precio de venta** de
+> la bodega —variante > atributo > producto; en un serial la unidad gana sobre
+> la referencia—, y el **costo** si no hay precio. Sigue siendo editable.
+> Antes el precio del carrito solo se ofrecía como un botón «usar $X» POR
+> LÍNEA: con treinta líneas eso era teclear treinta veces, que es justo lo
+> cansón de despachar.
+> **Y una LISTA re-precifica todo el envío de un toque** (opt-in
+> `listas_precios_activo`): el selector del modal cambia TODAS las líneas
+> —incluidas las ya tocadas a mano: elegir una lista es decir «este envío va a
+> este precio»— y lo que se agregue después entra con esa lista puesta. Lo que
+> no está en la lista NO queda en $0: cae al precio con el que llegó, y la
+> pantalla dice cuántos quedaron fuera, como el carrito. Para eso cada línea
+> viaja con sus `precios`; la expresión de herencia (el `||` de jsonb, clave por
+> clave) se movió a **`utils/listasPreciosSql.util.js`** y la comparten el
+> escaneo del carrito y las **siete** consultas del despacho — una copia se
+> habría separado, como las dos listas de módulos. Sin la migración devuelve
+> `NULL::jsonb` y todo emite el SQL de siempre.
+> De paso, el piso del precio mínimo en el despacho ya no espera al 400: se
+> calcula en pantalla con `pisoDePrecios`, la misma función del backend.
+> Un **OBSEQUIO no viaja con su $0** al despacho (`Carrito.prepararDespacho`):
+> vale 0 porque se le regala a un CLIENTE, y mandarlo así le regalaría la
+> mercancía al local; cae al precio de la bodega.
+> El backend NO cambió `valor_interno` (sigue siendo el costo) y manda
+> `precio_venta` y `precios` aparte: con despliegues separados, un frontend
 > viejo despacha igual que antes. Lo elige la PANTALLA, y `_valorLinea` sigue
 > cayendo al costo cuando la línea llega sin valor. `costo_real` se congela con
 > el costo para el aviso de dedazo. Consecuencia: el costo del local (que ES el
-> `valor_interno`) queda en el precio de venta de la bodega, y su utilidad y
-> sus tarifas se calculan sobre eso. Prueba: `47-despacho-precio-venta` (28).
+> `valor_interno`) queda en el precio que eligió el carrito, y su utilidad y
+> sus tarifas se calculan sobre eso.
+> Prueba: `47-despacho-precio-venta` (48; la 5 es la del precio del carrito, la
+> 7 la de la lista sobre todo el envío y la 8 que sin la migración de listas
+> nada cambia; extrae las tres funciones REALES del `.jsx` e importa
+> `precioEnLista` del util del frontend en vez de reescribirlo).
 
 > **Despachar resta lo que YA va en camino** (`_comprometidoSinRecibir`,
 > `_verificarStockRecepcion`): despachar no descuenta stock, y validaba solo

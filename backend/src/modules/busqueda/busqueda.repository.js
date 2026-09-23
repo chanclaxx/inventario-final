@@ -1,30 +1,22 @@
 const { pool } = require('../../config/db');
 const costoRed = require('../../utils/costoRed.util');
 const { hayListasPrecios, hayTecnicos } = require('../../config/columnas');
+const { selPreciosNodo: selPreciosSql } = require('../../utils/listasPreciosSql.util');
 
 // ── Listas de precios en el escaneo (feature opt-in) ─────────────────────────
 //
 // El escáner mete el nodo DERECHO al carrito, así que aquí no hay un árbol
 // donde resolver la herencia después: la resuelve el SQL, como ya hace con
-// `precio` y `costo_unitario`.
+// `precio` y `costo_unitario`. La expresión (herencia clave por clave con el
+// `||` de jsonb, no COALESCE) vive en `utils/listasPreciosSql.util.js` porque
+// el despacho de la red interna lee los mismos precios: dos copias se habrían
+// separado, como ya pasó con las dos listas de módulos.
 //
-// Pero no con COALESCE sino con el CONCATENADO de jsonb (`||`), y la diferencia
-// importa: COALESCE elige UN objeto entero, así que una talla con su propio
-// precio mayorista tiraría a la basura los otros dos precios que el producto sí
-// tenía. `||` mezcla CLAVE POR CLAVE y gana la derecha — o sea el nivel más
-// específico—, que es justo la regla: el producto pone los precios generales y
-// la talla sobrescribe los suyos.
-//
-// Se interpola solo si la columna existe. Ojo con el UNION: los tipos salen de
-// la PRIMERA rama, así que las tres tienen que traer la columna o ninguna.
-// No es entrada de usuario: es un literal SQL fijo.
-const HERENCIA_PRECIOS = {
-  producto: `pc.precios AS precios,`,
-  atributo: `COALESCE(pc.precios, '{}'::jsonb) || COALESCE(ap.precios, '{}'::jsonb) AS precios,`,
-  variante: `COALESCE(pc.precios, '{}'::jsonb) || COALESCE(ap.precios, '{}'::jsonb)
-               || COALESCE(v.precios, '{}'::jsonb) AS precios,`,
-};
-const selPreciosNodo = (nivel) => (hayListasPrecios() ? HERENCIA_PRECIOS[nivel] : '');
+// Ojo con el UNION: los tipos salen de la PRIMERA rama, así que las tres tienen
+// que traer la columna o ninguna — por eso `sinColumna: 'omitir'`, que la borra
+// del SELECT igual que antes cuando la migración no está.
+const selPreciosNodo = (nivel) =>
+  selPreciosSql(nivel, { coma: true, sinColumna: 'omitir' });
 
 // ─── Normalización de texto para búsquedas ────────────────────────────────────
 

@@ -62,10 +62,22 @@ const nombreHoja = (nombre, usados) => {
   return final;
 };
 
-// Las cuatro columnas fijas van SIEMPRE en este orden y con estos nombres: son
-// el contrato que lee el importador. Cambiar uno aquí sin cambiarlo allá deja
-// un archivo que se descarga bien y no se puede volver a subir.
-const COLUMNAS_FIJAS = ['ID', 'Producto', 'Detalle', 'Código', 'Precio actual'];
+// Las columnas fijas van SIEMPRE en este orden y con estos nombres: son el
+// contrato que lee el importador. Cambiar uno aquí sin cambiarlo allá deja un
+// archivo que se descarga bien y no se puede volver a subir.
+//
+// «Variante» se llamaba «Detalle» hasta sep-2026: con las tallas dentro del
+// archivo, «Detalle» no decía qué era esa fila. El importador sigue aceptando
+// las dos —un archivo bajado antes tiene que poder subirse igual— y por eso
+// `COLUMNAS_CONOCIDAS` lleva las dos, o la vieja saldría como «columna que no
+// es ninguna de tus listas y se ignora».
+const COLUMNAS_FIJAS = ['ID', 'Producto', 'Variante', 'Nivel', 'Código', 'Precio actual'];
+const COLUMNAS_CONOCIDAS = [...COLUMNAS_FIJAS, 'Detalle'];
+
+// Una talla se ve como lo que es: DEBAJO de su producto y sangrada. Con 2.000
+// filas, el archivo tiene que dejar ver de un vistazo dónde empieza y dónde
+// termina cada producto — si no, tarifar una talla es buscarla.
+const SANGRIA = { producto: '', serial: '', atributo: '    ', variante: '        ' };
 
 function hojaSucursal(nodos, listas) {
   const ws = {};
@@ -78,37 +90,54 @@ function hojaSucursal(nodos, listas) {
 
   nodos.forEach((nodo, i) => {
     const r = i + 1;
-    // Las filas de talla van con fondo suave: con 2.000 líneas hay que poder
-    // ver de un vistazo dónde empieza y termina cada producto.
-    const fondo = nodo.nivel === 'producto' ? C.blanco : C.grisSuave;
+    const esProducto = nodo.nivel === 'producto' || nodo.nivel === 'serial';
+    // Las filas de talla van con fondo suave y el nombre del producto en gris:
+    // lo que hay que leer en ellas es la variante, no repetir el producto.
+    const fondo = esProducto ? C.blanco : C.grisSuave;
+    const estilo = esProducto
+      ? { ...sTexto(fondo), font: { sz: 10, bold: true, color: { rgb: '111827' } } }
+      : sTexto(fondo);
 
-    put(ws, r, 0, 's', nodo.token,             sTexto(fondo));
-    put(ws, r, 1, 's', nodo.nombre  ?? '',      sTexto(fondo));
-    put(ws, r, 2, 's', nodo.detalle ?? '',      sTexto(fondo));
-    put(ws, r, 3, 's', nodo.codigo  ?? '',      sTexto(fondo));
+    put(ws, r, 0, 's', nodo.token,        sTexto(fondo));
+    put(ws, r, 1, 's', nodo.nombre ?? '', estilo);
+    // Un producto con tallas NO se tarifa solo con su fila: lo que se vende es
+    // la talla. Se dice aquí, en la fila, y no solo en las instrucciones.
+    const variante = nodo.detalle
+      ? `${SANGRIA[nodo.nivel] || ''}${nodo.detalle}`
+      : (nodo.tiene_hijos ? '(y todas sus variantes, abajo)' : '');
+    put(ws, r, 2, 's', variante, sTexto(fondo));
+    put(ws, r, 3, 's', nodo.nivel_etiqueta ?? '', sTexto(fondo));
+    put(ws, r, 4, 's', nodo.codigo ?? '', sTexto(fondo));
     // El precio de siempre viaja como REFERENCIA, no se importa: es lo que se
     // cobra cuando la lista elegida no menciona el producto, y verlo al lado
     // es lo que deja decidir si hace falta tarifarlo.
     const precio = Number(nodo.precio);
-    if (Number.isFinite(precio) && precio > 0) put(ws, r, 4, 'n', precio, sTexto(fondo));
-    else put(ws, r, 4, 's', '', sTexto(fondo));
+    if (Number.isFinite(precio) && precio > 0) put(ws, r, 5, 'n', precio, sTexto(fondo));
+    else put(ws, r, 5, 's', '', sTexto(fondo));
 
+    // Sin precio en esa lista NO se escribe la celda: una celda de texto vacío
+    // es, para Excel, una celda CON contenido — se cuenta al filtrar, estorba al
+    // arrastrar un precio hacia abajo y al pegar una columna entera. Vacía de
+    // verdad es lo que significa «esta fila hereda».
     listas.forEach((l, k) => {
-      const v = nodo.precios?.[l.id];
-      const c = COLUMNAS_FIJAS.length + k;
-      if (Number.isFinite(Number(v)) && Number(v) > 0) put(ws, r, c, 'n', Number(v));
-      else put(ws, r, c, 's', '');
+      const v = Number(nodo.precios?.[l.id]);
+      if (Number.isFinite(v) && v > 0) put(ws, r, COLUMNAS_FIJAS.length + k, 'n', v);
     });
   });
 
-  ws['!ref']  = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: nodos.length, c: encabezados.length - 1 } });
+  const ref = XLSX.utils.encode_range(
+    { s: { r: 0, c: 0 }, e: { r: nodos.length, c: encabezados.length - 1 } });
+  ws['!ref']  = ref;
   ws['!cols'] = [
-    { wch: 10 }, { wch: 42 }, { wch: 22 }, { wch: 14 }, { wch: 14 },
+    { wch: 10 }, { wch: 40 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
     ...listas.map(() => ({ wch: 16 })),
   ];
   // Congelar la cabecera: con 450 filas, perder de vista qué columna es cuál es
   // la forma más fácil de escribir el precio mayorista en la columna del final.
   ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+  // Y el filtro de Excel, que es como se tarifa de verdad: «todas las tallas de
+  // las correas», «solo lo que no tiene precio mayorista».
+  ws['!autofilter'] = { ref };
   return ws;
 }
 
@@ -131,10 +160,18 @@ function hojaInstrucciones(listas, sucursales) {
   normal('');
   normal('· NO borres la columna ID: es lo que identifica cada producto sin equivocarse.');
   normal('  Si la borras, se busca por nombre y eso sí puede fallar con nombres parecidos.');
-  normal('· Una casilla VACÍA significa "sin precio en esa lista": ese producto se venderá');
-  normal('  a su precio de siempre (la columna gris "Precio actual"), nunca en $0.');
+  normal('· Cada producto trae DEBAJO sus tallas y colores, sangrados. La columna "Nivel"');
+  normal('  dice qué es cada fila: Producto, Talla, Color… o Referencia (equipos con IMEI).');
+  normal('· El precio que pongas en el PRODUCTO vale para todas sus tallas. Escribe en la');
+  normal('  fila de una talla solo si ESA talla vale distinto: la de abajo manda.');
+  normal('· Una casilla VACÍA significa "sin precio propio": esa fila hereda el precio del');
+  normal('  producto y, si tampoco lo tiene, se vende a su precio de siempre (la columna');
+  normal('  "Precio actual"). Nunca en $0.');
   normal('· Escribir 0 es lo mismo que dejarla vacía. Un producto a $0 siempre es un error.');
-  normal('· "Precio actual" y "Código" son solo de referencia: aunque los cambies, no se importan.');
+  normal('· "Precio actual", "Código", "Nivel" y "Variante" son solo de referencia: aunque');
+  normal('  los cambies, no se importan.');
+  normal('· Puedes usar el filtro de Excel de la fila 1 para trabajar por producto o por');
+  normal('  talla sin perderte entre miles de filas.');
   normal('· Este archivo NO toca costos, stock ni ningún otro dato. Solo precios de venta.');
   normal('· Los productos que borres de una hoja se quedan como están. Para quitarle el');
   normal('  precio a uno, deja sus casillas verdes vacías.');
@@ -173,4 +210,4 @@ function generarPlantillaBuffer(datos, listas) {
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }
 
-module.exports = { generarPlantillaBuffer, COLUMNAS_FIJAS };
+module.exports = { generarPlantillaBuffer, COLUMNAS_FIJAS, COLUMNAS_CONOCIDAS };

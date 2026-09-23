@@ -13,7 +13,10 @@ import { Button }  from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
-import { bajoMinimo } from '../../utils/precioMinimo';
+import { bajoMinimo, pisoDePrecios } from '../../utils/precioMinimo';
+import { useListasPrecios } from '../../hooks/useListasPrecios';
+import { SelectorListaPrecio } from '../../components/ui/SelectorListaPrecio';
+import { precioEnLista } from '../../utils/listasPrecios';
 import {
   Truck, Trash2, Check, AlertTriangle, Store, Package, ShoppingBag,
   Plus, Minus, Search, X, ClipboardList,
@@ -32,11 +35,16 @@ import {
 //   2. LISTA DE ACCESORIOS: para los que no tienen código impreso. Se abre solo
 //      cuando se pide, para no llenar la pantalla de opciones.
 //
-// El VALOR de cada línea viene pregrabado con el PRECIO DE VENTA de la bodega
-// (decisión del negocio, sep-2026; antes era el costo) y es editable: es lo que
-// el local va a deber por esa mercancía. Si el producto no tiene precio de
-// venta, se pregraba el costo, como antes. Si venía del carrito con un precio
-// distinto, se ofrece aplicarlo con un toque.
+// El VALOR de cada línea es lo que el local va a deber por esa mercancía, y
+// viene pregrabado (editable) con, en este orden: el precio que el ítem TRAÍA
+// DEL CARRITO, el precio de venta de la bodega, o el costo si no hay precio.
+// Que mande el del carrito es la decisión de sep-2026: si allá se tocó «Al por
+// mayor», el envío entero sale al por mayor sin teclear línea por línea.
+//
+// Con las listas de precios activas hay además un selector para TODO el envío:
+// cambia las líneas de una, y las que se agreguen después entran con esa lista
+// puesta. Cada línea viaja con sus `precios`, así que el cambio no cuesta una
+// consulta más.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Identifica el NODO, no el producto: dos tallas del mismo producto son dos
@@ -47,29 +55,59 @@ const claveDe = (i) => (i.tipo === 'serial'
 
 // ── Valor pregrabado de una línea ───────────────────────────────────────────
 // El backend manda `valor_interno` = COSTO y `precio_venta` aparte. Aquí se
-// elige el precio de venta y, sin él, el costo. `costo_real` se congela con el
-// costo: contra él se avisa un dedazo (un cero de más o de menos). Un ítem que
-// ya pasó por aquí trae `costo_real` y no se vuelve a tocar, o el precio
-// terminaría haciéndose pasar por costo.
-const conValorInicial = (item) => {
+// decide con qué precio sale la línea, en este orden:
+//
+//   1. `precio_carrito` — el precio con el que el ítem VENÍA DEL CARRITO. Si
+//      allá se tocó «Al por mayor», el envío entero sale al por mayor sin
+//      teclear línea por línea, que es justo lo cansón de despachar (decisión
+//      del negocio, sep-2026). Cubre listas, tarifas y precios escritos a mano:
+//      el carrito ya resolvió cuál manda y aquí no se vuelve a decidir.
+//   2. `precio_venta` — el precio de la bodega, para lo que se agrega aquí
+//      dentro (escáner, accesorios) y para un frontend que no mande el 1.
+//   3. el COSTO, cuando el producto no tiene precio de venta.
+//
+// `costo_real` se congela con el costo: contra él se avisa un dedazo (un cero
+// de más o de menos). Un ítem que ya pasó por aquí trae `costo_real` y no se
+// vuelve a tocar, o el precio terminaría haciéndose pasar por costo.
+const conValorInicial = (item, lista = null) => {
   if (item.costo_real !== undefined) return item;
-  const costo  = Number(item.valor_interno || 0);
-  const precio = Number(item.precio_venta  || 0);
-  const valor  = precio > 0 ? precio : costo;
+  const costo = Number(item.valor_interno || 0);
+  const base  = valorSegunLista(item, lista);
+  const valor = base > 0 ? base : costo;
   return { ...item, costo_real: costo, valor_interno: valor, sin_costo: valor === 0 };
 };
+
+// Lo que vale una línea con una lista de precios puesta (o sin ninguna).
+// Una lista a medio llenar NO deja la línea en $0: cae al precio del carrito y
+// después al de la bodega, igual que el carrito cae al precio de siempre.
+const valorSegunLista = (item, lista) => {
+  const deLista = lista ? precioEnLista(item.precios, lista.id) : null;
+  if (deLista != null) return deLista;
+  return Number(item.precio_carrito || 0) || Number(item.precio_venta || 0);
+};
+
+// Cuántas líneas quedarían fuera de la lista elegida. Se dice ANTES de
+// despachar, como en el carrito: una lista a medio llenar se descubre cuando el
+// local ya recibió la mercancía.
+const sinPrecioEnLista = (items, lista) => (
+  lista ? items.filter((i) => precioEnLista(i.precios, lista.id) == null).length : 0
+);
 
 // ── Valor de la línea: visible y editable ───────────────────────────────────
 // Es lo que el local va a deber por esa mercancía. Viene con el precio de venta
 // puesto (o el costo si no hay precio), pero se puede cambiar: hace falta
 // cuando saldría en $0 o cuando se acuerda otro valor para esa entrega.
-// Precio mínimo (feature opt-in): el piso es el precio de venta de la bodega.
-// Con listas de precios activas el piso puede ser el de una lista, que estas
-// líneas no traen: ahí no se adivina en pantalla y responde el backend.
+// Precio mínimo (feature opt-in): el piso es el MENOR de los precios escritos
+// del producto — el de la bodega y, con listas activas, el de cada lista. Se
+// calcula con la misma función que usa el backend, y desde que la línea trae
+// sus `precios` ya no hace falta esperar al 400 para enterarse.
 const minimoDespacho = (item, regla) => {
-  if (!regla.activo || regla.listaIds.length > 0) return null;
-  const p = Number(item.precio_venta || 0);
-  return p > 0 ? p : null;
+  if (!regla.activo) return null;
+  return pisoDePrecios({
+    precio:   item.precio_venta,
+    precios:  item.precios,
+    listaIds: regla.listaIds,
+  });
 };
 
 function ValorLinea({ item, onCambiar, minimo = null }) {
@@ -208,7 +246,11 @@ export function ModalDespachar({
 }) {
   const [destino,     setDestino]     = useState(
     pedido ? Number(pedido.sucursal_id) : locales.length === 1 ? locales[0].id : null);
-  const [items,       setItems]       = useState(() => (itemsIniciales || []).map(conValorInicial));
+  const [items,       setItems]       = useState(
+    () => (itemsIniciales || []).map((i) => conValorInicial(i)));
+  // Lista de precios aplicada a TODO el envío (feature opt-in). Null = cada
+  // línea con el precio que traía del carrito (o el de la bodega).
+  const [lista,       setLista]       = useState(null);
   const [texto,       setTexto]       = useState('');
   const [error,       setError]       = useState('');
   const [aviso,       setAviso]       = useState('');
@@ -241,7 +283,10 @@ export function ModalDespachar({
     const existente = items.find((i) => claveDe(i) === k);
 
     if (!existente) {
-      setItems((prev) => [...prev, conValorInicial({ ...nuevo, cantidad: nuevo.cantidad || 1 })]);
+      setItems((prev) => [
+        ...prev,
+        conValorInicial({ ...nuevo, cantidad: nuevo.cantidad || 1 }, lista),
+      ]);
       setAviso(`${nuevo.nombre} agregado`);
       return;
     }
@@ -342,6 +387,19 @@ export function ModalDespachar({
   const enCero = items.filter((i) => Number(i.valor_interno || 0) === 0);
 
   const reglaPrecio = usePrecioMinimo();
+  const listasCfg   = useListasPrecios();
+
+  // Cambiar de lista re-precifica TODAS las líneas de una vez — incluidas las
+  // que ya se habían tocado a mano: elegir una lista es decir «este envío va a
+  // este precio», y dejar unas cuantas con el precio anterior es justo el
+  // descuadre que nadie revisa. `costo_real` no se toca: sigue siendo el costo.
+  const aplicarLista = (nueva) => {
+    setLista(nueva);
+    setItems((prev) => prev.map((i) => {
+      const valor = valorSegunLista(i, nueva) || Number(i.costo_real || 0);
+      return { ...i, valor_interno: valor, sin_costo: valor === 0 };
+    }));
+  };
   const bajoElMinimo = items.filter(
     (i) => bajoMinimo(Number(i.valor_interno || 0), minimoDespacho(i, reglaPrecio)));
 
@@ -482,6 +540,27 @@ export function ModalDespachar({
               </button>
             )}
           </div>
+
+          {/* Una lista de precios para TODO el envío. Lo que viene del carrito
+              ya trae el precio que se eligió allá; esto sirve para cambiarlo de
+              una, y para lo que se agrega aquí dentro con el escáner. */}
+          {listasCfg.activo && items.length > 0 && (
+            <div className="mt-3 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5
+              flex flex-col gap-2">
+              <SelectorListaPrecio
+                listas={listasCfg.listas}
+                valor={lista?.id || null}
+                onChange={aplicarLista}
+                label="Precio de todo el envío"
+              />
+              {lista && sinPrecioEnLista(items, lista) > 0 && (
+                <p className="text-xs text-amber-600">
+                  {sinPrecioEnLista(items, lista)} producto(s) no tienen precio en
+                  «{lista.nombre}»: van al precio con el que llegaron.
+                </p>
+              )}
+            </div>
+          )}
 
           {verAccesorios && (
             <div className="mt-2">

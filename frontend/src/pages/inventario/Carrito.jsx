@@ -287,9 +287,13 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
         variante_id: i.variante_id ?? null,
         cantidad:    i.cantidad || 1,
         nombre:      i.nombre,
-        // El precio del carrito es de VENTA, no de costo: viaja solo como
-        // sugerencia para que la pantalla de despacho lo ofrezca con un toque.
-        precio_carrito: i.precioFinal ?? i.precio ?? null,
+        // El precio con el que quedó en el carrito —de la lista, de la tarifa
+        // o escrito a mano—. El despacho SALE con él: si aquí se tocó «Al por
+        // mayor», todo el envío va al por mayor sin teclear línea por línea.
+        // Un OBSEQUIO no viaja: vale 0 porque se le regala a un CLIENTE, y
+        // mandarlo así le regalaría la mercancía al local. Cae al precio de la
+        // bodega, como cualquier ítem que llegue sin precio.
+        precio_carrito: esObsequio(i) ? null : (i.precioFinal ?? i.precio ?? null),
       }))
     ).then((r) => r.data.data),
     onSuccess: (data) => {

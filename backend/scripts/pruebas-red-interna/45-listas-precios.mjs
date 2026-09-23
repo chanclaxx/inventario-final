@@ -255,11 +255,28 @@ for (const [archivo, alias] of [
 // El escaneo mete el nodo DERECHO al carrito, así que su SQL tiene que resolver
 // la herencia — y con el `||` de jsonb, que mezcla clave por clave, no con un
 // COALESCE que elegiría un objeto entero y tiraría los otros precios.
-const busqueda = readFileSync(path.resolve(RAIZ, 'src/modules/busqueda/busqueda.repository.js'), 'utf8');
+//
+// La expresión vive en `utils/listasPreciosSql.util.js` desde sep-2026: la
+// comparten el escaneo hacia el carrito y el DESPACHO de la red interna, que
+// manda todo un envío al precio de una lista. Una segunda copia se habría
+// separado, como ya pasó con las dos listas de módulos.
+const sqlListas = readFileSync(path.resolve(RAIZ, 'src/utils/listasPreciosSql.util.js'), 'utf8');
 checkTrue('el escaneo hereda con el || de jsonb, no con COALESCE del objeto',
-  /COALESCE\(pc\.precios, '\{\}'::jsonb\) \|\| COALESCE\(ap\.precios/.test(busqueda));
+  /COALESCE\(pc\.precios, '\{\}'::jsonb\) \|\| COALESCE\(ap\.precios/.test(sqlListas));
+checkTrue('…y sin la columna no la nombra',
+  /hayListasPrecios\(\)/.test(sqlListas) && /NULL::jsonb/.test(sqlListas));
+
+const busqueda = readFileSync(path.resolve(RAIZ, 'src/modules/busqueda/busqueda.repository.js'), 'utf8');
+checkTrue('el escaneo usa esa MISMA expresión, no una copia',
+  /listasPreciosSql\.util/.test(busqueda));
 checkTrue('las tres ramas del UNION traen la columna o ninguna',
   (busqueda.match(/selPreciosNodo\('/g) || []).length === 3);
+
+// El despacho pide los mismos precios: sin ellos, mandar el envío al precio de
+// «Al por mayor» obligaría a teclear línea por línea, que es lo que se quitó.
+const redRepo = readFileSync(path.resolve(RAIZ, 'src/modules/red-interna/redInterna.repository.js'), 'utf8');
+checkTrue('el despacho lee los precios con la misma expresión',
+  /listasPreciosSql\.util/.test(redRepo) && (redRepo.match(/selPreciosNodo\('/g) || []).length >= 6);
 
 // La red interna: el local nace con los precios de la bodega como punto de
 // partida. Si este INSERT nombrara la columna sin la guarda, lo que se caería no
@@ -378,12 +395,29 @@ seccion(15, 'EXCEL: las columnas fijas son un contrato entre las dos puntas');
 
 const plantilla = require(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.plantilla.js'));
 check('las columnas fijas, en orden',
-  plantilla.COLUMNAS_FIJAS, ['ID', 'Producto', 'Detalle', 'Código', 'Precio actual']);
+  plantilla.COLUMNAS_FIJAS, ['ID', 'Producto', 'Variante', 'Nivel', 'Código', 'Precio actual']);
+// «Detalle» es como se llamaba «Variante» hasta sep-2026. El lector tiene que
+// seguir aceptándola: la gente guarda los archivos que bajó, y si su propia
+// columna saliera como «se ignora» el informe estaría acusando al usuario de un
+// cambio que hicimos nosotros.
+checkTrue('el lector sigue aceptando el nombre viejo de la columna',
+  plantilla.COLUMNAS_CONOCIDAS.includes('Detalle')
+  && plantilla.COLUMNAS_FIJAS.every((c) => plantilla.COLUMNAS_CONOCIDAS.includes(c)));
 // El lector las IMPORTA del generador en vez de repetirlas: copiadas, un archivo
 // se descargaría bien y no se podría volver a subir.
 const excelSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.excel.js'), 'utf8');
 checkTrue('el lector importa las columnas del generador',
-  excelSrc.includes("COLUMNAS_FIJAS } = require('./listasPrecios.plantilla')"));
+  excelSrc.includes("COLUMNAS_CONOCIDAS } = require('./listasPrecios.plantilla')"));
+checkTrue('…y lee la columna de variante con los dos nombres',
+  /fila\.Variante \?\? fila\.Detalle/.test(excelSrc));
+
+// Las tallas entran por defecto: es lo que se reportó desde producción («la
+// plantilla descarga los productos pero no las variantes»).
+const repoSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.repository.js'), 'utf8');
+checkTrue('la plantilla trae las tallas por defecto',
+  /incluirVariantes = true/.test(repoSrc));
+checkTrue('…y las referencias con IMEI también',
+  /FROM productos_serial ps/.test(repoSrc));
 
 const svcSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.service.js'), 'utf8');
 // Analizar y aplicar salen de la MISMA resolución: un validador paralelo se

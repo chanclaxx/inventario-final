@@ -16,10 +16,18 @@ const getPreciosProducto = (req, res, next) =>
 const _sucursalesDeQuery = (v) =>
   String(v ?? '').split(',').map((s) => Number(s.trim())).filter(Boolean);
 
+// `variantes` ausente NO es «no»: es «decide tú», y el service lo resuelve con
+// `variantes_activo`. Así un frontend viejo —o el enlace que alguien se guardó—
+// baja la plantilla con las tallas, que es lo que hace falta para tarifar.
+const _variantesDeQuery = (v) => {
+  if (v === undefined || v === null || v === '') return undefined;
+  return String(v) === '1';
+};
+
 const descargarPlantilla = (req, res, next) =>
   svc.generarPlantilla(req.user, {
     sucursales:       _sucursalesDeQuery(req.query.sucursales),
-    incluirVariantes: req.query.variantes === '1',
+    incluirVariantes: _variantesDeQuery(req.query.variantes),
   })
     .then(({ buffer }) => {
       const fecha = new Date().toISOString().slice(0, 10);

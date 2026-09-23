@@ -7,6 +7,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { getSucursales } from '../../api/sucursales.api';
+import { getConfig } from '../../api/config.api';
 import {
   descargarPlantillaPrecios, analizarPreciosExcel, importarPreciosExcel,
 } from '../../api/listasPrecios.api';
@@ -77,7 +78,24 @@ export function ModalPreciosExcel({ onCerrar }) {
   // el caso normal (un negocio con tres locales que comparten catálogo) y el
   // backend lo resuelve igual, así que la pantalla no tiene que adivinar nada.
   const [elegidas, setElegidas] = useState([]);
-  const [variantes, setVariantes] = useState(false);
+
+  // Las tallas vienen MARCADAS si el negocio usa variantes: con variantes
+  // activas el precio vive en la hoja (el producto es un contenedor), así que
+  // una plantilla sin ellas no puede tarifar lo que de verdad se vende.
+  //
+  // `null` = el usuario no ha tocado la casilla, y entonces NI SIQUIERA se
+  // manda el parámetro: decide el backend con la config del negocio. Guardar
+  // aquí el valor inicial sería fijarlo mientras la config todavía carga —la
+  // casilla diría una cosa y el archivo traería otra— y sincronizarlo después
+  // con un efecto es lo que el linter rechaza.
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => getConfig().then((r) => r.data.data),
+    staleTime: 60 * 1000,
+  });
+  const variantesActivo = config?.variantes_activo === '1';
+  const [eleccionVariantes, setEleccionVariantes] = useState(null);
+  const variantes = eleccionVariantes ?? variantesActivo;
   const [archivo,  setArchivo]  = useState(null);
   const [informe,  setInforme]  = useState(null);
   const [error,    setError]    = useState('');
@@ -90,7 +108,10 @@ export function ModalPreciosExcel({ onCerrar }) {
   };
 
   const descargar = useMutation({
-    mutationFn: () => descargarPlantillaPrecios({ sucursales: elegidas, incluirVariantes: variantes }),
+    mutationFn: () => descargarPlantillaPrecios({
+      sucursales: elegidas,
+      incluirVariantes: eleccionVariantes ?? undefined,
+    }),
     onSuccess: (res) => {
       const url = URL.createObjectURL(new Blob([res.data], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -188,11 +209,18 @@ export function ModalPreciosExcel({ onCerrar }) {
           </p>
           <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none mt-1">
             <input type="checkbox" checked={variantes}
-              onChange={(e) => setVariantes(e.target.checked)}
+              onChange={(e) => setEleccionVariantes(e.target.checked)}
               className="rounded border-gray-300" />
-            Incluir las variantes (tallas, colores)
-            <span className="text-gray-400">— el archivo crece bastante</span>
+            Incluir las tallas y colores de cada producto
+            <span className="text-gray-400">
+              {variantesActivo
+                ? '— cada talla puede tener su propio precio'
+                : '— tu negocio no usa variantes'}
+            </span>
           </label>
+          <p className="text-[11px] text-gray-400">
+            Los equipos con IMEI van siempre: su precio de lista es el de la referencia.
+          </p>
         </div>
 
         {/* ── Paso 1 ────────────────────────────────────────────────────── */}

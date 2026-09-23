@@ -167,17 +167,33 @@ const _sucursalesPermitidas = async (usuario, pedidas) => {
   return suyas.filter((s) => elegidas.includes(s.id));
 };
 
-/** El .xlsx con los precios de hoy, listo para editar y volver a subir. */
-const generarPlantilla = async (usuario, { sucursales, incluirVariantes = false } = {}) => {
+/**
+ * El .xlsx con los precios de hoy, listo para editar y volver a subir.
+ *
+ * **Las tallas entran por defecto si el negocio usa variantes.** Con
+ * `variantes_activo` el precio vive en la HOJA y el producto es un contenedor:
+ * una plantilla sin tallas no puede tarifar lo que de verdad se vende, y eso
+ * fue justo lo que se reportó («descarga los productos pero no las variantes»).
+ * `incluirVariantes` solo manda cuando la pantalla lo dice explícitamente —
+ * `undefined` es «decide tú», que es lo que manda un frontend viejo.
+ */
+const generarPlantilla = async (usuario, { sucursales, incluirVariantes } = {}) => {
   if (!hayListasPrecios()) throw _sinInfra();
   const listas = await _listas(usuario.negocio_id);
   const sedes  = await _sucursalesPermitidas(usuario, sucursales);
+
+  const cfg = await config.getMap(usuario.negocio_id);
+  const conVariantes = incluirVariantes === undefined
+    ? cfg.variantes_activo === '1'
+    : !!incluirVariantes;
 
   const datos = [];
   for (const sucursal of sedes) {
     datos.push({
       sucursal,
-      nodos: await repo.leerNodosSucursal(sucursal.id, usuario.negocio_id, { incluirVariantes }),
+      nodos: await repo.leerNodosSucursal(sucursal.id, usuario.negocio_id, {
+        incluirVariantes: conVariantes,
+      }),
     });
   }
   return { buffer: generarPlantillaBuffer(datos, listas), sedes };
