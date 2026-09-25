@@ -1665,6 +1665,27 @@ const aplicarMigraciones = async (client) => {
     if (sqlTecnicos) await migrar(client, 'Técnicos externos', sqlTecnicos);
   }
 
+  // Mora en los envíos de la red interna — el envío gana plazo, condición
+  // congelada y su registro de cobros y condonaciones. Ver
+  // migrations/20260925_mora_envios.sql.
+  //
+  // Se lee el mismo archivo, como técnicos: la copia a mano de un CHECK con
+  // cuatro ramas es justo lo que se separa sin que nadie lo note.
+  //
+  // Bloque PROPIO, fuera del try/catch de la red interna: si fallara, la red
+  // (que ya opera en producción) sigue igual. `hayMoraEnvios()` de
+  // src/config/columnas.js decide si alguna consulta nombra lo nuevo.
+  {
+    let sqlMoraEnvios = null;
+    try {
+      sqlMoraEnvios = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20260925_mora_envios.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Mora de envíos: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlMoraEnvios) await migrar(client, 'Mora de envíos (red interna)', sqlMoraEnvios);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

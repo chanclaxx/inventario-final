@@ -82,8 +82,9 @@ export default function Dashboard() {
           onClick={() => navigate('/bodega')}
           className={`w-full text-left rounded-2xl border p-4 sm:p-5 shadow-sm
             hover:shadow-md transition-all duration-200 flex items-center gap-4
-            ${bodega.saldo > 0 ? 'bg-amber-50 border-amber-200'
-                               : 'bg-green-50 border-green-200'}`}
+            ${bodega.envios_vencidos > 0 ? 'bg-red-50 border-red-200'
+              : (bodega.total_a_pagar ?? bodega.saldo) > 0 ? 'bg-amber-50 border-amber-200'
+              : 'bg-green-50 border-green-200'}`}
         >
           <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0
             ${bodega.saldo > 0 ? 'bg-amber-100 text-amber-600'
@@ -95,11 +96,19 @@ export default function Dashboard() {
                 es saldo A FAVOR y se aplica al próximo envío. La bodega no le
                 queda debiendo plata. */}
             <p className="text-xs text-gray-500 font-medium">Deuda con la bodega</p>
-            <p className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">
-              {formatCOP(bodega.saldo)}
+            {/* Mercancía + mora de los envíos vencidos: lo que hay que entregar. */}
+            <p className={`text-xl sm:text-2xl font-bold leading-tight
+              ${bodega.envios_vencidos > 0 ? 'text-red-700' : 'text-gray-900'}`}>
+              {formatCOP(bodega.total_a_pagar ?? bodega.saldo)}
             </p>
+            {bodega.envios_vencidos > 0 && (
+              <p className="text-xs text-red-600 font-medium truncate">
+                {bodega.envios_vencidos} envío(s) vencido(s)
+                {bodega.mora_pendiente > 0 && ` · ${formatCOP(bodega.mora_pendiente)} de mora`}
+              </p>
+            )}
             <p className="text-xs text-gray-400 truncate">
-              {bodega.saldo > 0
+              {(bodega.total_a_pagar ?? bodega.saldo) > 0
                 ? `${bodega.envios_abiertos} envío(s) por pagar`
                 : bodega.saldo_a_favor > 0
                   ? `${formatCOP(bodega.saldo_a_favor)} a tu favor`

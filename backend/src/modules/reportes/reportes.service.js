@@ -230,6 +230,13 @@ const _getDeudaBodega = async (sucursalId, negocioId) => {
       // le queda debiendo plata sino mercancía (ver _armarSaldo).
       saldo:               totales.saldo_por_liquidar,
       saldo_a_favor:       totales.saldo_a_favor,
+      // La mora de los envíos vencidos (opt-in): aparte del saldo de la
+      // mercancía, y sumada en `total_a_pagar`, que es lo que se entrega.
+      mora_pendiente:      totales.mora_pendiente || 0,
+      envios_vencidos:     totales.envios_vencidos || 0,
+      dias_max_vencido:    totales.dias_max_vencido || 0,
+      total_a_pagar:       totales.total_a_pagar ?? totales.saldo_por_liquidar,
+      proximo_vencimiento: totales.proximo_vencimiento || null,
       remesas_en_transito: totales.remesas_en_transito,
       // Cuántos envíos sostienen esa deuda, para dar contexto al número.
       envios_abiertos:     totales.envios_abiertos,
@@ -1039,6 +1046,13 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   // rompería el cuadre entre el total y la lista de facturas de arriba. La
   // pantalla las muestra como un grupo aparte, igual que préstamos y servicios.
   const redInterna = await getVentasALocales(sucursalId, desde, hasta);
+  // La mora que la bodega le cobró a sus locales en el período: ingreso
+  // FINANCIERO, nunca margen comercial. Va en su propio sub-bloque y no toca
+  // `utilidad_realizada` (esa mide cobrado − costo con los abonos a capital).
+  const moraRed = await getMoraEnviosRango(sucursalId, desde, hasta);
+  const redInternaConMora = moraRed
+    ? { ...(redInterna || { envios: [], resumen: null }), mora: moraRed }
+    : redInterna;
 
   // Lo que se regaló en el período. Va en su propio bloque y NO se resta de
   // `resumen`: el costo de un obsequio YA está dentro de la utilidad de arriba
@@ -1048,7 +1062,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
 
   return {
     facturas: facturasCompletas, resumen, prestamos, servicios,
-    creditos: creditosData, mora, red_interna: redInterna,
+    creditos: creditosData, mora, red_interna: redInternaConMora,
     obsequios: obsequiosRango,
   };
 };
@@ -1365,6 +1379,48 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
       envios_sin_costo:   envios.filter((e) => e.lineas_sin_costo > 0).length,
     },
   };
+};
+
+// ─── Mora de los envíos de la red interna en un período ─────────────────────
+//
+// Solo para la BODEGA (la sucursal que despacha): cuánta mora le cobraron sus
+// locales y cuánta perdonó, local por local. Se cuenta por la fecha del cobro
+// EFECTIVO —el mismo SQL_MORA_EFECTIVOS de la cuenta: una remesa en camino no
+// ha pagado nada todavía—.
+//
+// Devuelve null sin la migración o sin movimientos: la pantalla no pinta nada.
+const getMoraEnviosRango = async (sucursalId, desde, hasta) => {
+  const { hayMoraEnvios } = require('../../config/columnas');
+  if (!hayMoraEnvios()) return null;
+  const redRepo = require('../red-interna/redInterna.repository');
+  try {
+    const { rows } = await pool.query(`
+      SELECT me.sucursal_id, su.nombre AS sucursal_nombre,
+             COALESCE(SUM(me.valor) FILTER (WHERE me.tipo = 'Cobro'), 0)       AS cobrada,
+             COALESCE(SUM(me.valor) FILTER (WHERE me.tipo = 'Condonacion'), 0) AS condonada,
+             COUNT(DISTINCT me.remision_id)::int                               AS envios
+      FROM (${redRepo.SQL_MORA_EFECTIVOS}) me
+      JOIN remisiones r  ON r.id  = me.remision_id
+      JOIN sucursales su ON su.id = me.sucursal_id
+      WHERE r.sucursal_origen_id = $1
+        AND DATE(me.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      GROUP BY me.sucursal_id, su.nombre
+      ORDER BY cobrada DESC
+    `, [sucursalId, desde, hasta]);
+    if (!rows.length) return null;
+    const locales = rows.map((r) => ({
+      sucursal_id: Number(r.sucursal_id), sucursal_nombre: r.sucursal_nombre,
+      cobrada: Number(r.cobrada), condonada: Number(r.condonada), envios: r.envios,
+    }));
+    return {
+      cobrada:   locales.reduce((s, l) => s + l.cobrada, 0),
+      condonada: locales.reduce((s, l) => s + l.condonada, 0),
+      locales,
+    };
+  } catch (err) {
+    console.warn('[reportes] Mora de envíos no disponible:', err.message);
+    return null;
+  }
 };
 
 // ─── getProductosTop ──────────────────────────────────────────────────────────
@@ -2347,7 +2403,7 @@ const eliminarGastoFijo = async (sucursalId, id) => {
 };
 
 module.exports = {
-  getVentasALocales,
+  getVentasALocales, getMoraEnviosRango,
   getDashboard,
   getVentasRango,
   // Lo expone la prueba 57; la pantalla lo recibe dentro de getVentasRango.

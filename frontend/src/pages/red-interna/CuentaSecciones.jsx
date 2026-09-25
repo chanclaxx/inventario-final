@@ -15,6 +15,9 @@ import { CardEquipo } from './CardEquipo';
 import { ModalDocumentoEnvio } from './documentos/ModalDocumentoEnvio';
 import { ModalEnviosPendientes } from './documentos/ModalEnviosPendientes';
 import { CHIPS, contar, VENDIDOS } from './estados';
+import { ChipPlazo } from './PlazoEnvio';
+import { ModalPlazoEnvio, ModalCondonarMora, MovimientosMora } from './ModalesMora';
+import { useAuth } from '../../context/useAuth';
 import {
   ChevronDown, Search, X, TrendingUp, TrendingDown, Package, Truck,
   Wallet, FileText, Receipt, Filter, Info, HandCoins, ShoppingBag, Undo2,
@@ -75,6 +78,7 @@ function ComposicionDeuda({ t }) {
     filas.push({ clave: 'cargos', etiqueta: 'Cargos que te hizo aparte',
       detalle: 'roturas, faltantes u otros ajustes en contra', valor: t.cargos_sueltos });
   }
+  const mora = Number(t.mora_pendiente || 0);
 
   if (t.cargo_total == null) return null;
 
@@ -100,6 +104,23 @@ function ComposicionDeuda({ t }) {
           <span className="text-sm font-semibold text-gray-900">Deuda</span>
           <span className="text-base font-bold text-gray-900">{formatCOP(t.deuda_total)}</span>
         </div>
+        {/* La mora va DESPUÉS de la deuda y aparte: es lo que se debe por pagar
+            tarde, no por la mercancía. */}
+        {mora > 0 && (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-red-700">Mora por pagar tarde</p>
+                <p className="text-xs text-gray-400">{t.envios_vencidos} envío(s) vencido(s)</p>
+              </div>
+              <span className="text-sm font-semibold text-red-600">+{formatCOP(mora)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-900">Total a pagar</span>
+              <span className="text-base font-bold text-gray-900">{formatCOP(t.total_a_pagar)}</span>
+            </div>
+          </>
+        )}
         {t.saldo_a_favor > 0 && (
           <div className="flex items-center justify-between">
             <span className="text-sm text-blue-700">Saldo a favor sin usar</span>
@@ -428,6 +449,20 @@ function MovimientosEnvio({ envio, abonos }) {
             {formatCOP(envio.saldo)}
           </span>
         </div>
+        {envio.mora?.pendiente > 0 && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-red-700">
+                Mora ({envio.mora.dias_cobrables} día(s) de atraso)
+              </span>
+              <span className="text-sm font-semibold text-red-600">+{formatCOP(envio.mora.pendiente)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-900">Total a pagar</span>
+              <span className="text-base font-bold text-red-700">{formatCOP(envio.total_a_pagar)}</span>
+            </div>
+          </>
+        )}
         {envio.excedente > 0 && (
           <p className="text-xs text-blue-600 flex items-center gap-1.5">
             <PiggyBank size={12} />
@@ -581,7 +616,7 @@ function CorregirLinea({ linea, enTransito, onListo }) {
   );
 }
 
-function CuentaDelEnvio({ envio, onCambio }) {
+function CuentaDelEnvio({ envio, onCambio, puedeAnularMora = false }) {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['red-remision', envio.id],
     queryFn:  () => getRemision(envio.id).then((r) => r.data.data),
@@ -597,6 +632,11 @@ function CuentaDelEnvio({ envio, onCambio }) {
   return (
     <div className="bg-gray-50/70 border-t border-gray-100">
       <MovimientosEnvio envio={envio} abonos={data.abonos || []} />
+      <MovimientosMora
+        movimientos={data.mora?.movimientos || []}
+        puedeAnular={puedeAnularMora}
+        onCambio={(msg) => { refetch(); onCambio?.(msg); }}
+      />
 
       {puedeCorregir && (
         <div className="px-4 py-3 border-t border-gray-100">
@@ -777,8 +817,15 @@ function TarjetaDevolucion({ d }) {
 
 export function TabEnvios({
   envios, cargos = [], resumen, ocultos, propia, onAbonar, onAbonarCargo, onCambio,
-  devoluciones = [], sucursalId = null, nombreLocal = '',
+  devoluciones = [], sucursalId = null, nombreLocal = '', esBodega = false, onPagarMora,
 }) {
+  const { usuario } = useAuth();
+  // Plazo y condonación son de la bodega; condonar, además, solo del admin
+  // (el backend lo exige igual: esto solo evita ofrecer lo que va a rechazar).
+  const puedePlazo    = esBodega && !propia;
+  const puedeCondonar = puedePlazo && usuario?.rol === 'admin_negocio';
+  const [plazo, setPlazo]         = useState(null);   // envío al que se le cambia el plazo
+  const [condonando, setCondonando] = useState(null);
   const [abierto, setAbierto] = useState(null);
   const [verPagados, setVerPagados] = useState(false);
   // "Recibí todo" y faltaba una caja: el error más caro del día a día del local
@@ -797,20 +844,24 @@ export function TabEnvios({
 
   // Igual que en créditos: primero lo que está abierto, y el historial de lo
   // saldado se despliega aparte para que no compita por la atención.
-  const abiertos = envios.filter((e) => e.saldo > 0 || e.estado === 'En transito');
-  const cerrados = envios.filter((e) => !(e.saldo > 0 || e.estado === 'En transito'));
+  // Abierto = debe capital O mora: un envío con el producto pagado y la mora
+  // pendiente todavía no está pagado.
+  const debeAlgo = (e) => e.saldo > 0 || (e.mora?.pendiente || 0) > 0;
+  const abiertos = envios.filter((e) => debeAlgo(e) || e.estado === 'En transito');
+  const cerrados = envios.filter((e) => !(debeAlgo(e) || e.estado === 'En transito'));
   const cargosAbiertos = cargos.filter((c) => c.saldo > 0);
   const cargosCerrados = cargos.filter((c) => c.saldo <= 0);
 
   const tarjeta = (e) => {
     const abre = abierto === e.id;
     const anulado = e.estado === 'Anulada';
-    const debe = e.saldo > 0;
+    const debe = debeAlgo(e);
+    const moraPend = e.mora?.pendiente || 0;
     const lineas = e.lineas || [];
     return (
       <div key={e.id}
         className={`border rounded-2xl overflow-hidden bg-white
-          ${debe ? 'border-amber-200' : 'border-gray-100'}`}>
+          ${e.mora?.en_mora ? 'border-red-200' : debe ? 'border-amber-200' : 'border-gray-100'}`}>
         <div className="px-4 py-3">
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
@@ -832,8 +883,12 @@ export function TabEnvios({
                : e.estado === 'En transito' ? <Badge variant="blue">En tránsito</Badge>
                : debe ? (
                   <>
-                    <p className="text-lg font-bold text-amber-700">{formatCOP(e.saldo)}</p>
-                    <p className="text-xs text-gray-400">por pagar</p>
+                    <p className={`text-lg font-bold ${e.mora?.en_mora ? 'text-red-700' : 'text-amber-700'}`}>
+                      {formatCOP(e.total_a_pagar ?? e.saldo)}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {moraPend > 0 ? `por pagar · incluye ${formatCOP(moraPend)} de mora` : 'por pagar'}
+                    </p>
                   </>
                 ) : e.cargo > 0 ? (
                   <span className="inline-flex items-center gap-1 text-sm font-semibold text-green-600">
@@ -844,6 +899,13 @@ export function TabEnvios({
           </div>
 
           {!anulado && e.cargo > 0 && <Avance cargo={e.cargo} abonado={e.abonado} />}
+
+          {/* El plazo de pago: cuándo vence, o cuántos días tendrá al recibirlo. */}
+          {!anulado && (
+            <div className="mt-2">
+              <ChipPlazo mora={e.mora} enTransito={e.estado === 'En transito'} />
+            </div>
+          )}
 
           {/* Informativo: qué pasó con la mercancía. No mueve la cuenta. */}
           {!anulado && (
@@ -876,6 +938,23 @@ export function TabEnvios({
               <Send size={14} /> Abonar
             </Button>
           )}
+          {propia && moraPend > 0 && onPagarMora && (
+            <Button size="sm" variant="secondary" onClick={() => onPagarMora(e)}>
+              Pagar mora
+            </Button>
+          )}
+          {puedePlazo && !anulado && (
+            <button onClick={() => setPlazo(e)}
+              className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors">
+              <Clock size={12} /> Plazo
+            </button>
+          )}
+          {puedeCondonar && moraPend > 0 && (
+            <button onClick={() => setCondonando(e)}
+              className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors">
+              <HandCoins size={12} /> Condonar mora
+            </button>
+          )}
           {propia && !anulado && e.cargo > 0 && (
             <button
               onClick={() => setReclamando(e)}
@@ -904,7 +983,7 @@ export function TabEnvios({
           )}
         </div>
 
-        {abre && <CuentaDelEnvio envio={e} onCambio={onCambio} />}
+        {abre && <CuentaDelEnvio envio={e} onCambio={onCambio} puedeAnularMora={puedeCondonar} />}
       </div>
     );
   };
@@ -922,7 +1001,8 @@ export function TabEnvios({
           <Wallet size={16} className="text-red-500 flex-shrink-0" />
           <span className="flex-1 min-w-0 text-sm text-red-800">
             <strong>{nPendientes}</strong> {nPendientes === 1 ? 'documento' : 'documentos'} por pagar ·{' '}
-            <strong>{formatCOP(Number(resumen?.saldo_total || 0) + Number(resumen?.cargos_sueltos || 0))}</strong>
+            <strong>{formatCOP(Number(resumen?.saldo_total || 0) + Number(resumen?.cargos_sueltos || 0)
+              + Number(resumen?.mora_pendiente || 0))}</strong>
           </span>
           <span className="text-xs font-medium text-red-700 flex items-center gap-1">
             <Printer size={13} /> Ver e imprimir
@@ -939,6 +1019,10 @@ export function TabEnvios({
             {resumen.cargos_sueltos > 0 && (
               <> Más <strong>{formatCOP(resumen.cargos_sueltos)}</strong> de cargos
               que la bodega te hizo aparte — abajo, con su tarjeta.</>
+            )}
+            {resumen.mora_pendiente > 0 && (
+              <> Y <strong className="text-red-700">{formatCOP(resumen.mora_pendiente)}</strong> de
+              mora por {resumen.vencidos} envío(s) vencido(s).</>
             )}
             {resumen.saldo_a_favor > 0 && (
               <> Y <strong>{formatCOP(resumen.saldo_a_favor)}</strong> a tu favor
@@ -974,9 +1058,19 @@ export function TabEnvios({
           // La deuda sale de los totales del local (saldo de envíos + cargos),
           // no de sumar la lista, que viene topada.
           deuda={Number(resumen?.saldo_total || 0) + Number(resumen?.cargos_sueltos || 0)}
+          mora={Number(resumen?.mora_pendiente || 0)}
           aFavor={Number(resumen?.saldo_a_favor || 0)}
           onClose={() => setVerPendientes(false)}
         />
+      )}
+
+      {plazo && (
+        <ModalPlazoEnvio envio={plazo} onCerrar={() => setPlazo(null)}
+          onListo={(msg) => { setPlazo(null); onCambio?.(msg); }} />
+      )}
+      {condonando && (
+        <ModalCondonarMora envio={condonando} onCerrar={() => setCondonando(null)}
+          onListo={(msg) => { setCondonando(null); onCambio?.(msg); }} />
       )}
 
       {reclamando && (
@@ -1031,7 +1125,7 @@ export function TabEnvios({
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function TabPagos({
-  remesas, movimientos, abonos, totales, envios = [], esBodega, onHecho,
+  remesas, movimientos, abonos, totales, envios = [], esBodega, onHecho, moraCobros = [],
 }) {
   // Todo lo que se puede deshacer pasa por aquí. La regla de quién puede qué la
   // decide el backend; la pantalla solo ofrece lo que tiene sentido ofrecer.
@@ -1075,10 +1169,22 @@ export function TabPagos({
     return m;
   }, [abonos]);
 
-  const destino = (lista) => {
-    if (!lista?.length) return null;
-    if (lista.length === 1) return `al envío #${lista[0].remision_numero ?? lista[0].remision_id}`;
-    return `repartido entre ${lista.length} envíos`;
+  // La parte de cada pago que se fue a MORA (vive en otra tabla: la mora no es
+  // abono a la mercancía). Se suma al reparto para que el pago cuadre.
+  const moraPor = useMemo(() => {
+    const m = new Map();
+    for (const c of moraCobros || []) {
+      const k = c.remesa_id != null ? `r${c.remesa_id}` : c.movimiento_id != null ? `m${c.movimiento_id}` : null;
+      if (k) m.set(k, (m.get(k) || 0) + Number(c.valor || 0));
+    }
+    return m;
+  }, [moraCobros]);
+
+  const destino = (lista, mora = 0) => {
+    const conMora = (txt) => (mora > 0 ? `${txt ? `${txt} · ` : ''}${formatCOP(mora)} a mora` : txt);
+    if (!lista?.length) return conMora(null);
+    if (lista.length === 1) return conMora(`al envío #${lista[0].remision_numero ?? lista[0].remision_id}`);
+    return conMora(`repartido entre ${lista.length} envíos`);
   };
 
   const filas = useMemo(() => [
@@ -1087,7 +1193,7 @@ export function TabPagos({
       titulo: `Pago #${r.numero ?? r.id}`,
       valor: Number(r.valor || 0), estado: r.estado,
       fecha: r.fecha_recepcion || r.fecha_envio,
-      reparto: destino(porRemesa.get(Number(r.id)) || porRemesa.get(r.id)),
+      reparto: destino(porRemesa.get(Number(r.id)) || porRemesa.get(r.id), moraPor.get(`r${r.id}`)),
       abonos:  porRemesa.get(Number(r.id)) || porRemesa.get(r.id) || [],
       // En tránsito lo anula cualquiera de los dos; ya confirmado, solo la
       // bodega — es la que dijo que lo tenía.
@@ -1107,7 +1213,7 @@ export function TabPagos({
       titulo: m.concepto || (m.tipo === 'GastoAutorizado'
         ? 'Gasto por cuenta de bodega' : 'Ajuste'),
       valor: Number(m.valor || 0), estado: 'Recibida', fecha: m.fecha,
-      reparto: destino(porMovimiento.get(Number(m.id)) || porMovimiento.get(m.id)),
+      reparto: destino(porMovimiento.get(Number(m.id)) || porMovimiento.get(m.id), moraPor.get(`m${m.id}`)),
       abonos:  [],
       estadoAprobacion: m.estado,
       aprobadoPor: m.aprobado_por,
@@ -1127,7 +1233,7 @@ export function TabPagos({
   ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)),
   // `esBodega` entra en las dependencias porque decide `puedeDeshacer`: una
   // remesa ya confirmada solo la revierte la bodega.
-  [remesas, movimientos, porRemesa, porMovimiento, esBodega]);
+  [remesas, movimientos, porRemesa, porMovimiento, moraPor, esBodega]);
 
   return (
     <div className="flex flex-col gap-3">

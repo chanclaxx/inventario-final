@@ -116,6 +116,24 @@ export const anularMovimientoCuenta = (id, payload = {}) =>
 export const moverAbono = (id, remisionId) =>
   api.post(`/red-interna/abonos/${id}/mover`, { remision_id: remisionId });
 
+// ── Plazo de pago y mora de los envíos (opt-in) ──────────────────────────────
+// En tránsito se manda `plazo_dias`; ya recibido, `fecha_limite` (o
+// `plazo_dias`, que el backend convierte en fecha desde hoy). `quitar: true`
+// le quita el plazo.
+export const fijarPlazoEnvio = (remisionId, payload) =>
+  api.post(`/red-interna/remisiones/${remisionId}/plazo`, payload);
+
+// Plazo a todos los envíos abiertos SIN plazo de un local, de una vez.
+export const fijarPlazoLocal = (payload) => api.post('/red-interna/mora/plazo-local', payload);
+
+// Solo el admin, desde la bodega, con motivo y PIN.
+export const condonarMoraEnvio = (remisionId, payload) =>
+  api.post(`/red-interna/remisiones/${remisionId}/mora/condonar`, payload);
+
+// Deshacer una condonación. Un COBRO se deshace anulando su pago.
+export const anularCondonacionMora = (movimientoId) =>
+  api.post(`/red-interna/mora/${movimientoId}/anular`);
+
 export const getMovimientosCuenta = (sucursal) =>
   api.get('/red-interna/cuenta/movimientos', { params: { sucursal } });
 

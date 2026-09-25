@@ -3,7 +3,7 @@ const { pool } = require('../../config/db');
 // Si su migración no llegó a aplicarse, nombrarlas tumbaría el despacho entero
 // —la operación diaria de un módulo que ya está en producción—, así que se
 // interpolan solo cuando existen. Ver src/config/columnas.js.
-const { hayPedidosInternos } = require('../../config/columnas');
+const { hayPedidosInternos, hayMoraEnvios } = require('../../config/columnas');
 // Los precios de las listas de cada nodo (feature opt-in). La expresión de
 // herencia se comparte con la búsqueda del carrito: ver el util.
 const { selPreciosNodo } = require('../../utils/listasPreciosSql.util');
@@ -252,6 +252,53 @@ const buscarUnidades = async (negocioId, sucursalId, {
 // Las remisiones y devoluciones aparecen como apuntes INFORMATIVOS (valor 0 en
 // el saldo): no mueven la cuenta, pero sin ellos el extracto no se entiende.
 // ─────────────────────────────────────────────────────────────────────────────
+// MORA COBRADA — la parte de un pago que se fue a la mora de un envío. Entra
+// como CARGO, con la fecha del pago que la cubrió: el pago ya aparece por su
+// valor completo como abono, y sin este renglón el saldo corrido bajaría de más
+// (la mora nunca estuvo en ningún cargo). Juntos cuentan la verdad: "se causó
+// esta mora y se pagó con este pago".
+//
+// La CONDONACIÓN es informativa (valor 0): lo perdonado nunca entró a la cuenta.
+// La mora PENDIENTE no va aquí — el extracto cuenta hechos, y lo pendiente es un
+// cálculo de hoy; vive en los totales y en cada envío.
+//
+// Solo se nombra la tabla si la migración existe (`hayMoraEnvios`).
+const _sqlExtractoMora = () => (hayMoraEnvios() ? `
+      UNION ALL
+      SELECT
+        CASE me.origen
+          WHEN 'remesa' THEN rm.fecha_recepcion
+          WHEN 'gasto'  THEN mc.fecha
+          WHEN 'ajuste' THEN mc.fecha
+          ELSE me.fecha END,
+        'cargo', 'mora',
+        'Mora del envío #' || COALESCE(r.numero::text, r.id::text)
+          || COALESCE(' (' || me.dias_mora::text || ' días de atraso)', ''),
+        me.valor,
+        NULL, r.numero, um.nombre,
+        CASE me.origen WHEN 'remesa'      THEN 'pagada con la remesa #' || COALESCE(rm.numero::text, rm.id::text)
+                       WHEN 'gasto'       THEN 'pagada con un gasto por cuenta de bodega'
+                       WHEN 'ajuste'      THEN 'pagada con un abono de la bodega'
+                       ELSE 'pagada con saldo a favor' END
+      FROM (${SQL_MORA_EFECTIVOS}) me
+      JOIN remisiones r                       ON r.id  = me.remision_id
+      LEFT JOIN remesas rm                    ON rm.id = me.remesa_id
+      LEFT JOIN movimientos_cuenta_interna mc ON mc.id = me.movimiento_id
+      LEFT JOIN usuarios um                   ON um.id = me.usuario_id
+      WHERE me.negocio_id = $1 AND me.sucursal_id = $2 AND me.tipo = 'Cobro'
+
+      UNION ALL
+      SELECT me.fecha, 'info', 'mora',
+             'Mora condonada del envío #' || COALESCE(r.numero::text, r.id::text), 0,
+             NULL, r.numero, um.nombre,
+             'no se cobran ' || me.valor::text || COALESCE(' · ' || me.motivo, '')
+      FROM mora_envios me
+      JOIN remisiones r     ON r.id  = me.remision_id
+      LEFT JOIN usuarios um ON um.id = me.usuario_id
+      WHERE me.negocio_id = $1 AND me.sucursal_id = $2
+        AND me.tipo = 'Condonacion' AND NOT me.anulado
+` : '');
+
 const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, limit = 300 } = {}) => {
   const { rows } = await pool.query(`
     WITH u AS (${SQL_UNIDADES}),
@@ -397,6 +444,7 @@ const getExtracto = async (negocioId, sucursalId, { desde = null, hasta = null, 
       FROM u
       WHERE u.factura_fecha IS NOT NULL
         AND u.estado_unidad IN ('Por liquidar', 'En recaudo')
+      ${_sqlExtractoMora()}
     ),
     filtrados AS (
       SELECT * FROM eventos
@@ -647,6 +695,29 @@ const SQL_ABONOS_RESERVADOS = `
     AND (a.movimiento_id IS NULL OR (mc.estado <> 'Rechazado' AND NOT mc.anulado))
 `;
 
+// ── Mora de los envíos (20260925_mora_envios.sql) ────────────────────────────
+//
+// Un COBRO de mora cuelga de la misma plata que un abono a capital y sigue sus
+// mismas dos reglas: la remesa en tránsito reserva pero no cuenta, y el gasto
+// sin aprobar tampoco. Una CONDONACIÓN no es plata (no tiene remesa ni
+// movimiento), así que cuenta siempre que no esté anulada.
+//
+// Vive en su propia tabla y NO en `abonos_remision` a propósito: los reportes
+// suman SQL_ABONOS_EFECTIVOS como "lo cobrado" del envío para medir la utilidad
+// de la bodega, y la mora no es margen comercial.
+//
+// Solo se nombran si `hayMoraEnvios()`: sin la migración, ninguna consulta de
+// la cuenta puede tocar esta tabla.
+const SQL_MORA_EFECTIVOS = `
+  SELECT me.*
+  FROM mora_envios me
+  LEFT JOIN remesas rm                    ON rm.id = me.remesa_id
+  LEFT JOIN movimientos_cuenta_interna mc ON mc.id = me.movimiento_id
+  WHERE NOT me.anulado
+    AND (me.origen IS DISTINCT FROM 'remesa' OR rm.estado = 'Recibida')
+    AND (me.movimiento_id IS NULL OR (mc.estado = 'Aprobado' AND NOT mc.anulado))
+`;
+
 // Cargo, abonado y saldo de cada envío de un local.
 //   $1 negocio_id   $2 sucursal_destino_id (NULL = todas)
 const _sqlEnviosCuenta = (fuenteAbonos) => `
@@ -719,11 +790,20 @@ const SQL_CARGOS_RESERVA = _sqlCargosCuenta(SQL_ABONOS_RESERVADOS);
  * (el local pagó más que su deuda total) − lo que ya se consumió.
  */
 const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
+  // La plata que el local pagó y se fue a MORA ya no está "sin imputar": sin
+  // restarla aquí, cada peso de mora cobrada reaparecería como saldo a favor y
+  // se le devolvería al local en el siguiente envío. Lo mismo al revés con el
+  // crédito a favor que pagó mora: ya se consumió.
+  const conMora = hayMoraEnvios();
   const { rows } = await (client || pool).query(`
     WITH env AS (${SQL_ENVIOS_CUENTA}),
     car AS (${SQL_CARGOS_CUENTA}),
     ab AS (SELECT * FROM (${SQL_ABONOS_EFECTIVOS}) x
-           WHERE x.negocio_id = $1 AND x.sucursal_id = $2)
+           WHERE x.negocio_id = $1 AND x.sucursal_id = $2),
+    mo AS (${conMora
+      ? `SELECT x.origen, x.valor FROM (${SQL_MORA_EFECTIVOS}) x
+         WHERE x.negocio_id = $1 AND x.sucursal_id = $2 AND x.tipo = 'Cobro'`
+      : `SELECT NULL::text AS origen, 0::numeric AS valor WHERE FALSE`})
     SELECT
       COALESCE(SUM(env.cargo), 0)     AS cargo_total,
       COALESCE(SUM(env.abonado), 0)   AS abonado_total,
@@ -747,8 +827,10 @@ const getTotalesEnvios = async (negocioId, sucursalId, client = null) => {
                     AND tipo IN ('GastoAutorizado', 'Ajuste')
                     AND valor > 0), 0)
       - COALESCE((SELECT SUM(valor) FROM ab WHERE origen <> 'saldo_favor'), 0)
+      - COALESCE((SELECT SUM(valor) FROM mo WHERE origen <> 'saldo_favor'), 0)
       )                               AS sin_imputar,
-      COALESCE((SELECT SUM(valor) FROM ab WHERE origen = 'saldo_favor'), 0) AS favor_usado,
+      COALESCE((SELECT SUM(valor) FROM ab WHERE origen = 'saldo_favor'), 0)
+      + COALESCE((SELECT SUM(valor) FROM mo WHERE origen = 'saldo_favor'), 0) AS favor_usado,
       -- Lo que queda debiendo por cargos. Es su SALDO, no su valor: un cargo se
       -- puede abonar como cualquier envío, y contarlo entero mostraría deuda
       -- que ya está pagada.
@@ -1035,6 +1117,9 @@ const getResumenPorRemision = async (negocioId, sucursalId, { limit = 100 } = {}
     SELECT
       r.id, r.numero, r.estado, r.fecha_emision, r.fecha_recepcion, r.notas,
       r.valor_total,
+      -- El plazo pactado: un envío en camino todavía no tiene fecha límite
+      -- (nace al recibir), pero el local tiene que saber cuántos días tendrá.
+      ${hayMoraEnvios() ? 'r.fecha_limite, r.mora_condicion, r.mora_plazo_dias,' : ''}
       so.nombre AS sucursal_origen_nombre,
       ue.nombre AS usuario_emisor_nombre,
       ur.nombre AS usuario_receptor_nombre,
@@ -2171,6 +2256,10 @@ module.exports = {
   // separadas terminarían diciendo que la bodega vendió algo que el local no
   // debe, y no habría forma de saber cuál de las dos miente.
   SQL_CARGO_ENVIO, SQL_ABONOS_EFECTIVOS,
+  // La mora de los envíos (redInterna.mora.js) lee la cuenta de cada envío con
+  // estas mismas definiciones: una copia se separaría del saldo que la
+  // pantalla muestra.
+  SQL_ABONOS_RESERVADOS, SQL_ENVIOS_CUENTA, SQL_ENVIOS_RESERVA, SQL_MORA_EFECTIVOS,
   getUnidades, buscarUnidades, getExtracto, getResumenUnidades, getCantidadConsignada,
   getValorConsignacionSeriales,
   getTotalRemesado, getTotalMovimientosCuenta, getConciliacion, getResumenPorRemision,

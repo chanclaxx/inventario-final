@@ -91,8 +91,30 @@ function EnvioTermico({ r, config, onClose }) {
             <>
               <Fila label="Cargo del envío:" valor={formatCOP(s.cargo)} />
               <Fila label="Abonado:" valor={formatCOP(s.abonado)} />
-              <Fila label="SALDO:" valor={formatCOP(s.saldo)} negrita grande />
+              {Number(s.mora_pendiente) > 0 ? (
+                <>
+                  <Fila label="Saldo del producto:" valor={formatCOP(s.saldo)} />
+                  <Fila label={`Mora (${r.mora?.dias_cobrables} días):`} valor={formatCOP(s.mora_pendiente)} />
+                  <Fila label="TOTAL A PAGAR:" valor={formatCOP(s.total_a_pagar)} negrita grande />
+                </>
+              ) : (
+                <Fila label="SALDO:" valor={formatCOP(s.saldo)} negrita grande />
+              )}
             </>
+          )}
+          {/* El plazo de pago es condición del documento: va en la guía que
+              viaja con la mercancía, donde el local la firma. */}
+          {!esDevolucion && r.mora?.aplica && (
+            <div style={{ fontSize: '10px', marginTop: '4px' }}>
+              Plazo de pago: vence {String(r.mora.fecha_limite).split('-').reverse().join('/')}
+              {r.mora.condicion?.nombre ? ` · mora ${r.mora.condicion.nombre}: ${r.mora.descripcion}` : ''}
+            </div>
+          )}
+          {!esDevolucion && !r.mora?.aplica && r.mora?.plazo_dias && (
+            <div style={{ fontSize: '10px', marginTop: '4px' }}>
+              Plazo de pago: {r.mora.plazo_dias} días desde que se reciba
+              {r.mora.condicion?.nombre ? ` · mora ${r.mora.condicion.nombre}: ${r.mora.descripcion}` : ''}
+            </div>
           )}
           {r.notas && (<><Divisor /><div style={{ fontSize: '10px' }}>Notas: {r.notas}</div></>)}
           <Firma titulo="Entregó" identificacion={r.sucursal_origen_nombre} />
@@ -172,8 +194,10 @@ export function ModalDocumentoEnvio({ remisionId, onClose }) {
           {!esDevolucion && r.estado !== 'En transito' && r.estado !== 'Anulada' && (
             <div className="flex items-center justify-between text-xs mt-1 pt-1.5 border-t border-gray-200">
               <span className="text-gray-500">Cargo {formatCOP(s.cargo)} · abonado {formatCOP(s.abonado)}</span>
-              <span className={`font-semibold ${Number(s.saldo) > 0 ? 'text-red-600' : 'text-green-700'}`}>
-                Saldo {formatCOP(s.saldo)}
+              <span className={`font-semibold ${Number(s.total_a_pagar ?? s.saldo) > 0 ? 'text-red-600' : 'text-green-700'}`}>
+                {Number(s.mora_pendiente) > 0
+                  ? `Debe ${formatCOP(s.total_a_pagar)} (mora ${formatCOP(s.mora_pendiente)})`
+                  : `Saldo ${formatCOP(s.saldo)}`}
               </span>
             </div>
           )}

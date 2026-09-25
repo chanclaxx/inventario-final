@@ -123,7 +123,7 @@ const recolectar = async (negocioId) => {
   const u = await _umbrales(negocioId);
 
   const [cartera, proveedores, plan, stock, borradores,
-    garantias, pedidos, entradas, cajas, tecnicos] = await Promise.all([
+    garantias, pedidos, entradas, cajas, tecnicos, red] = await Promise.all([
     alertas.cartera(negocioId),
     alertas.carteraProveedores(negocioId),
     alertas.planPorVencer(negocioId),
@@ -134,6 +134,7 @@ const recolectar = async (negocioId) => {
     operaciones.entradasSinConfirmar(negocioId, u.entrada_dias),
     operaciones.cajasSinCerrar(negocioId, u.caja_horas),
     operaciones.tecnicosPendientes(negocioId),
+    operaciones.enviosRedVencidos(negocioId),
   ]);
 
   const senales = [];
@@ -186,6 +187,30 @@ const recolectar = async (negocioId) => {
       titulo: `${_plural(v.length, 'factura', 'facturas')} de proveedor por vencer`,
       cuerpo: `${_pesos(_saldo(v))} con fecha próxima.`,
       url: '/acreedores?tab=facturas', valor: _saldo(v), n: v.length,
+    }));
+  }
+
+  // ── Envíos de la red interna vencidos ─────────────────────────────────────
+  // Urgente, como cualquier cobro vencido: cada día que pasa es mora. El cron
+  // lo entrega aparte —uno a cada local vencido y uno a la bodega— igual que
+  // los cobros a clientes (ver `_avisarEnviosRed`).
+  if (red?.vencidos?.length) {
+    const n = red.vencidos.length;
+    senales.push(_senal({
+      clave: 'red_envios_vencidos', prioridad: 'urgente', categoria: 'red_interna',
+      titulo: `${_plural(red.total_vencidos, 'envío vencido', 'envíos vencidos')} en la red`,
+      cuerpo: `${_plural(n, 'local debe', 'locales deben')} ${_pesos(red.capital_total + red.mora_total)}`
+        + (red.mora_total > 0 ? ` (incluye ${_pesos(red.mora_total)} de mora).` : '.'),
+      url: '/bodega', valor: red.capital_total + red.mora_total, n: red.total_vencidos,
+    }));
+  }
+  if (red?.por_vencer?.length) {
+    const n = red.por_vencer.reduce((s, l) => s + l.por_vencer, 0);
+    senales.push(_senal({
+      clave: 'red_envios_por_vencer', categoria: 'red_interna',
+      titulo: `${_plural(n, 'envío se vence', 'envíos se vencen')} pronto`,
+      cuerpo: `Envíos a los locales con plazo de ${red.dias_aviso} días o menos.`,
+      url: '/bodega', valor: red.por_vencer.reduce((s, l) => s + l.por_vencer_capital, 0), n,
     }));
   }
 
@@ -328,7 +353,7 @@ const recolectar = async (negocioId) => {
     normales: senales.filter((s) => s.prioridad === 'normal'),
     // El detalle crudo, para la pantalla de Avisos. El push nunca lo lleva: en
     // una pantalla bloqueada no van nombres de clientes con sus montos.
-    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos },
+    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos, red },
     umbrales: u,
   };
 };

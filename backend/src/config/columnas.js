@@ -50,6 +50,7 @@ const detectarColumnas = async () => {
   await _detectarCodigoProveedor();
   await _detectarTecnicos();
   await _detectarObsequios();
+  await _detectarMoraEnvios();
   return _ubicacionDisponible;
 };
 
@@ -463,6 +464,48 @@ const _detectarObsequios = async () => {
 
 const hayObsequios = () => _obsequiosDisponible;
 
+// ── Mora de los envíos de la red interna ─────────────────────────────────────
+//
+// Ver migrations/20260925_mora_envios.sql. La cuenta de la red interna se lee
+// en cada panel, en el Dashboard de cada local y en los reportes de la bodega:
+// si la migración fallara y esas consultas nombraran `mora_envios` o
+// `remisiones.fecha_limite`, no se caería una feature nueva — se caería la
+// cuenta entera de un módulo que ya opera en producción.
+//
+// Se exigen la tabla Y las tres columnas: con media estructura, un despacho
+// podría pactar un plazo que la recepción no tiene dónde convertir en fecha.
+// Apagada, la red interna emite exactamente el SQL de siempre.
+
+const COLUMNAS_MORA_ENVIOS = ['fecha_limite', 'mora_condicion', 'mora_plazo_dias'];
+let _moraEnviosDisponible = false;
+
+const _detectarMoraEnvios = async () => {
+  try {
+    const { rows: tabla } = await pool.query(
+      `SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+         AND table_name = 'mora_envios'`
+    );
+    const { rows: cols } = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'remisiones'
+         AND column_name = ANY($1::text[])`,
+      [COLUMNAS_MORA_ENVIOS]
+    );
+    const hay = new Set(cols.map((r) => r.column_name));
+    _moraEnviosDisponible = tabla.length > 0 && COLUMNAS_MORA_ENVIOS.every((c) => hay.has(c));
+    if (!_moraEnviosDisponible) {
+      console.warn('⚠️  Mora de envíos no instalada: la red interna sigue sin plazos (todo lo demás igual).');
+    }
+  } catch (err) {
+    _moraEnviosDisponible = false;
+    console.error('⚠️  No se pudo verificar la mora de envíos (feature desactivada):', err.message);
+  }
+  return _moraEnviosDisponible;
+};
+
+const hayMoraEnvios = () => _moraEnviosDisponible;
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -475,6 +518,7 @@ const _setListasPreciosDisponible = (valor) => { _listasPreciosDisponible = !!va
 const _setCodigoProveedorDisponible = (valor) => { _codigoProveedorDisponible = !!valor; };
 const _setTecnicosDisponible = (valor) => { _tecnicosDisponible = !!valor; };
 const _setObsequiosDisponible = (valor) => { _obsequiosDisponible = !!valor; };
+const _setMoraEnviosDisponible = (valor) => { _moraEnviosDisponible = !!valor; };
 
 module.exports = {
   detectarColumnas, hayUbicacion, _setUbicacionDisponible,
@@ -488,4 +532,5 @@ module.exports = {
   hayCodigoProveedor, _setCodigoProveedorDisponible,
   hayTecnicos, _setTecnicosDisponible,
   hayObsequios, _setObsequiosDisponible,
+  hayMoraEnvios, _setMoraEnviosDisponible,
 };

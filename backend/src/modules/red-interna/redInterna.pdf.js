@@ -94,7 +94,42 @@ const ORIGEN_ABONO = {
   gasto:        'Gasto por cuenta de bodega',
   ajuste:       'Ajuste a favor',
   saldo_favor:  'Saldo a favor aplicado',
+  // Los movimientos de MORA del envío se dibujan con la misma tabla.
+  condonacion:  'Mora condonada',
 };
+
+// 'YYYY-MM-DD' → 'DD/MM/AAAA' sin pasar por Date: una fecha límite es un DATE
+// y convertirla a la zona de Bogotá la correría un día.
+const _fechaLimite = (iso) => {
+  const f = String(iso || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(f) ? f.split('-').reverse().join('/') : '';
+};
+
+// La mora del envío con las palabras del documento. `m` es el objeto `mora`
+// que arma el backend (moraRed.moraDeEnvio); aquí no se calcula nada.
+const _textoPlazo = (m, enTransito) => {
+  if (!m) return null;
+  const cond = m.condicion?.nombre ? `${m.condicion.nombre} (${m.descripcion})` : m.descripcion;
+  if (m.aplica) {
+    const estado = m.en_mora
+      ? `vencido hace ${m.dias_vencidos} día(s)`
+      : m.vencido ? 'vencido y al día'
+      : m.dias_para_vencer != null ? `faltan ${m.dias_para_vencer} día(s)` : 'pagado';
+    return `Plazo de pago: vence el ${_fechaLimite(m.fecha_limite)} (${estado}). Mora pactada: ${cond}.`;
+  }
+  if (enTransito && m.plazo_dias) {
+    return `Plazo de pago: ${m.plazo_dias} día(s) desde que el local lo reciba. Mora pactada: ${cond}.`;
+  }
+  return null;
+};
+
+// Los movimientos de mora en la forma de la tabla de abonos.
+const _abonosMora = (m) => (m?.movimientos || []).map((x) => (x.tipo === 'Condonacion'
+  ? { fecha: x.fecha, origen: 'condonacion', valor: x.valor, anulado: false,
+      movimiento_concepto: x.motivo || null }
+  : { fecha: x.fecha, origen: x.origen, valor: x.valor, anulado: false,
+      remesa_numero: x.remesa_numero, remesa_estado: x.remesa_estado,
+      movimiento_concepto: `mora${x.dias_mora != null ? ` de ${x.dias_mora} día(s)` : ''}` }));
 
 const _etiquetaAbono = (a) => {
   const base = ORIGEN_ABONO[a.origen] || (a.origen ? String(a.origen).replace(/_/g, ' ') : 'Abono');
@@ -316,6 +351,11 @@ const construirPdfEnvio = (r, config) => {
         ? [`Recibió: ${r.usuario_receptor_nombre || '—'}`, `Fecha: ${formatFechaHora(r.fecha_recepcion)}`]
         : ['Aún no se ha recibido'] });
 
+  // El plazo de pago va ANTES de los productos: es la condición del
+  // documento, y quien lo firma tiene que leerla.
+  const textoPlazo = esDevolucion ? null : _textoPlazo(r.mora, r.estado === 'En transito');
+  if (textoPlazo) y = _nota(doc, y, textoPlazo, r.mora?.en_mora ? 'rojo' : 'azul');
+
   y = labelSeccion(doc, y, `Productos (${(r.lineas || []).length})`, { reservar: 44 });
   y = _tablaProductos(doc, y, r.lineas || [], { verValores });
 
@@ -346,8 +386,19 @@ const construirPdfEnvio = (r, config) => {
     }
     filasTot.push(['Cargo del envío', formatCOP(s.cargo)]);
     filasTot.push(['Abonado', _menos(s.abonado), C.verde]);
+    // Con mora causada, el saldo del producto y la mora van por separado y el
+    // total es la suma: la misma lectura de un crédito con mora.
+    const m = r.mora || {};
+    const conMora = m.aplica && (_num(m.causada) > 0 || _num(m.cobrada) > 0 || _num(m.condonada) > 0);
+    if (conMora) {
+      filasTot.push(['Saldo del producto', formatCOP(s.saldo), _num(s.saldo) > 0 ? C.rojo : C.verde]);
+      filasTot.push([`Mora (${m.dias_cobrables} día(s) de atraso)`, formatCOP(m.causada), C.rojo]);
+      if (_num(m.cobrada) > 0)   filasTot.push(['Mora pagada', _menos(m.cobrada), C.verde]);
+      if (_num(m.condonada) > 0) filasTot.push(['Mora condonada', _menos(m.condonada), C.verde]);
+    }
+    const total = conMora ? _num(s.saldo) + _num(m.pendiente) : _num(s.saldo);
     y = _cajaTotales(doc, y, filasTot, {
-      destacada: ['Saldo pendiente', formatCOP(s.saldo), _num(s.saldo) > 0 ? C.rojo : C.verde],
+      destacada: [conMora ? 'Total a pagar' : 'Saldo pendiente', formatCOP(total), total > 0 ? C.rojo : C.verde],
     });
 
     if (r.estado === 'En transito') {
@@ -360,6 +411,11 @@ const construirPdfEnvio = (r, config) => {
     if (abonos.length) {
       y = labelSeccion(doc, y, 'Abonos a este envío', { reservar: 40 });
       y = _tablaAbonos(doc, y, abonos);
+    }
+    const movMora = _abonosMora(r.mora);
+    if (movMora.length) {
+      y = labelSeccion(doc, y, 'Mora de este envío: pagos y condonaciones', { reservar: 40 });
+      y = _tablaAbonos(doc, y, movMora);
     }
     if (verValores && (r.correcciones || []).length) {
       y = labelSeccion(doc, y, 'Correcciones de valor', { reservar: 20 });
@@ -399,7 +455,9 @@ const construirPdfEnviosActivos = (data, config) => {
   const verValores = !data.costos_ocultos;
   const t = data.totales || {};
   const local = data.sucursal?.nombre || 'Local';
-  const envios = (data.envios || []).filter((e) => _num(e.saldo) > 0)
+  // Por pagar = capital o mora: un envío con el producto cubierto y la mora
+  // pendiente todavía se debe.
+  const envios = (data.envios || []).filter((e) => _num(e.saldo) > 0 || _num(e.mora?.pendiente) > 0)
     .sort((a, b) => new Date(a.fecha_recepcion || a.fecha_emision) - new Date(b.fecha_recepcion || b.fecha_emision));
   const cargos = (data.cargos || []).filter((c) => _num(c.saldo) > 0);
   const enCamino = (data.remisiones || []).filter((r) => r.estado === 'En transito' && r.tipo !== 'devolucion');
@@ -420,9 +478,12 @@ const construirPdfEnviosActivos = (data, config) => {
   });
   y += 18;
 
+  // Lo que se debe DE VERDAD: capital + mora. Sin mora es exactamente la deuda.
+  const totalDebe = _num(t.deuda_total) + _num(t.mora_pendiente);
+
   // Resumen arriba: lo primero que pregunta quien recibe el PDF.
   const tarjetas = [
-    ['Debe en total', formatCOP(t.deuda_total), _num(t.deuda_total) > 0 ? C.rojo : C.verde],
+    ['Debe en total', formatCOP(totalDebe), totalDebe > 0 ? C.rojo : C.verde],
     ['Envíos con saldo', String(envios.length), C.negro],
     ['Cargos pendientes', String(cargos.length), C.negro],
     _num(t.saldo_a_favor) > 0
@@ -447,18 +508,30 @@ const construirPdfEnviosActivos = (data, config) => {
     rectFill(doc, MARGIN, y, CONTENT_W, 28, C.azulFondo, 8);
     doc.font(FONT.bold).fontSize(10).fillColor(C.negro)
       .text(`Envío #${e.numero ?? e.id}`, MARGIN + 12, y + 9, { width: 200, height: 12, lineBreak: false });
-    doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
-      .text(`Recibido ${formatFecha(e.fecha_recepcion || e.fecha_emision)}`, MARGIN + 120, y + 10.5, { width: 160, height: 10, lineBreak: false });
+    const me = e.mora || {};
+    const vence = me.aplica
+      ? (me.en_mora ? ` · vencido hace ${me.dias_vencidos} día(s)` : ` · vence ${_fechaLimite(me.fecha_limite)}`)
+      : '';
+    doc.font(FONT.normal).fontSize(8).fillColor(me.en_mora ? C.rojo : C.gris)
+      .text(`Recibido ${formatFecha(e.fecha_recepcion || e.fecha_emision)}${vence}`, MARGIN + 120, y + 10.5, { width: 240, height: 10, lineBreak: false, ellipsis: true });
     doc.font(FONT.bold).fontSize(10).fillColor(C.rojo)
-      .text(`Saldo ${formatCOP(e.saldo)}`, MARGIN + 260, y + 9, { width: CONTENT_W - 272, align: 'right', height: 12, lineBreak: false });
+      .text(`Debe ${formatCOP(_num(e.saldo) + _num(me.pendiente))}`, MARGIN + 360, y + 9, { width: CONTENT_W - 372, align: 'right', height: 12, lineBreak: false });
     y += 36;
     y = _tablaProductos(doc, y, (e.lineas || []).map((l) => ({ ...l, cantidad_recibida: null })), { verValores });
     const abonos = abonosPorEnvio.get(Number(e.id)) || [];
     if (abonos.length) y = _tablaAbonos(doc, y, abonos);
-    y = _cajaTotales(doc, y, [
+    const filasEnvio = [
       ['Cargo del envío', formatCOP(e.cargo)],
       ['Abonado', _menos(e.abonado), C.verde],
-    ], { destacada: ['Saldo', formatCOP(e.saldo), C.rojo] });
+    ];
+    if (_num(me.pendiente) > 0) {
+      filasEnvio.push(['Saldo del producto', formatCOP(e.saldo)]);
+      filasEnvio.push([`Mora pendiente (${me.dias_vencidos} día(s))`, formatCOP(me.pendiente), C.rojo]);
+    }
+    y = _cajaTotales(doc, y, filasEnvio, {
+      destacada: [_num(me.pendiente) > 0 ? 'Total a pagar' : 'Saldo',
+        formatCOP(_num(e.saldo) + _num(me.pendiente)), C.rojo],
+    });
   }
 
   if (cargos.length) {
@@ -492,10 +565,14 @@ const construirPdfEnviosActivos = (data, config) => {
 
   // El total sale de los totales del local, NO de sumar esta lista: es la
   // misma cifra grande de la pantalla, y sumar tarjetas topadas daría menos.
-  y = _cajaTotales(doc, y, [
+  const filasFinal = [
     ['Envíos con saldo', formatCOP(envios.reduce((s, e) => s + _num(e.saldo), 0))],
     ['Cargos pendientes', formatCOP(cargos.reduce((s, c) => s + _num(c.saldo), 0))],
-  ], { destacada: ['Total que debe', formatCOP(t.deuda_total), _num(t.deuda_total) > 0 ? C.rojo : C.verde] });
+  ];
+  // La mora sale de los totales del local, igual que la deuda.
+  if (_num(t.mora_pendiente) > 0) filasFinal.push(['Mora por pagar tarde', formatCOP(t.mora_pendiente), C.rojo]);
+  y = _cajaTotales(doc, y, filasFinal,
+    { destacada: ['Total que debe', formatCOP(totalDebe), totalDebe > 0 ? C.rojo : C.verde] });
 
   _pie(doc, config);
   doc.end();
@@ -521,6 +598,7 @@ const TIPO_LABEL = {
   ajuste:     { label: 'Ajuste',     bg: '#F3F4F6', text: '#374151' },
   correccion: { label: 'Corrección', bg: '#F3F4F6', text: '#6B7280' },
   venta:      { label: 'Venta',      bg: '#F3F4F6', text: '#6B7280' },
+  mora:       { label: 'Mora',       bg: '#FEF2F2', text: '#DC2626' },
 };
 
 /**
@@ -561,7 +639,13 @@ const generarPdfEstadoCuentaLocal = async (req, sucursalId) => {
     saldoFinal,
     doc: construirPdfEstadoCuenta({
       persona: { nombre: data.sucursal.nombre },
-      subtitulo: 'Local de la red interna · negativo = saldo a favor del local',
+      // El extracto cuenta HECHOS: la mora cobrada está dentro, la pendiente
+      // no (es un cálculo de hoy). Se dice aquí para que el saldo final no se
+      // lea como todo lo que se debe.
+      subtitulo: 'Local de la red interna · negativo = saldo a favor del local'
+        + (_num(data.totales?.mora_pendiente) > 0
+          ? ` · además debe ${formatCOP(data.totales.mora_pendiente)} de mora pendiente`
+          : ''),
       movimientos, saldoFinal, config,
       logoNegocio: config.logo_negocio,
       tipoLabels: TIPO_LABEL,

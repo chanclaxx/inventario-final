@@ -213,7 +213,7 @@ const _textoTspl = (t, b, ox, oy, k, dpi) => {
  * Encabezado del trabajo TSPL. Va UNA vez: la impresora lo recuerda para todas
  * las filas que siguen.
  */
-const _encabezadoTspl = (t, formato, op) => {
+const _encabezadoTspl = (t, formato, op, ctx) => {
   const W = formato.pagina.ancho;
   const H = formato.pagina.alto;
   const continuo = !!formato.rollo?.incluirSeparacion || formato.medio !== 'rollo';
@@ -227,6 +227,13 @@ const _encabezadoTspl = (t, formato, op) => {
   t.linea(`DIRECTION ${op.impresora?.rotacion === 180 ? 0 : 1},0`);
   t.linea('REFERENCE 0,0');
   t.linea('OFFSET 0 mm');
+  // El desvío VERTICAL va con SHIFT y no sumado a las coordenadas: si la
+  // impresora arranca a imprimir más abajo que el troquel (sensor sin calibrar,
+  // hueco distinto al real), subir la impresión exige coordenadas NEGATIVAS, y
+  // la impresora las descarta porque su punto 0 ya es su borde. SHIFT mueve la
+  // etiqueta entera y acepta negativos. Se manda SIEMPRE (0 incluido) porque la
+  // impresora lo recuerda entre trabajos. Reportado con la DIG T451B, 25-sep.
+  t.linea(`SHIFT ${ctx.desvioY}`);
   t.linea('SET TEAR ON');
   t.linea('CODEPAGE 850');
   t.linea('DENSITY 8');
@@ -259,7 +266,7 @@ const _textoZpl = (z, b, ox, oy, k) => {
   z.linea(`^FO${x},${y}^A0N,${alto},${Math.round(alto * 0.9)}^FB${ancho},${b.lineas || 1},0,${align}^FD${_zplTexto(_textoDe(b))}^FS`);
 };
 
-const _inicioZpl = (z, formato, op, k) => {
+const _inicioZpl = (z, formato, op, k, desvioY = 0) => {
   const continuo = !!formato.rollo?.incluirSeparacion || formato.medio !== 'rollo';
   z.linea('^XA');
   z.linea('^CI28');
@@ -267,6 +274,8 @@ const _inicioZpl = (z, formato, op, k) => {
   z.linea(`^PW${Math.round(formato.pagina.ancho * MM * k)}`);
   z.linea(`^LL${Math.round(formato.pagina.alto * MM * k)}`);
   z.linea('^LH0,0');
+  // Igual que SHIFT en TSPL: ^LT mueve la etiqueta entera, negativo = arriba.
+  z.linea(`^LT${Math.max(-120, Math.min(120, desvioY))}`);
   z.linea(op.impresora?.rotacion === 180 ? '^POI' : '^PON');
 };
 
@@ -278,11 +287,14 @@ const _contexto = (formato, op) => {
   const dpi = Number(op.dpi) || DPI_DEFECTO;
   const k = dpi / 72;                       // puntos PDF → puntos del cabezal
   const dx = (Number(op.ajuste?.x) || 0) * MM * k;
-  const dy = (Number(op.ajuste?.y) || 0) * MM * k;
+  // El vertical NO entra en las coordenadas: va como SHIFT / ^LT (ver el
+  // encabezado de TSPL). Topado a una pulgada, el rango del comando.
+  const desvioY = Math.max(-dpi, Math.min(dpi, Math.round((Number(op.ajuste?.y) || 0) * MM * k)));
+  const dy = 0;
   // El plano se calcula con la resolución REAL del cabezal para que el módulo
   // sea un número entero de puntos, igual que en el PDF con dpi puesto.
   const opPlano = { ...op, dpi };
-  return { dpi, k, dx, dy, opPlano };
+  return { dpi, k, dx, dy, desvioY, opPlano };
 };
 
 /** Dibuja UNA etiqueta con el traductor del idioma. */
@@ -368,9 +380,9 @@ const generarComandos = ({ lenguaje = 'tspl', etiquetas = [], formato, opciones:
   const ctx = _contexto(formato, op);
   const porPagina = formato.columnas * formato.filas;
 
-  if (!zpl) _encabezadoTspl(out, formato, op);
+  if (!zpl) _encabezadoTspl(out, formato, op, ctx);
 
-  const abrir  = () => (zpl ? _inicioZpl(out, formato, op, ctx.k) : out.linea('CLS'));
+  const abrir  = () => (zpl ? _inicioZpl(out, formato, op, ctx.k, ctx.desvioY) : out.linea('CLS'));
   const cerrar = () => out.linea(zpl ? '^PQ1^XZ' : 'PRINT 1,1');
 
   if (prueba) {

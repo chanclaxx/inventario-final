@@ -24,6 +24,15 @@ const CLAVES = {
   bloquearTraslados: 'red_interna_bloquear_traslados', // '1' = traslado libre off
   ocultarCostos:     'red_interna_ocultar_costos',     // '1' = vendedor sin costos
   pedidos:           'red_interna_pedidos',            // '0' = el local no pide
+  // Plazo de pago y mora de los envíos (20260925_mora_envios.sql). Mismas
+  // claves que la mora de créditos con el prefijo de la red: las condiciones
+  // que se le ponen a un cliente no son las que la bodega le pone a su local.
+  moraActiva:        'red_interna_mora_activa',
+  moraLista:         'red_interna_mora_lista',
+  moraDefaultId:     'red_interna_mora_default_id',
+  moraPlazo:         'red_interna_mora_plazo_default_dias',
+  moraTecho:         'red_interna_mora_tope_tasa_mensual',
+  moraAvisoPrevio:   'red_interna_mora_aviso_previo_dias',
 };
 
 const DEFAULTS = {
@@ -81,6 +90,10 @@ const getConfigRed = async (negocioId) => {
     // despacha. El interruptor existe para la bodega que no quiere que los
     // locales pidan, no para esconder la función.
     pedidos:             map[CLAVES.pedidos]            !== '0',
+    // Ausente = APAGADA, como toda la mora del sistema. Sin la migración
+    // (`hayMoraEnvios`) también: pactar un plazo que la recepción no tiene
+    // dónde guardar sería prometer una mora que nunca se cobraría.
+    mora: require('../modules/red-interna/redInterna.mora').leerConfigMoraRed(map),
   };
 
   _cache.set(negocioId, { valor, expira: Date.now() + TTL_MS });

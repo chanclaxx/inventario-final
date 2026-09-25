@@ -23,10 +23,22 @@ import { Send, Info, Truck, Layers } from 'lucide-react';
 // aplica solo cuando llegue el próximo envío.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ModalPago({ envio = null, cargo = null, sugerido = 0, onCerrar, onListo }) {
+// MORA (envíos con plazo vencido): por defecto cada pago cubre primero la mora
+// del envío y después su mercancía (Art. 1653 C.C.). El local puede pedir lo
+// contrario, y el botón "Pagar mora" de un envío abre este modal en `soloMora`.
+export function ModalPago({
+  envio = null, cargo = null, sugerido = 0, soloMora = false, moraTotal = 0, onCerrar, onListo,
+}) {
   // Un cargo se paga igual que un envío: es la misma deuda con otro documento.
   const doc  = envio || cargo;
-  const tope = doc ? Number(doc.saldo || 0) : Number(sugerido || 0);
+  const moraDoc = envio ? Number(envio.mora?.pendiente || 0) : 0;
+  const tope = soloMora
+    ? moraDoc
+    : envio ? Number(envio.total_a_pagar ?? envio.saldo ?? 0)
+    : doc ? Number(doc.saldo || 0) : Number(sugerido || 0);
+  // Hay mora en juego si el envío (o la cuenta, en un pago total) la tiene.
+  const hayMora = !cargo && !soloMora && (envio ? moraDoc > 0 : Number(moraTotal) > 0);
+  const [modo, setModo] = useState('mora_primero');
   const [valor, setValor] = useState(tope > 0 ? Math.round(tope) : '');
   const [notas, setNotas] = useState('');
   const [error, setError] = useState('');
@@ -52,6 +64,7 @@ export function ModalPago({ envio = null, cargo = null, sugerido = 0, onCerrar, 
       metodo: cuenta?.metodo_sugerido || undefined,
       remision_id: envio?.id || undefined,
       cargo_id:    cargo?.cargo_id || undefined,
+      modo_mora:   soloMora ? 'solo_mora' : hayMora ? modo : undefined,
       clave_idempotencia: clave(),
     }).then((r) => r.data),
     onSuccess: (res) => onListo(res?.message, res?.data),
@@ -64,7 +77,8 @@ export function ModalPago({ envio = null, cargo = null, sugerido = 0, onCerrar, 
   return (
     <Modal
       open onClose={onCerrar} size="sm"
-      title={envio ? `Abonar al envío #${envio.numero ?? envio.id}`
+      title={soloMora ? `Pagar la mora del envío #${envio.numero ?? envio.id}`
+             : envio ? `Abonar al envío #${envio.numero ?? envio.id}`
              : cargo ? 'Abonar a este cargo'
              : 'Pagarle a la bodega'}
     >
@@ -76,6 +90,11 @@ export function ModalPago({ envio = null, cargo = null, sugerido = 0, onCerrar, 
               {cargo && <span className="block text-gray-700">{cargo.concepto}</span>}
               Debe <strong className="text-gray-800">{formatCOP(doc.saldo)}</strong>
               {Number(doc.abonado) > 0 && <> · ya abonó {formatCOP(doc.abonado)}</>}
+              {moraDoc > 0 && (
+                <span className="block text-red-600">
+                  + {formatCOP(moraDoc)} de mora ({envio.mora.dias_vencidos} día(s) vencido)
+                </span>
+              )}
             </div>
           </div>
         ) : (
@@ -117,6 +136,29 @@ export function ModalPago({ envio = null, cargo = null, sugerido = 0, onCerrar, 
               ? ' Lo que sobre pasará a lo demás que tengas abierto.'
               : ' Lo que sobre te queda a favor.'}
           </p>
+        )}
+
+        {hayMora && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-gray-700">¿Qué se paga primero?</label>
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {[
+                { id: 'mora_primero',    label: 'La mora' },
+                { id: 'capital_primero', label: 'La mercancía' },
+              ].map((o) => (
+                <button key={o.id} type="button" onClick={() => setModo(o.id)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all
+                    ${modo === o.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400">
+              {modo === 'mora_primero'
+                ? 'Cada envío paga primero su mora y después su mercancía, del más viejo al más nuevo.'
+                : 'Se cubre primero la mercancía; la mora se paga con lo que sobre y, si no alcanza, sigue pendiente.'}
+            </p>
+          </div>
         )}
 
         {cuentas.length > 1 && (

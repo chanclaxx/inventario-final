@@ -32,19 +32,23 @@ export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose })
   const [pendientes, setPendientes] = useState(false);
 
   const t = data?.totales || {};
-  const conSaldo = (data?.envios || []).filter((e) => Number(e.saldo) > 0).length;
+  const conSaldo = (data?.envios || [])
+    .filter((e) => Number(e.saldo) > 0 || Number(e.mora?.pendiente || 0) > 0).length;
   const cargos = (data?.cargos || []).filter((c) => Number(c.saldo) > 0).length;
   const movimientos = (data?.extracto || []).length;
   const deuda = Number(t.deuda_total || 0);
   const aFavor = Number(t.saldo_a_favor || 0);
+  // La mora de los envíos vencidos: va aparte de la deuda de mercancía y se
+  // suma en lo que el local tiene que entregar.
+  const mora = Number(t.mora_pendiente || 0);
 
   const opciones = [
     {
       id: 'pendientes', Icn: FileText, color: 'blue',
       titulo: 'Envíos pendientes de pago',
       descripcion: 'Cada envío con saldo: sus productos, abonos y lo que falta. Más los cargos y lo que va en camino. Para cobrarle al local.',
-      cifra: deuda > 0
-        ? `Debe ${formatCOP(deuda)} · ${conSaldo} envío(s)${cargos ? ` · ${cargos} cargo(s)` : ''}`
+      cifra: deuda + mora > 0
+        ? `Debe ${formatCOP(deuda + mora)}${mora > 0 ? ` (con ${formatCOP(mora)} de mora)` : ''} · ${conSaldo} envío(s)${cargos ? ` · ${cargos} cargo(s)` : ''}`
         : 'Al día: no debe nada',
       abre: true,
       pdf: {
@@ -73,7 +77,7 @@ export function ModalDocumentosLocal({ sucursalId, nombreLocal, data, onClose })
       <ModalEnviosPendientes
         sucursalId={sucursalId} nombreLocal={nombreLocal}
         envios={data?.envios || []} cargos={data?.cargos || []}
-        deuda={deuda} aFavor={aFavor}
+        deuda={deuda} aFavor={aFavor} mora={mora}
         onClose={onClose}
       />
     );

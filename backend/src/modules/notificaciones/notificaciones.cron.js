@@ -193,6 +193,41 @@ const _avisarCarteraVencida = async (negocioId, cartera) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Envíos de la red interna vencidos: UNO a cada local (lo tiene que pagar) y
+ * UNO a la bodega (lo tiene que cobrar). Mismo criterio que los cobros a
+ * clientes: el aviso dice a QUIÉN, no «N envíos vencidos» en abstracto.
+ */
+const _avisarEnviosRed = async (negocioId, red) => {
+  if (!red?.vencidos?.length) return 0;
+  let enviados = 0;
+  for (const l of red.vencidos.slice(0, MAX_AVISOS_POR_SUCURSAL)) {
+    const res = await service.enviar({
+      negocio_id: negocioId, sucursal_id: l.sucursal_id,
+      titulo: `${l.vencidos} envío${l.vencidos === 1 ? '' : 's'} vencido${l.vencidos === 1 ? '' : 's'} con la bodega`,
+      cuerpo: `Debes ${_pesos(l.capital + l.mora)}`
+        + (l.mora > 0 ? ` (incluye ${_pesos(l.mora)} de mora)` : '')
+        + `. El más viejo lleva ${l.dias_max} día${l.dias_max === 1 ? '' : 's'} vencido.`,
+      url: '/bodega', tag: `red-vencido-${l.sucursal_id}`,
+      tipo: 'red_envios_vencidos_local', referencia_id: String(l.sucursal_id),
+      unico_por_dia: true,
+    });
+    enviados += res.enviados || 0;
+  }
+  const total = red.vencidos.reduce((s, l) => s + l.capital + l.mora, 0);
+  const res = await service.enviar({
+    negocio_id: negocioId, sucursal_id: red.bodega_id,
+    roles: ['admin_negocio', 'supervisor'],
+    titulo: `${red.vencidos.length} local${red.vencidos.length === 1 ? '' : 'es'} con envíos vencidos`,
+    cuerpo: `${red.vencidos.slice(0, 3).map((l) => l.sucursal_nombre).join(', ')}`
+      + `${red.vencidos.length > 3 ? ' y otros' : ''} · ${_pesos(total)} por cobrar.`,
+    url: '/bodega', tag: 'red-vencidos-bodega',
+    tipo: 'red_envios_vencidos', referencia_id: String(red.total_vencidos),
+    unico_por_dia: true,
+  });
+  return enviados + (res.enviados || 0);
+};
+
+/**
  * Manda las señales de UN negocio.
  *
  * @param {number} negocioId
@@ -216,6 +251,10 @@ const _avisarNegocio = async (negocioId, { soloUrgentes = false } = {}) => {
     // contrario de hacerlo más inteligente.
     if (s.clave === 'cobros_vencidos') {
       enviados += await _avisarCarteraVencida(negocioId, detalle.cartera);
+      continue;
+    }
+    if (s.clave === 'red_envios_vencidos') {
+      enviados += await _avisarEnviosRed(negocioId, detalle.red);
       continue;
     }
 

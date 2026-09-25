@@ -213,7 +213,18 @@ seccion('6. Empezar en la etiqueta N, hoja de prueba, desvío, tildes');
 
   const base = leerTspl(generarComandos({ etiquetas: ITEMS.slice(0, 1), formato: f, opciones: OP() })).paginas[0].bars[0];
   const movida = leerTspl(generarComandos({ etiquetas: ITEMS.slice(0, 1), formato: f, opciones: OP({ ajuste: { x: 2, y: 1 } }) })).paginas[0].bars[0];
-  check('desvío 2 mm / 1 mm = 16 / 8 puntos a 203 dpi', Math.abs(movida[0] - base[0] - 16) <= 1 && Math.abs(movida[1] - base[1] - 8) <= 1);
+  check('desvío horizontal 2 mm = 16 puntos a 203 dpi, en las coordenadas', Math.abs(movida[0] - base[0] - 16) <= 1);
+  // El vertical va como SHIFT (TSPL) / ^LT (ZPL): subir la impresión exige ir
+  // por encima del punto 0 de la impresora, y eso las coordenadas no lo pueden
+  // decir (DIG T451B, 25-sep: «sale muy abajo y recorta la etiqueta»).
+  check('desvío vertical: las coordenadas NO se mueven', movida[1] === base[1]);
+  const txtArriba = generarComandos({ etiquetas: ITEMS.slice(0, 1), formato: f, opciones: OP({ ajuste: { x: 0, y: -3 } }) }).toString('latin1');
+  check('subir 3 mm = SHIFT -24 a 203 dpi', txtArriba.includes('SHIFT -24\r\n'));
+  check('subir 3 mm no deja NINGUNA coordenada negativa', !/^(BAR|TEXT|BOX) -?\d+,-/m.test(txtArriba));
+  check('sin desvío se manda SHIFT 0 (la impresora recuerda el del trabajo anterior)',
+    generarComandos({ etiquetas: ITEMS.slice(0, 1), formato: f, opciones: OP() }).toString('latin1').includes('SHIFT 0\r\n'));
+  check('ZPL: subir 3 mm = ^LT-24', generarComandos({ lenguaje: 'zpl', etiquetas: ITEMS.slice(0, 1), formato: f, opciones: OP({ ajuste: { x: 0, y: -3 } }) }).toString().includes('^LT-24'));
+  check('bajar 1 mm = SHIFT 8', generarComandos({ etiquetas: ITEMS.slice(0, 1), formato: f, opciones: OP({ ajuste: { x: 0, y: 1 } }) }).toString('latin1').includes('SHIFT 8\r\n'));
 
   const prueba = leerTspl(generarComandos({ formato: f, opciones: OP(), prueba: true }));
   check('prueba en rollo: 2 filas', prueba.paginas.length === 2);

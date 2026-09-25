@@ -80,13 +80,17 @@ const _moraEjemplo = (c) => {
   return Math.round(conTope);
 };
 
-export function MoraConfig({ valores, set }) {
-  const activo      = valores.mora_activa === '1';
-  const condiciones = parsearCondiciones(valores.mora_lista);
-  const defaultId   = valores.mora_default_id || '';
-  const plazoDef    = valores.mora_plazo_default_dias ?? '';
-  const techo       = valores.mora_tope_tasa_mensual ?? '';
-  const avisoPrevio = valores.mora_aviso_previo_dias ?? '';
+// `prefijo` permite usar el MISMO editor para otra cartera: la red interna
+// guarda sus condiciones en `red_interna_mora_*` (las del local con la bodega
+// no son las de un cliente). Mismas validaciones, mismos ejemplos.
+export function MoraConfig({ valores, set, prefijo = 'mora_', red = false }) {
+  const k = (clave) => `${prefijo}${clave}`;
+  const activo      = valores[k('activa')] === '1';
+  const condiciones = parsearCondiciones(valores[k('lista')]);
+  const defaultId   = valores[k('default_id')] || '';
+  const plazoDef    = valores[k('plazo_default_dias')] ?? '';
+  const techo       = valores[k('tope_tasa_mensual')] ?? '';
+  const avisoPrevio = valores[k('aviso_previo_dias')] ?? '';
 
   const [nombre, setNombre] = useState('');
   const [tipo,   setTipo]   = useState(TIPO_MENSUAL);
@@ -96,7 +100,7 @@ export function MoraConfig({ valores, set }) {
   const [color,  setColor]  = useState('amber');
   const [error,  setError]  = useState('');
 
-  const setCondiciones = (lista) => set('mora_lista', JSON.stringify(lista));
+  const setCondiciones = (lista) => set(k('lista'), JSON.stringify(lista));
   const valorEsCero = String(valor).trim() !== '' && Number(String(valor).replace(',', '.')) === 0;
 
   const handleAgregar = () => {
@@ -130,7 +134,7 @@ export function MoraConfig({ valores, set }) {
 
   const eliminar = (id) => {
     setCondiciones(condiciones.filter((c) => c.id !== id));
-    if (defaultId === id) set('mora_default_id', '');
+    if (defaultId === id) set(k('default_id'), '');
   };
 
   // Aviso de usura: la tasa legal máxima la publica la Superfinanciera cada mes,
@@ -142,18 +146,23 @@ export function MoraConfig({ valores, set }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
         <CalendarClock size={15} className="text-gray-400" />
-        <h3 className="text-sm font-semibold text-gray-700">Plazo de pago y mora</h3>
+        <h3 className="text-sm font-semibold text-gray-700">
+          {red ? 'Plazo de pago y mora de los envíos' : 'Plazo de pago y mora'}
+        </h3>
       </div>
       <p className="text-xs text-gray-400 -mt-2">
-        Permite ponerle una fecha límite a las ventas a crédito y a los préstamos.
-        Si el cliente se pasa del plazo, se calcula una mora sobre el saldo pendiente.
+        {red
+          ? 'La bodega le pone a cada envío un plazo para pagarlo. El plazo corre desde que el local lo RECIBE; si se pasa, se calcula una mora sobre lo que queda debiendo de ese envío.'
+          : 'Permite ponerle una fecha límite a las ventas a crédito y a los préstamos. Si el cliente se pasa del plazo, se calcula una mora sobre el saldo pendiente.'}
       </p>
 
       <Toggle
-        label="Activar plazo de pago y mora"
-        description="Muestra el campo de fecha límite al vender a crédito y al prestar"
+        label={red ? 'Activar plazo de pago en los envíos' : 'Activar plazo de pago y mora'}
+        description={red
+          ? 'Muestra el plazo al despachar y la mora en la cuenta de cada local'
+          : 'Muestra el campo de fecha límite al vender a crédito y al prestar'}
         enabled={activo}
-        onChange={(val) => set('mora_activa', val ? '1' : '0')}
+        onChange={(val) => set(k('activa'), val ? '1' : '0')}
       />
 
       {activo && (
@@ -162,7 +171,7 @@ export function MoraConfig({ valores, set }) {
           {/* ── Condiciones ── */}
           <div className="flex flex-col gap-3">
             <span className="text-xs font-medium text-gray-500">
-              Condiciones que podrá elegir el vendedor
+              {red ? 'Condiciones que podrá elegir la bodega al despachar' : 'Condiciones que podrá elegir el vendedor'}
             </span>
 
             {condiciones.length === 0 ? (
@@ -205,7 +214,7 @@ export function MoraConfig({ valores, set }) {
                         )}
                       </div>
                       <button
-                        onClick={() => set('mora_default_id', esDefault ? '' : c.id)}
+                        onClick={() => set(k('default_id'), esDefault ? '' : c.id)}
                         className={`text-[11px] px-2 py-1 rounded-lg transition-colors flex-shrink-0
                           ${esDefault ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-400 hover:bg-gray-100'}`}
                       >
@@ -295,21 +304,25 @@ export function MoraConfig({ valores, set }) {
           {/* ── Ajustes generales ── */}
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-gray-500">Plazo sugerido al vender (días)</span>
+              <span className="text-xs font-medium text-gray-500">
+                {red ? 'Plazo por defecto de cada envío (días)' : 'Plazo sugerido al vender (días)'}
+              </span>
               <input type="number" min="1" value={plazoDef}
-                onChange={(e) => set('mora_plazo_default_dias', e.target.value)}
+                onChange={(e) => set(k('plazo_default_dias'), e.target.value)}
                 placeholder="Ej: 30"
                 className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
                   placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
               <span className="text-[11px] text-gray-400">
-                La fecha límite llega precargada con estos días, y el vendedor la puede cambiar o dejar vacía.
+                {red
+                  ? 'Con plazo y condición por defecto, todo envío sale con ellos (también los que se despachan desde el carrito). En el despacho se pueden cambiar o quitar.'
+                  : 'La fecha límite llega precargada con estos días, y el vendedor la puede cambiar o dejar vacía.'}
               </span>
             </div>
 
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-gray-500">Avisar antes del vencimiento (días)</span>
               <input type="number" min="1" max="30" value={avisoPrevio}
-                onChange={(e) => set('mora_aviso_previo_dias', e.target.value)}
+                onChange={(e) => set(k('aviso_previo_dias'), e.target.value)}
                 placeholder="3"
                 className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
                   placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
@@ -322,7 +335,7 @@ export function MoraConfig({ valores, set }) {
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-gray-500">Techo de aviso (% mensual)</span>
               <input type="number" min="0" step="0.1" value={techo}
-                onChange={(e) => set('mora_tope_tasa_mensual', e.target.value)}
+                onChange={(e) => set(k('tope_tasa_mensual'), e.target.value)}
                 placeholder="Ej: 3.2"
                 className="w-full px-3 py-2 bg-gray-100 border-0 rounded-xl text-sm
                   placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
@@ -332,7 +345,32 @@ export function MoraConfig({ valores, set }) {
             </div>
           </div>
 
+          {red && (
+            <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <Info size={13} className="text-blue-500 flex-shrink-0" />
+                <p className="text-xs font-medium text-blue-800">Cómo funciona en la red</p>
+              </div>
+              <p className="text-xs text-blue-700">
+                • <strong>Sin plazo no hay mora.</strong> Los envíos que ya existen no cambian;
+                se les puede poner plazo desde la cuenta de cada local (nunca con fecha pasada).
+              </p>
+              <p className="text-xs text-blue-700">
+                • Cada pago del local cubre primero la <strong>mora</strong> del envío y después su
+                mercancía. El local puede elegir pagar primero la mercancía.
+              </p>
+              <p className="text-xs text-blue-700">
+                • La mora <strong>no cuenta como utilidad</strong> de la bodega: sale aparte en
+                Reportes como ingreso financiero.
+              </p>
+              <p className="text-xs text-blue-700">
+                • El administrador puede <strong>condonarla</strong> desde la bodega, con motivo y PIN.
+              </p>
+            </div>
+          )}
+
           {/* ── Advertencia legal ── */}
+          {!red && (<>
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-2.5">
             <AlertTriangle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
             <div className="flex flex-col gap-1.5">
@@ -380,6 +418,7 @@ export function MoraConfig({ valores, set }) {
               detalle del crédito o del préstamo.
             </p>
           </div>
+          </>)}
         </div>
       )}
     </div>

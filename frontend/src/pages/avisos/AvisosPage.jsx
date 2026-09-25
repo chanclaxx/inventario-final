@@ -5,7 +5,7 @@ import {
   AlertTriangle, Bell, CheckCircle2, ChevronRight, RefreshCw,
   Wallet, Truck, ShieldCheck, PackageSearch, ClipboardCheck, Banknote,
   CreditCard, Layers, FileClock, ChevronDown, Phone,
-  Wrench,
+  Wrench, Warehouse,
 } from 'lucide-react';
 import { getResumenAvisos } from '../../api/notificaciones.api';
 import { Spinner }    from '../../components/ui/Spinner';
@@ -49,6 +49,8 @@ const ICONOS = {
   borradores:  Layers,
   inventario:  PackageSearch,
   tecnicos:    Wrench,
+  // Envíos de la red interna vencidos o por vencer (mora de envíos).
+  red_interna: Warehouse,
 };
 const ICONO_POR_DEFECTO = Bell;
 

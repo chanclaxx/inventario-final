@@ -6,6 +6,8 @@ const referencias   = require('./redInterna.referencias');
 // UN solo sentido: los pedidos no importan este archivo — mandan sus avisos por
 // `redInterna.avisos`, que existe justamente para no cerrar el ciclo.
 const pedidos       = require('./redInterna.pedidos.service');
+// Plazo de pago y mora de los envíos (opt-in `red_interna_mora_activa`).
+const moraRed       = require('./redInterna.mora');
 const trasladosRepo = require('../traslados/traslados.repository');
 const variantesRepo = require('../variantes-producto/variantes-producto.repository');
 const tesoreriaRepo = require('../tesoreria/tesoreria.repository');
@@ -215,6 +217,23 @@ const _recortarParaVendedor = (data) => {
       en_recaudo_unidades:      t.en_recaudo_unidades,
       sin_ubicar_unidades:      t.sin_ubicar_unidades,
       vendido_unidades:         t.vendido_unidades,
+      // La mora es cuenta, no valorización: el vendedor la tiene que pagar,
+      // así que la ve completa. Sin estas claves la cabecera de su cuenta
+      // mostraría menos de lo que de verdad debe.
+      cargos_abiertos:     t.cargos_abiertos,
+      mora_activa:         t.mora_activa,
+      mora_pendiente:      t.mora_pendiente,
+      mora_causada:        t.mora_causada,
+      mora_cobrada:        t.mora_cobrada,
+      mora_condonada:      t.mora_condonada,
+      mora_en_camino:      t.mora_en_camino,
+      envios_con_plazo:    t.envios_con_plazo,
+      envios_vencidos:     t.envios_vencidos,
+      capital_vencido:     t.capital_vencido,
+      dias_max_vencido:    t.dias_max_vencido,
+      envios_por_vencer:   t.envios_por_vencer,
+      proximo_vencimiento: t.proximo_vencimiento,
+      total_a_pagar:       t.total_a_pagar,
       // Valorización de la mercancía por estado: fuera.
       vendido_valor:         null,
       en_vitrina_valor:      null,
@@ -710,7 +729,7 @@ const _destinoElegido = async (client, {
 
 const despachar = async (req, {
   sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
-  pedido_id,
+  pedido_id, mora,
 }) => {
   _exigirBodega(req);
   const negocioId = req.user.negocio_id;
@@ -723,6 +742,11 @@ const despachar = async (req, {
     throw { status: 400, message: 'Agrega al menos un producto' };
   }
   await _verificarSucursal(null, destinoId, negocioId);
+
+  // El plazo de pago del envío (opt-in). `mora` ausente = el que el negocio
+  // tenga por defecto; `null` = sin plazo, a propósito. Se resuelve ANTES de
+  // abrir la transacción: una condición inválida no debe dejar nada a medias.
+  const plazo = moraRed.plazoParaDespacho(req.red?.mora, mora);
 
   // Los productos que terminen valiendo $0 se recogen dentro del bucle y se
   // revisan al final: hay que mirar el valor RESUELTO, no el que llegó del
@@ -762,6 +786,16 @@ const despachar = async (req, {
       estado: 'En transito',
       pedido_id: pedido ? pedido.pedido.id : null,
     });
+
+    // Lo pactado se congela en el envío. La FECHA límite todavía no existe:
+    // nace al recibir, que es cuando nace la deuda (ver _ejecutarRecepcion).
+    // Solo se escribe si hay plazo, y solo hay plazo con la migración aplicada.
+    if (plazo) {
+      await client.query(
+        `UPDATE remisiones SET mora_plazo_dias = $2, mora_condicion = $3::jsonb WHERE id = $1`,
+        [remision.id, plazo.plazo_dias, JSON.stringify(plazo.condicion)]
+      );
+    }
 
     for (const l of lineas) {
       if (l.tipo === 'serial') {
@@ -1138,6 +1172,15 @@ const _ejecutarRecepcion = async (client, {
   });
   await repo.actualizarTotalRemision(client, remision.id);
 
+  // La deuda nace ahora, y con ella el plazo: hoy + los días pactados al
+  // despachar. Contar desde el despacho le quitaría al local los días que el
+  // envío pasó en camino, que no son culpa suya.
+  const fechaLimite = moraRed.fechaLimiteAlRecibir(remision);
+  if (fechaLimite) {
+    await client.query(`UPDATE remisiones SET fecha_limite = $2 WHERE id = $1`,
+      [remision.id, fechaLimite]);
+  }
+
   // El envío acaba de nacer con saldo. Si el local traía crédito a favor (pagó
   // de más antes, o devolvió algo que ya había pagado) se le aplica aquí
   // mismo: es lo que el cliente pidió, "que se descuente del siguiente envío".
@@ -1152,6 +1195,9 @@ const _ejecutarRecepcion = async (client, {
   return {
     traslado_id: traslado.id, recibidas: hubo, faltantes: idsFaltante.length,
     saldo_favor_aplicado: favor.aplicado,
+    // La fecha límite que acaba de nacer (null sin plazo): el aviso y la
+    // pantalla se la dicen al local en el momento en que empieza a correr.
+    fecha_limite: fechaLimite,
   };
 };
 
@@ -1199,7 +1245,8 @@ const recibir = async (req, remisionId, { lineas_recibidas, cantidades } = {}) =
       roles: ['admin_negocio', 'supervisor'],
       titulo: `Envío #${recibida.numero ?? remisionId} recibido`,
       cuerpo: `${res.recibidas} producto(s) por ${_dinero(recibida.valor_total)}`
-        + (res.faltantes ? ` · ${res.faltantes} reportados como no llegados` : ''),
+        + (res.faltantes ? ` · ${res.faltantes} reportados como no llegados` : '')
+        + (res.fecha_limite ? ` · pagar antes del ${res.fecha_limite.split('-').reverse().join('/')}` : ''),
     });
     _avisar({
       negocioId, sucursalId: Number(remision.sucursal_origen_id),
@@ -1814,13 +1861,45 @@ const _centavos = (v) => Math.round(_num(v) * 100) / 100;
 // archivo entero y los dos quedaban en ciclo.
 const { avisar: _avisar } = require('./redInterna.avisos');
 
+// Cómo se reparte un pago entre la MORA y el CAPITAL de los envíos con plazo.
+//
+//   'mora_primero'    → envío por envío (del más viejo al más nuevo): primero
+//                       su mora, después su capital. Es el orden del Art. 1653
+//                       del Código Civil —intereses antes que capital— y el que
+//                       usa todo lo que no elige: gastos, ajustes y el saldo a
+//                       favor que se aplica solo.
+//   'capital_primero' → todo el capital primero y la mora con lo que sobre.
+//                       El local lo puede pactar: favorece al deudor.
+//   'solo_mora'       → el botón "Pagar mora" de un envío: no toca capital.
+//
+// Sin envíos con plazo (o sin la migración) los tres modos son idénticos al
+// reparto de siempre: el FIFO de capital no cambió una línea.
+const MODOS_MORA = new Set(['mora_primero', 'capital_primero', 'solo_mora']);
+
 const _imputarFIFO = async (client, {
   negocioId, sucursalId, valor, origen,
   remesaId = null, movimientoId = null, usuarioId = null, notas = null,
-  remisionId = null, cargoId = null,
+  remisionId = null, cargoId = null, modoMora = 'mora_primero',
 }) => {
+  if (!MODOS_MORA.has(modoMora)) {
+    throw { status: 400, message: 'Modo de reparto de la mora inválido' };
+  }
   let resto = _centavos(valor);
   const reparto = [];
+
+  // La mora de cada envío con plazo, contando lo que ya RESERVARON otros pagos
+  // en camino (`pendiente_reserva`): sin eso, dos remesas seguidas sin
+  // confirmar pagarían dos veces la misma mora. Se lee dentro de esta
+  // transacción, igual que el saldo de capital.
+  const moras = moraRed.disponible()
+    ? await moraRed.cargarEstados(client, negocioId, sucursalId)
+    : new Map();
+  const moraPendiente = (remId) =>
+    (remId != null ? Math.max(0, Math.round(moras.get(Number(remId))?.pendiente_reserva || 0)) : 0);
+
+  if (modoMora === 'solo_mora' && cargoId) {
+    throw { status: 400, message: 'Un cargo de la bodega no tiene mora' };
+  }
 
   // La cola es TODO lo que el local debe: envíos y cargos, del más viejo al más
   // nuevo. Dejar los cargos fuera era lo que los volvía impagables — el dinero
@@ -1833,7 +1912,13 @@ const _imputarFIFO = async (client, {
     if (Number(e.sucursal_destino_id) !== Number(sucursalId)) {
       throw { status: 403, message: 'Ese envío es de otra sucursal' };
     }
-    if (_num(e.saldo) <= 0) {
+    const mora = moraPendiente(remisionId);
+    if (modoMora === 'solo_mora' && mora <= 0) {
+      throw { status: 409, message: `El envío #${e.numero ?? remisionId} no tiene mora pendiente` };
+    }
+    // Pagado es capital Y mora en cero: un envío con el producto cubierto pero
+    // con mora pendiente sigue abierto, como un crédito en `solo_falta_mora`.
+    if (_num(e.saldo) <= 0 && mora <= 0) {
       throw { status: 409, message: `El envío #${e.numero ?? remisionId} ya está pagado` };
     }
     cola.push({ tipo: 'envio', remision_id: Number(remisionId), etiqueta: e.numero,
@@ -1851,21 +1936,32 @@ const _imputarFIFO = async (client, {
                 saldo: _num(c.saldo) });
   }
 
-  for (const d of await repo.getEnviosAbiertos(client, negocioId, sucursalId)) {
-    if (remisionId && Number(d.remision_id) === Number(remisionId)) continue;
-    if (cargoId    && Number(d.cargo_id)    === Number(cargoId))    continue;
-    cola.push({
+  const abiertos = (await repo.getEnviosAbiertos(client, negocioId, sucursalId))
+    .filter((d) => !(remisionId && Number(d.remision_id) === Number(remisionId))
+                && !(cargoId    && Number(d.cargo_id)    === Number(cargoId)))
+    .map((d) => ({
       tipo: d.tipo,
       remision_id: d.remision_id != null ? Number(d.remision_id) : null,
       cargo_id:    d.cargo_id    != null ? Number(d.cargo_id)    : null,
-      etiqueta: d.etiqueta, saldo: _num(d.saldo),
-    });
+      etiqueta: d.etiqueta, saldo: _num(d.saldo), fecha: d.fecha,
+    }));
+  // Un envío con el capital cubierto y la mora pendiente no sale en
+  // `getEnviosAbiertos` (que mira el capital), pero sigue siendo deuda.
+  const enCola = new Set(abiertos.filter((d) => d.tipo === 'envio').map((d) => d.remision_id));
+  for (const m of moras.values()) {
+    if (m.remision_id === Number(remisionId) || enCola.has(m.remision_id)) continue;
+    if (moraPendiente(m.remision_id) <= 0) continue;
+    abiertos.push({ tipo: 'envio', remision_id: m.remision_id, cargo_id: null,
+                    etiqueta: m.numero, saldo: 0, fecha: m.fecha_recepcion });
   }
+  abiertos.sort((a, b) => new Date(a.fecha) - new Date(b.fecha)
+    || (a.remision_id ?? a.cargo_id) - (b.remision_id ?? b.cargo_id));
+  cola.push(...abiertos);
 
-  for (const e of cola) {
-    if (resto <= 0) break;
+  const pagarCapital = async (e) => {
+    if (resto <= 0 || e.saldo <= 0) return;
     const aplica = _centavos(Math.min(resto, e.saldo));
-    if (aplica <= 0) continue;
+    if (aplica <= 0) return;
     await repo.insertarAbonoRemision(client, {
       negocio_id: negocioId, sucursal_id: sucursalId,
       remision_id: e.remision_id ?? null,
@@ -1879,7 +1975,41 @@ const _imputarFIFO = async (client, {
       concepto: e.tipo === 'cargo' ? e.etiqueta : null,
       valor: aplica,
     });
+    e.saldo = _centavos(e.saldo - aplica);
     resto = _centavos(resto - aplica);
+  };
+
+  // La mora va a `mora_envios`, NUNCA a `abonos_remision`: los reportes suman
+  // esos abonos como lo cobrado del envío, y la mora no es margen comercial.
+  const pagarMora = async (e) => {
+    if (resto <= 0 || e.tipo !== 'envio') return;
+    const m = moras.get(Number(e.remision_id));
+    const pendiente = moraPendiente(e.remision_id) - (e.mora_aplicada || 0);
+    if (!m || pendiente <= 0) return;
+    const aplica = _centavos(Math.min(resto, pendiente));
+    if (aplica <= 0) return;
+    await moraRed.insertarCobro(client, {
+      negocio_id: negocioId, sucursal_id: sucursalId, remision_id: e.remision_id,
+      origen, remesa_id: remesaId, movimiento_id: movimientoId, valor: aplica,
+      dias_mora: m.dias_vencidos, saldo_base: m.saldo_capital, condicion: m.condicion,
+      usuario_id: usuarioId,
+    });
+    reparto.push({ tipo: 'mora', remision_id: e.remision_id, cargo_id: null,
+                   numero: e.etiqueta, concepto: null, valor: aplica });
+    e.mora_aplicada = (e.mora_aplicada || 0) + aplica;
+    resto = _centavos(resto - aplica);
+  };
+
+  if (modoMora === 'solo_mora') {
+    for (const e of cola) await pagarMora(e);
+  } else if (modoMora === 'capital_primero') {
+    for (const e of cola) await pagarCapital(e);
+    for (const e of cola) await pagarMora(e);
+  } else {
+    for (const e of cola) {
+      await pagarMora(e);
+      await pagarCapital(e);
+    }
   }
 
   // Lo que sobra NO se escribe: queda como saldo a favor derivado (plata
@@ -2004,6 +2134,7 @@ const getCuentasParaRemesa = async (req) => {
  */
 const enviarRemesa = async (req, {
   valor, notas, clave_idempotencia, cuenta_origen_id, metodo, remision_id, cargo_id,
+  modo_mora,
 }) => {
   const negocioId = req.user.negocio_id;
   const origenId  = Number(req.sucursal_id);
@@ -2012,6 +2143,13 @@ const enviarRemesa = async (req, {
   const monto = Number(valor);
   if (!(monto > 0)) throw { status: 400, message: 'El valor debe ser mayor a 0' };
   if (origenId === bodegaId) throw { status: 400, message: 'La bodega no se envía remesas a sí misma' };
+  // Cómo se reparte entre mora y capital (ver MODOS_MORA). Se valida antes de
+  // mover un peso: un modo inválido no puede dejar la plata a medio camino.
+  const modoMora = modo_mora || 'mora_primero';
+  if (!MODOS_MORA.has(modoMora)) throw { status: 400, message: 'Modo de reparto de la mora inválido' };
+  if (modoMora === 'solo_mora' && !remision_id) {
+    throw { status: 400, message: 'Para pagar solo la mora hay que elegir el envío' };
+  }
 
   if (clave_idempotencia) {
     const previa = await repo.findRemesaPorClave(clave_idempotencia);
@@ -2112,6 +2250,7 @@ const enviarRemesa = async (req, {
       remisionId: remision_id ? Number(remision_id) : null,
       cargoId:    cargo_id    ? Number(cargo_id)    : null,
       notas: notas || null,
+      modoMora,
     });
 
     await client.query('COMMIT');
@@ -2251,6 +2390,9 @@ const anularRemesa = async (req, remesaId) => {
     // quedar abiertos. Se marca anulada en vez de borrarse para que el envío
     // conserve el rastro de que hubo un pago y se deshizo.
     await repo.anularAbonosDeRemesa(client, remesaId);
+    // La mora que pagaba también: sin esto quedaría "cobrada" con una plata que
+    // se devolvió, y el envío dejaría de deberla.
+    await moraRed.anularPorRemesa(client, remesaId);
 
     await client.query('COMMIT');
 
@@ -2386,6 +2528,7 @@ const decidirGasto = async (req, movimientoId, { aprobar, motivo }) => {
       // rechazarlo se la come él. Lo que sí se corrige es el concepto en
       // tesorería, que si no seguiría diciendo que era por cuenta de la bodega.
       await repo.anularAbonosDeMovimiento(client, movimientoId);
+      await moraRed.anularPorMovimiento(client, movimientoId);
       if (mov.mov_dinero_id) {
         await client.query(`
           UPDATE movimientos_dinero
@@ -2453,6 +2596,7 @@ const anularMovimientoCuenta = async (req, movimientoId, { motivo } = {}) => {
 
     await repo.anularMovimientoCuenta(client, movimientoId);
     await repo.anularAbonosDeMovimiento(client, movimientoId);
+    await moraRed.anularPorMovimiento(client, movimientoId);
 
     // El movimiento de dinero también se desactiva: la plata vuelve a la
     // cuenta de donde salió, y con ella su espejo en caja.
@@ -2625,7 +2769,7 @@ const ESTADOS_EN_PODER = [
 // para contarle al local qué vendió y qué le queda en vitrina. Cuando algo
 // aquí diga "informativo", quiere decir exactamente eso.
 // ─────────────────────────────────────────────────────────────────────────────
-const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
+const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios, mora = null, moraActiva = false }) => {
   const porEstado = {};
   let liquidableSerial = 0;
   for (const r of resumen) {
@@ -2673,6 +2817,13 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
 
   const deudaTotal = deudaEnvios + cargosSueltos;
 
+  // La MORA de los envíos con plazo: otra cubeta, como en un crédito. No entra
+  // en `deuda_total` (la identidad Σ saldo de documentos = deuda_total es de
+  // CAPITAL y la sostienen las pruebas de la cuenta); se suma aparte y juntas
+  // dan `total_a_pagar`, que es lo que el local tiene que entregar de verdad.
+  const m = mora || moraRed.resumir(new Map());
+  const moraPendiente = _num(m.mora_pendiente);
+
   return {
     por_estado: porEstado,
     cantidad_consignada: cantidad,
@@ -2698,9 +2849,30 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
       cargo_total:        Math.round(_num(envios?.cargo_total)),
       abonado_total:      Math.round(_num(envios?.abonado_total)),
       cargos_sueltos:     Math.round(cargosSueltos),
-      envios_abiertos:    Number(envios?.envios_abiertos || 0),
+      // Abierto = algo que pagar: capital, o solo la mora de un envío cuyo
+      // producto ya está cubierto (un envío así NO está pagado).
+      envios_abiertos:    Number(envios?.envios_abiertos || 0) + Number(m.envios_solo_mora || 0),
       envios_total:       Number(envios?.envios_total    || 0),
       cargos_abiertos:    Number(envios?.cargos_abiertos || 0),
+
+      // ── LA MORA (envíos con plazo, opt-in) ─────────────────────────────────
+      // Todo en cero para quien no la usa: la forma de la respuesta no cambia
+      // según la feature, así ninguna pantalla tiene que preguntar.
+      mora_activa:        !!moraActiva,
+      mora_pendiente:     Math.round(moraPendiente),
+      mora_causada:       _num(m.mora_causada),
+      mora_cobrada:       _num(m.mora_cobrada),
+      mora_condonada:     _num(m.mora_condonada),
+      mora_en_camino:     _num(m.mora_en_camino),
+      envios_con_plazo:   Number(m.envios_con_plazo || 0),
+      envios_vencidos:    Number(m.envios_vencidos || 0),
+      capital_vencido:    _num(m.capital_vencido),
+      dias_max_vencido:   Number(m.dias_max_vencido || 0),
+      envios_por_vencer:  Number(m.envios_por_vencer || 0),
+      proximo_vencimiento: m.proximo_vencimiento || null,
+      // Capital + mora − crédito a favor. Nunca negativo, por la misma razón
+      // que `saldo_por_liquidar`.
+      total_a_pagar:      Math.max(0, Math.round(deudaTotal + moraPendiente - aFavor)),
       cargos_valor:       Math.round(_num(envios?.cargos_valor)),
       cargos_abonado:     Math.round(_num(envios?.cargos_abonado)),
 
@@ -2729,20 +2901,35 @@ const _armarSaldo = ({ resumen, cantidad, remesado, movimientos, envios }) => {
   };
 };
 
-const getEstadoLocal = async (negocioId, sucursalId) => {
-  const [resumen, cantidad, remesado, movimientos, envios] = await Promise.all([
+// El estado del local Y el mapa de mora de sus envíos. El mapa no viaja en la
+// respuesta (es interno): lo usan el estado de cuenta y el panel para pegarle a
+// cada envío su mora sin volver a consultarla.
+const _estadoLocal = async (negocioId, sucursalId) => {
+  const { getConfigRed } = require('../../middlewares/redInterna.middleware');
+  const [resumen, cantidad, remesado, movimientos, envios, moraMapa, config] = await Promise.all([
     repo.getResumenUnidades(negocioId, sucursalId),
     repo.getCantidadConsignada(negocioId, sucursalId),
     repo.getTotalRemesado(negocioId, sucursalId),
     repo.getTotalMovimientosCuenta(negocioId, sucursalId),
     repo.getTotalesEnvios(negocioId, sucursalId),
+    moraRed.cargarEstados(null, negocioId, sucursalId),
+    getConfigRed(negocioId),
   ]);
-  return _armarSaldo({
+  const mora = moraRed.resumir(moraMapa, { avisoPrevio: config.mora?.aviso_previo_dias });
+  const estado = _armarSaldo({
     resumen, cantidad, envios,
     remesado:    remesado[0],
     movimientos: movimientos[0],
+    mora,
+    // Encendida en Ajustes, o con envíos que todavía cargan un plazo de
+    // antes de apagarla: esos siguen causando y se tienen que ver.
+    moraActiva: !!config.mora?.activa || moraMapa.size > 0,
   });
+  return { estado, moraMapa };
 };
+
+const getEstadoLocal = async (negocioId, sucursalId) =>
+  (await _estadoLocal(negocioId, sucursalId)).estado;
 
 /**
  * Los pedidos que le interesan a este panel, o `null` si la función está
@@ -2824,8 +3011,15 @@ const getPanelBodega = async (req) => {
     saldo_por_liquidar: acc.saldo_por_liquidar + l.totales.saldo_por_liquidar,
     en_consignacion:    acc.en_consignacion    + l.totales.en_consignacion_valor,
     sin_ubicar:         acc.sin_ubicar         + l.totales.sin_ubicar_unidades,
+    // La mora de toda la red: aparte de la deuda de mercancía, como en cada
+    // local. `total_a_pagar` es lo que la bodega tiene por cobrar de verdad.
+    mora_pendiente:     acc.mora_pendiente     + l.totales.mora_pendiente,
+    envios_vencidos:    acc.envios_vencidos    + l.totales.envios_vencidos,
+    locales_en_mora:    acc.locales_en_mora    + (l.totales.envios_vencidos > 0 ? 1 : 0),
+    total_a_pagar:      acc.total_a_pagar      + l.totales.total_a_pagar,
   }), { deuda: 0, saldo_a_favor: 0, envios_abiertos: 0,
-        saldo_por_liquidar: 0, en_consignacion: 0, sin_ubicar: 0 });
+        saldo_por_liquidar: 0, en_consignacion: 0, sin_ubicar: 0,
+        mora_pendiente: 0, envios_vencidos: 0, locales_en_mora: 0, total_a_pagar: 0 });
 
   return {
     es_bodega: true, sucursal_id: bodegaId,
@@ -2839,6 +3033,8 @@ const getPanelBodega = async (req) => {
     // —el avance es derivado— y vuelve a llenarse si esa remisión se anula o
     // el local reporta un faltante.
     pedidos_por_atender: await _pedidosDelPanel(req, { abiertos: true }),
+    // Las condiciones de mora de los envíos, para despachar y fijar plazos.
+    mora_config: _configMoraPublica(req.red?.mora),
   };
 };
 
@@ -2903,9 +3099,9 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 
   const { desde = null, hasta = null, q = '', estado = null, limit = 100, offset = 0 } = filtros;
 
-  const [totales, extracto, mercancia, remisiones, remesas, movimientos, porEnvio,
-         abonos, lineasEnvios, cargos, devoluciones, lineasDevoluciones] = await Promise.all([
-      getEstadoLocal(negocioId, objetivo),
+  const [{ estado: totales, moraMapa }, extracto, mercancia, remisiones, remesas, movimientos, porEnvio,
+         abonos, lineasEnvios, cargos, devoluciones, lineasDevoluciones, moraCobros] = await Promise.all([
+      _estadoLocal(negocioId, objetivo),
       repo.getExtracto(negocioId, objetivo, { desde, hasta }),
       repo.buscarUnidades(negocioId, objetivo, {
         estado: estado || null, q, desde, hasta,
@@ -2932,6 +3128,9 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       }),
       // Sus líneas, para poder abrir cada devolución y ver qué llevaba dentro.
       repo.getLineasDeDevoluciones(negocioId, objetivo, { limit: 600 }),
+      // Qué parte de cada pago se fue a mora: la pestaña de pagos lo cuenta
+      // junto al reparto, o el pago parecería no cuadrar con lo que cubrió.
+      moraRed.cobrosDeLocal(negocioId, objetivo),
     ]);
 
   const salida = {
@@ -2991,6 +3190,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
     // contar el pago como lo hizo el usuario ("pagué $2M y taparon 3 envíos")
     // en vez de como una cifra suelta.
     abonos: abonos.map((a) => ({ ...a, valor: _num(a.valor) })),
+    mora_cobros: moraCobros,
     // Los cargos que no vienen de un envío, con su saldo y sus abonos.
     cargos: cargos.map((c) => ({
       ...c,
@@ -3000,8 +3200,9 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
       excedente: Math.round(_num(c.excedente)),
       pagado:    _num(c.saldo) <= 0,
     })),
-    // Envío por envío: su cuenta y, aparte, qué se vendió y qué queda.
-    ...(_armarEnvios(porEnvio, totales.totales, lineasEnvios)),
+    // Envío por envío: su cuenta, su plazo y su mora, y aparte qué se vendió
+    // y qué queda.
+    ...(_armarEnvios(porEnvio, totales.totales, lineasEnvios, moraMapa)),
     // Por qué debe lo que debe, en una línea por concepto.
     desglose: _desgloseSaldo(totales.totales, remesas),
   };
@@ -3022,7 +3223,7 @@ const getEstadoCuenta = async (req, sucursalId, filtros = {}) => {
 // cualquier otra línea, porque ahora valen cantidad × valor, no una estimación
 // contra el stock. Verificado en 11-envios-por-remision.
 // ─────────────────────────────────────────────────────────────────────────────
-const _armarEnvios = (filas, t, lineas = []) => {
+const _armarEnvios = (filas, t, lineas = [], moraMapa = new Map()) => {
   // Las líneas llegan en una sola consulta para toda la pantalla; aquí se
   // reparten a su envío.
   const porEnvio = new Map();
@@ -3050,7 +3251,11 @@ const _armarEnvios = (filas, t, lineas = []) => {
     });
   }
 
-  const envios = filas.map((e) => ({
+  const envios = filas.map((e) => {
+    // La mora del envío: su plazo, su fecha límite y lo que debe por pagar
+    // tarde. Un envío sin plazo trae el objeto en cero (misma forma siempre).
+    const mora = moraRed.moraDeEnvio(moraMapa, e);
+    return {
     ...e,
     lineas: porEnvio.get(Number(e.id)) || [],
     unidades:          Number(e.unidades),
@@ -3059,7 +3264,11 @@ const _armarEnvios = (filas, t, lineas = []) => {
     abonado:           Math.round(_num(e.abonado)),
     saldo:             Math.round(_num(e.saldo)),
     excedente:         Math.round(_num(e.excedente)),
-    pagado:            _num(e.cargo) > 0 && _num(e.saldo) <= 0,
+    mora,
+    // Lo que falta de verdad: el capital Y la mora. Un envío con el producto
+    // pagado y la mora pendiente NO está pagado, igual que un crédito.
+    total_a_pagar:     Math.round(_num(e.saldo)) + mora.pendiente,
+    pagado:            _num(e.cargo) > 0 && _num(e.saldo) <= 0 && mora.pendiente <= 0,
     // ── La mercancía (informativo) ──
     valor_recibido:    Math.round(_num(e.valor_recibido)),
     disponibles_valor: Math.round(_num(e.disponibles_valor)),
@@ -3068,13 +3277,18 @@ const _armarEnvios = (filas, t, lineas = []) => {
     sin_ubicar_valor:  Math.round(_num(e.sin_ubicar_valor)),
     accesorios_valor:  Math.round(_num(e.accesorios_valor)),
     valor_total:       _num(e.valor_total),
-  }));
+    };
+  });
 
   return {
     envios,
     envios_resumen: {
       total:    envios.length,
-      abiertos: envios.filter((e) => e.saldo > 0).length,
+      abiertos: envios.filter((e) => e.saldo > 0 || e.mora.pendiente > 0).length,
+      vencidos: envios.filter((e) => e.mora.en_mora).length,
+      // Igual que el saldo: de los totales, nunca de la lista topada.
+      mora_pendiente: _num(t.mora_pendiente),
+      total_a_pagar:  _num(t.total_a_pagar),
       // Se toman de los totales del local, no de la suma de esta lista: la
       // lista viene topada y sumarla daría menos deuda de la que hay.
       saldo_total:    Math.max(0, _num(t.deuda_total) - _num(t.cargos_sueltos)),
@@ -3126,6 +3340,16 @@ const _desgloseSaldo = (t, remesas = []) => {
       valor: _num(t.cargos_sueltos), signo: '+',
     });
   }
+  // La mora va como renglón propio, nunca mezclada con la mercancía: es lo
+  // que el local debe por pagar TARDE, no por lo que recibió.
+  if (_num(t.mora_pendiente) > 0) {
+    lineas.push({
+      clave: 'mora',
+      etiqueta: 'Mora por pagar tarde',
+      detalle: `${t.envios_vencidos || 0} envío(s) vencido(s)`,
+      valor: _num(t.mora_pendiente), signo: '+',
+    });
+  }
   if (_num(t.saldo_a_favor) > 0) {
     lineas.push({
       clave: 'favor',
@@ -3137,7 +3361,10 @@ const _desgloseSaldo = (t, remesas = []) => {
 
   return {
     lineas,
-    saldo: _num(t.saldo_por_liquidar),
+    // Los renglones suman hasta aquí: con mora, lo que se paga es capital +
+    // mora. `saldo_capital` conserva la deuda de la mercancía sola.
+    saldo: t.total_a_pagar != null ? _num(t.total_a_pagar) : _num(t.saldo_por_liquidar),
+    saldo_capital: _num(t.saldo_por_liquidar),
     // De lo que debe, de dónde va a salir la plata. Es informativo y es la
     // duda más común del local ahora que paga todo lo que recibe.
     respaldo: {
@@ -3205,6 +3432,20 @@ const getRemision = async (req, id) => {
     .filter((a) => !a.anulado && (a.origen !== 'remesa' || a.remesa_estado === 'Recibida'))
     .reduce((s, a) => s + _num(a.valor), 0);
 
+  // El plazo y la mora del envío, con las mismas reglas que el listado. Los
+  // movimientos de mora se leen aparte: un envío al que le quitaron el plazo
+  // ya no causa, pero lo que se cobró antes sigue siendo historia suya.
+  let mora = moraRed.moraDeEnvio(new Map(), remision);
+  if (remision.tipo === 'entrega' && moraRed.disponible()) {
+    const [mapa, movimientosMora] = await Promise.all([
+      moraRed.cargarEstados(null, negocioId, Number(remision.sucursal_destino_id), {
+        remisionIds: [Number(id)],
+      }),
+      moraRed.movimientosDeEnvio(negocioId, Number(id)),
+    ]);
+    mora = { ...moraRed.moraDeEnvio(mapa, remision), movimientos: movimientosMora };
+  }
+
   // El costo de la BODEGA (lo que a ella le costó: `costo_origen`, congelado
   // al despachar) solo lo ve el admin — la misma regla del export y de la
   // búsqueda por IMEI. Las líneas se leen con `lr.*`, así que viajaba entero al
@@ -3230,6 +3471,9 @@ const getRemision = async (req, id) => {
     // No lleva ninguna cifra, así que no pasa por el recorte de más abajo: un
     // vendedor tiene que poder ver que este envío contesta lo que él pidió.
     pedido,
+    // Plazo, fecha límite y mora. Es cuenta (lo que el local tiene que pagar),
+    // así que atraviesa el recorte del vendedor igual que el saldo.
+    mora,
     resumen: {
       enviado:    Math.round(resumen.enviado),
       // La cuenta del envío, calculada con las MISMAS reglas que el listado:
@@ -3237,6 +3481,8 @@ const getRemision = async (req, id) => {
       cargo:      Math.round(resumen.cargo),
       abonado:    Math.round(abonadoEfectivo),
       saldo:      Math.max(0, Math.round(resumen.cargo - abonadoEfectivo)),
+      mora_pendiente: mora.pendiente,
+      total_a_pagar:  Math.max(0, Math.round(resumen.cargo - abonadoEfectivo)) + mora.pendiente,
       // Solo en una DEVOLUCIÓN: lo que le bajó a la cuenta del local. Misma
       // regla que el extracto (rama NOTA CRÉDITO): un serial acredita su valor
       // interno si era mercancía de la bodega; la cantidad, el reparto FIFO.
@@ -3273,6 +3519,8 @@ const getRemision = async (req, id) => {
       cargo:      salida.resumen.cargo,
       abonado:    salida.resumen.abonado,
       saldo:      salida.resumen.saldo,
+      mora_pendiente: salida.resumen.mora_pendiente,
+      total_a_pagar:  salida.resumen.total_a_pagar,
       acreditado: salida.resumen.acreditado,
       enviado:    null, devuelto: null, liquidable: null,
       en_vitrina: null, no_llego: null,
@@ -3668,8 +3916,20 @@ const getContexto = async (req) => {
     es_bodega:   sucursalId === bodegaId,
     bodega_nombre: todas.find((s) => s.id === bodegaId)?.nombre || 'Bodega',
     locales:     todas.filter((s) => s.id !== bodegaId),
+    // El plazo de pago de los envíos: lo necesitan el modal de despacho (qué
+    // condición y cuántos días) y el de cambiar el plazo. Solo lo que se pinta:
+    // condiciones, la de por defecto y el plazo sugerido.
+    mora: _configMoraPublica(req.red?.mora),
   };
 };
+
+const _configMoraPublica = (m) => ({
+  activa:        !!m?.activa,
+  condiciones:   m?.activa ? m.condiciones : [],
+  default_id:    m?.activa ? m.default_id : null,
+  plazo_default: m?.activa ? m.plazo_default : null,
+  aviso_previo_dias: m?.aviso_previo_dias ?? 3,
+});
 
 const getMovimientosCuenta = async (req, sucursalId) => {
   const objetivo = Number(sucursalId || req.sucursal_id);

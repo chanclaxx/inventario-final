@@ -4,6 +4,8 @@ import {
   buscarParaDespacho, buscarAccesorios, despachar, previsualizarDestino,
 } from '../../api/redInterna.api';
 import { PanelRevisionDestino } from './PanelRevisionDestino';
+import { SelectorPlazoEnvio } from './PlazoEnvio';
+import { useMoraRed, plazoPorDefecto, plazoValido } from './moraEnvio';
 import { claveItem } from './claveItem';
 import { formatCOP } from '../../utils/formatters';
 import { useClaveIdempotencia } from '../../utils/claveIdempotencia';
@@ -263,6 +265,12 @@ export function ModalDespachar({
   const [decisiones, setDecisiones] = useState({});
   const inputRef = useRef(null);
   const clave = useClaveIdempotencia();
+  // Plazo de pago del envío (opt-in). `undefined` = la bodega no lo tocó y
+  // manda el del negocio; se DERIVA en vez de copiarse con un efecto, así un
+  // cambio de config que llega tarde no queda pisado por un estado viejo.
+  const moraRed = useMoraRed();
+  const [plazoElegido, setPlazoElegido] = useState(undefined);
+  const plazo = plazoElegido === undefined ? plazoPorDefecto(moraRed) : plazoElegido;
 
   // Si el negocio no usa códigos únicos, el escáner solo sirve para IMEI: el
   // texto lo dice para no prometer algo que no va a funcionar.
@@ -414,6 +422,11 @@ export function ModalDespachar({
       // escáner, el carrito y esta pantalla atribuyen igual, y una que se
       // olvidara del vínculo no dejaría el pedido pidiendo lo que ya salió.
       pedido_id: pedido ? pedido.id : undefined,
+      // Lo que se ve es lo que se manda: el plazo elegido, o null a propósito.
+      // Con la mora apagada no se manda nada y el backend no pacta plazo.
+      mora: moraRed.activa
+        ? (plazo ? { plazo_dias: Number(plazo.plazo_dias), condicion_id: plazo.condicion_id } : null)
+        : undefined,
     }).then((r) => r.data.data),
     onSuccess: onListo,
     onError: (err) => setError(err.response?.data?.error || 'No se pudo despachar'),
@@ -652,6 +665,12 @@ export function ModalDespachar({
 
         {/* Paso 3 — enviar */}
         {items.length > 0 && (
+          <SelectorPlazoEnvio
+            mora={moraRed} valor={plazo} onChange={setPlazoElegido}
+            ayuda="Si el local se pasa del plazo, el envío empieza a causar mora sobre lo que quede debiendo."
+          />
+        )}
+        {items.length > 0 && (
           <input
             value={notas}
             onChange={(e) => setNotas(e.target.value)}
@@ -693,7 +712,7 @@ export function ModalDespachar({
           <Button
             className="flex-1"
             disabled={!destino || items.length === 0 || (enCero.length > 0 && !sinCobro)
-              || bajoElMinimo.length > 0}
+              || bajoElMinimo.length > 0 || !plazoValido(plazo)}
             loading={revisar.isPending || enviar.isPending}
             onClick={() => { setError(''); revisar.mutate(); }}
           >

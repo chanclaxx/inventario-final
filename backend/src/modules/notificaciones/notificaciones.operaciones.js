@@ -325,7 +325,76 @@ const tecnicosPendientes = async (negocioId) => {
   }
 };
 
+// ── 6. Envíos de la red interna vencidos o por vencer ───────────────────────
+//
+// La mora de los envíos NO se recalcula aquí: sale de `redInterna.mora`, la
+// misma función que pinta la cuenta del local. Si el aviso contara por su lado,
+// el local abriría su cuenta y encontraría otra cifra que la que le avisaron.
+//
+// Agrupado por LOCAL: el aviso va a quien tiene que pagar (el local) y a quien
+// tiene que cobrar (la bodega), y un local con cinco envíos vencidos es una
+// sola llamada, no cinco.
+const enviosRedVencidos = async (negocioId) => {
+  const vacio = { vencidos: [], por_vencer: [], total_vencidos: 0, mora_total: 0, bodega_id: null };
+  try {
+    const { getConfigRed } = require('../../middlewares/redInterna.middleware');
+    const moraRed = require('../red-interna/redInterna.mora');
+    if (!moraRed.disponible()) return vacio;
+    const config = await getConfigRed(negocioId);
+    if (!config.activa || !config.bodega_id) return vacio;
+
+    const mapa = await moraRed.cargarEstados(null, negocioId, null);
+    if (!mapa.size) return vacio;
+    const aviso = config.mora?.aviso_previo_dias ?? 3;
+
+    const { rows: sucs } = await pool.query(
+      'SELECT id, nombre FROM sucursales WHERE negocio_id = $1', [negocioId]);
+    const nombre = new Map(sucs.map((s) => [Number(s.id), s.nombre]));
+
+    const porLocal = new Map();
+    const local = (id) => {
+      if (!porLocal.has(id)) {
+        porLocal.set(id, {
+          sucursal_id: id, sucursal_nombre: nombre.get(id) || 'Local',
+          vencidos: 0, capital: 0, mora: 0, dias_max: 0,
+          por_vencer: 0, por_vencer_capital: 0, proximo: null,
+        });
+      }
+      return porLocal.get(id);
+    };
+    for (const m of mapa.values()) {
+      if (m.en_mora) {
+        const l = local(m.sucursal_id);
+        l.vencidos += 1;
+        l.capital  += m.saldo_capital;
+        l.mora     += m.pendiente;
+        l.dias_max  = Math.max(l.dias_max, m.dias_vencidos);
+      } else if (m.dias_para_vencer != null && m.dias_para_vencer <= aviso) {
+        const l = local(m.sucursal_id);
+        l.por_vencer += 1;
+        l.por_vencer_capital += m.saldo_capital;
+        if (!l.proximo || m.fecha_limite < l.proximo) l.proximo = m.fecha_limite;
+      }
+    }
+    const todos = [...porLocal.values()];
+    const vencidos = todos.filter((l) => l.vencidos > 0)
+      .sort((a, b) => (b.capital + b.mora) - (a.capital + a.mora));
+    return {
+      vencidos,
+      por_vencer: todos.filter((l) => l.por_vencer > 0),
+      total_vencidos: vencidos.reduce((s, l) => s + l.vencidos, 0),
+      mora_total: vencidos.reduce((s, l) => s + l.mora, 0),
+      capital_total: vencidos.reduce((s, l) => s + l.capital, 0),
+      dias_aviso: aviso,
+      bodega_id: Number(config.bodega_id),
+    };
+  } catch (err) {
+    return _fallo('envíos de la red vencidos', negocioId, err, vacio);
+  }
+};
+
 module.exports = {
+  enviosRedVencidos,
   garantiasPorVencer, pedidosAtrasados, entradasSinConfirmar, cajasSinCerrar,
   tecnicosPendientes,
   hoyBogota,

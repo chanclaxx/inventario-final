@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getSucursales } from '../../api/sucursales.api';
+import { MoraConfig } from './MoraConfig';
 import {
   ToggleLeft, ToggleRight, Warehouse, Info, AlertTriangle,
 } from 'lucide-react';
@@ -166,6 +167,14 @@ export function RedInternaConfig({ valores, set }) {
               label="El vendedor del local ve el valor de cada producto del envío"
               description="En la pestaña Envíos y en los PDF. Apagado, el vendedor ve los productos y la cuenta (cargo, abonos, saldo) pero no el valor de cada línea. Supervisores y administradores lo ven siempre. Lo que a la bodega le costó cada producto no se le muestra nunca al local."
             />
+          </div>
+
+          {/* Plazo de pago y mora de los envíos: el mismo editor de la mora de
+              créditos, con las claves `red_interna_mora_*`. Separadas a
+              propósito: lo que se le cobra a un cliente no es lo que la bodega
+              le cobra a su propio local. */}
+          <div className="pl-4 pt-2 border-t border-gray-100">
+            <MoraConfig valores={valores} set={set} prefijo="red_interna_mora_" red />
           </div>
 
           <div className="pl-4">

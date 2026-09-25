@@ -27,7 +27,11 @@ import { ModalDocumentoEnvio } from './ModalDocumentoEnvio';
 const n = (v) => Number(v || 0);
 const numeroDe = (e) => e?.numero ?? e?.id;
 
-function PendientesTermico({ nombreLocal, envios, cargos, deuda, aFavor, config, onClose }) {
+// Lo que se debe de UN envío: su mercancía y su mora (la calcula el backend).
+const debeEnvio = (e) => n(e.saldo) + n(e.mora?.pendiente);
+const fechaDMA = (iso) => String(iso || '').slice(0, 10).split('-').reverse().join('/');
+
+function PendientesTermico({ nombreLocal, envios, cargos, deuda, aFavor, mora = 0, config, onClose }) {
   return (
     <DocumentoTermico
       id="envios-pendientes-termico"
@@ -45,11 +49,18 @@ function PendientesTermico({ nombreLocal, envios, cargos, deuda, aFavor, config,
           {envios.map((e) => (
             <div key={e.id} style={{ marginTop: '3px' }}>
               <Fila label={`Envío #${numeroDe(e)} · ${formatFecha(e.fecha_recepcion || e.fecha_emision)}`}
-                valor={formatCOP(e.saldo)} negrita />
+                valor={formatCOP(debeEnvio(e))} negrita />
               <div style={{ fontSize: '9px' }}>
                 Cargo {formatCOP(e.cargo)} · abonado {formatCOP(e.abonado)}
                 {` · ${(e.lineas || []).length} producto(s)`}
               </div>
+              {e.mora?.aplica && (
+                <div style={{ fontSize: '9px' }}>
+                  {e.mora.en_mora
+                    ? `VENCIDO hace ${e.mora.dias_vencidos} día(s)${n(e.mora.pendiente) > 0 ? ` · mora ${formatCOP(e.mora.pendiente)}` : ''}`
+                    : `Vence ${fechaDMA(e.mora.fecha_limite)}`}
+                </div>
+              )}
             </div>
           ))}
           {cargos.length > 0 && (
@@ -62,6 +73,7 @@ function PendientesTermico({ nombreLocal, envios, cargos, deuda, aFavor, config,
             </>
           )}
           <Divisor />
+          {mora > 0 && <Fila label="Mora por pagar tarde:" valor={formatCOP(mora)} />}
           <Fila label="TOTAL QUE DEBE:" valor={formatCOP(deuda)} negrita grande />
           {aFavor > 0 && <Fila label="Saldo a favor:" valor={formatCOP(aFavor)} />}
           <Firma titulo="Recibí el estado de cuenta" identificacion={nombreLocal} />
@@ -84,7 +96,9 @@ function PendientesTermico({ nombreLocal, envios, cargos, deuda, aFavor, config,
  * @param {number} props.deuda    deuda total del local (de los totales, no de la lista)
  * @param {number} [props.aFavor]
  */
-export function ModalEnviosPendientes({ sucursalId, nombreLocal, envios = [], cargos = [], deuda, aFavor = 0, onClose }) {
+export function ModalEnviosPendientes({
+  sucursalId, nombreLocal, envios = [], cargos = [], deuda, aFavor = 0, mora = 0, onClose,
+}) {
   const [vista, setVista] = useState('lista'); // 'lista' | 'pos'
   const [envioAbierto, setEnvioAbierto] = useState(null);
   const { exportando, error, exportar, puedeCompartir } = useExportarPdfRedInterna();
@@ -95,10 +109,13 @@ export function ModalEnviosPendientes({ sucursalId, nombreLocal, envios = [], ca
 
   // Del más viejo al más nuevo: es el orden en que se cobran (el pago total los
   // tapa en ese mismo orden).
-  const pendientes = envios.filter((e) => n(e.saldo) > 0)
+  // Por pagar = mercancía o mora: un envío con el producto cubierto y la mora
+  // pendiente todavía se debe.
+  const pendientes = envios.filter((e) => debeEnvio(e) > 0)
     .sort((a, b) => new Date(a.fecha_recepcion || a.fecha_emision) - new Date(b.fecha_recepcion || b.fecha_emision));
   const cargosPend = cargos.filter((c) => n(c.saldo) > 0);
-  const total = n(deuda);
+  // `deuda` es la de la mercancía (de los totales del local); la mora va aparte.
+  const total = n(deuda) + n(mora);
 
   if (envioAbierto) {
     return <ModalDocumentoEnvio remisionId={envioAbierto} onClose={() => setEnvioAbierto(null)} />;
@@ -106,7 +123,7 @@ export function ModalEnviosPendientes({ sucursalId, nombreLocal, envios = [], ca
   if (vista === 'pos') {
     return (
       <PendientesTermico nombreLocal={nombreLocal} envios={pendientes} cargos={cargosPend}
-        deuda={total} aFavor={n(aFavor)} config={config} onClose={onClose} />
+        deuda={total} aFavor={n(aFavor)} mora={n(mora)} config={config} onClose={onClose} />
     );
   }
 
@@ -130,6 +147,7 @@ export function ModalEnviosPendientes({ sucursalId, nombreLocal, envios = [], ca
           </div>
           <p className="text-xs text-gray-500 text-right">
             {pendientes.length} envío(s){cargosPend.length ? ` · ${cargosPend.length} cargo(s)` : ''}
+            {n(mora) > 0 && <><br /><span className="text-red-600">incluye {formatCOP(mora)} de mora</span></>}
             {n(aFavor) > 0 && <><br />a favor {formatCOP(aFavor)}</>}
           </p>
         </div>
@@ -152,11 +170,18 @@ export function ModalEnviosPendientes({ sucursalId, nombreLocal, envios = [], ca
                     <p className="text-xs text-gray-500">
                       Cargo {formatCOP(e.cargo)} · abonado {formatCOP(e.abonado)} · {(e.lineas || []).length} producto(s)
                     </p>
+                    {e.mora?.aplica && (
+                      <p className={`text-xs ${e.mora.en_mora ? 'text-red-600' : 'text-gray-400'}`}>
+                        {e.mora.en_mora
+                          ? `Vencido hace ${e.mora.dias_vencidos} día(s)${n(e.mora.pendiente) > 0 ? ` · mora ${formatCOP(e.mora.pendiente)}` : ''}`
+                          : `Vence el ${fechaDMA(e.mora.fecha_limite)}`}
+                      </p>
+                    )}
                     <div className="h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
                       <div className="h-full bg-green-500 rounded-full" style={{ width: `${pagado}%` }} />
                     </div>
                   </div>
-                  <span className="text-sm font-semibold text-red-600 tabular-nums">{formatCOP(e.saldo)}</span>
+                  <span className="text-sm font-semibold text-red-600 tabular-nums">{formatCOP(debeEnvio(e))}</span>
                   <ChevronRight size={15} className="text-gray-300 flex-shrink-0" />
                 </button>
               );

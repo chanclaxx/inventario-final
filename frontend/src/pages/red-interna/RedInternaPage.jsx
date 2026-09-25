@@ -111,8 +111,22 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
         <div className="flex gap-2 text-sm">
           <div>
             <p className="text-xs text-gray-400">Te deben</p>
-            <p className="text-lg font-bold text-gray-900">{formatCOP(data.totales.deuda)}</p>
+            {/* Mercancía + mora: lo que de verdad hay por cobrar. */}
+            <p className="text-lg font-bold text-gray-900">
+              {formatCOP(data.totales.total_a_pagar ?? data.totales.deuda)}
+            </p>
+            {data.totales.mora_pendiente > 0 && (
+              <p className="text-[11px] text-red-600">
+                incluye {formatCOP(data.totales.mora_pendiente)} de mora
+              </p>
+            )}
           </div>
+          {data.totales.envios_vencidos > 0 && (
+            <div className="ml-5">
+              <p className="text-xs text-gray-400">Vencidos</p>
+              <p className="text-lg font-bold text-red-600">{data.totales.envios_vencidos}</p>
+            </div>
+          )}
           <div className="ml-5">
             <p className="text-xs text-gray-400">Envíos abiertos</p>
             <p className="text-lg font-bold text-gray-500">{data.totales.envios_abiertos}</p>
@@ -156,11 +170,25 @@ function PanelBodega({ data, locales, onRefrescar, onAviso, onVerCuenta }) {
                     {t.sin_ubicar_unidades > 0 && (
                       <span className="text-red-500 font-medium"> · {t.sin_ubicar_unidades} sin ubicar ⚠</span>
                     )}
+                    {t.envios_vencidos > 0 && (
+                      <span className="text-red-600 font-medium">
+                        {' '}· {t.envios_vencidos} vencido(s), hace hasta {t.dias_max_vencido} día(s)
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  {t.saldo_por_liquidar > 0
-                    ? <p className="text-sm font-bold text-gray-900">{formatCOP(t.saldo_por_liquidar)}</p>
+                  {(t.total_a_pagar ?? t.saldo_por_liquidar) > 0
+                    ? (
+                      <>
+                        <p className={`text-sm font-bold ${t.envios_vencidos > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                          {formatCOP(t.total_a_pagar ?? t.saldo_por_liquidar)}
+                        </p>
+                        {t.mora_pendiente > 0 && (
+                          <p className="text-[11px] text-red-500">con {formatCOP(t.mora_pendiente)} de mora</p>
+                        )}
+                      </>
+                    )
                     : t.saldo_a_favor > 0
                       ? <Badge variant="blue">{formatCOP(t.saldo_a_favor)} a favor</Badge>
                       : <Badge variant="green">Al día</Badge>}

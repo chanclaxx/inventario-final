@@ -47,6 +47,7 @@ node scripts/pruebas-red-interna/40-simulacion-tesla.mjs
 node scripts/pruebas-red-interna/41-prestamos-por-persona.mjs
 node scripts/pruebas-red-interna/54-tecnicos-externos.mjs
 node scripts/pruebas-red-interna/55-pdf-red-interna.mjs
+node scripts/pruebas-red-interna/60-mora-envios.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un

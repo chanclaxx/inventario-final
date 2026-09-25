@@ -1272,7 +1272,12 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > calculó el plano—. El texto usa las fuentes internas: en TSPL las de mapa de
 > bits (monoespaciadas, así se sabe cuántas letras caben; se encogen antes de
 > cortar y el código legible **nunca** se corta), CP850 para tildes y ñ; en ZPL
-> la fuente 0 con `^FB` y `^CI28`. La calibración: desvío = puntos, 180° =
+> la fuente 0 con `^FB` y `^CI28`. La calibración: desvío horizontal = puntos
+> sumados a las coordenadas; **desvío vertical = `SHIFT` / `^LT`**, nunca en
+> las coordenadas (DIG T451B, 25-sep: «sale muy abajo y recorta»): subir la
+> impresión exige ir por encima del punto 0 de la impresora, y una coordenada
+> negativa la impresora la descarta. Se manda `SHIFT 0` aunque no haya desvío,
+> porque la impresora recuerda el del trabajo anterior. 180° =
 > `DIRECTION`/`^POI`, y la escala NO aplica (un punto es un punto). Sin dpi se
 > asume 203.
 > **La firma de QZ**: sin certificado QZ pregunta «Allow» en cada trabajo. El
@@ -1946,6 +1951,51 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Prueba: `55-pdf-red-interna` (49; la 2 quién ve valores, la 3 los abonos
 > ajenos, la 8 un envío de 70 líneas sin saltos de PDFKit, la 9 que ningún
 > carácter impreso quede fuera de WinAnsi).
+
+> **Mora en los ENVÍOS de la red interna** (`redInterna.mora.js`,
+> `20260925_mora_envios.sql`, Ajustes → Red interna → «Plazo de pago y mora de
+> los envíos»; opt-in `red_interna_mora_activa`, **ausente = apagada**). El envío
+> ya era un documento de deuda; ahora tiene PLAZO, como un crédito. Condiciones
+> PROPIAS (`red_interna_mora_*`, mismas validaciones y mismo editor `MoraConfig`
+> con `prefijo`): lo que se le cobra a un cliente no es lo que la bodega le cobra
+> a su local, y encender una no enciende la otra. El CÁLCULO es el de créditos
+> (`mora.util` + `devengo.util`) sin una línea nueva.
+> **El plazo se pacta al despachar y la fecha nace al RECIBIR** (`mora_plazo_dias`
+> + `mora_condicion` congelada → `fecha_limite = hoy + días` en
+> `_ejecutarRecepcion`): los días en camino no son culpa del local. `mora`
+> AUSENTE en el despacho = el plazo por defecto del negocio (así el carrito y el
+> escáner no se saltan la política); `null` = sin plazo, a propósito.
+> **La mora vive en `mora_envios`, NUNCA en `abonos_remision`**: los reportes
+> suman esos abonos como lo cobrado del envío (`utilidad = cobrado − costo`), y
+> la mora no es margen. Un cobro cuelga de la misma plata (`remesa_id` /
+> `movimiento_id`) y sigue las mismas reglas: remesa en tránsito reserva pero no
+> cuenta (`pendiente_reserva`), anular la remesa o rechazar/anular el gasto anula
+> su mora. Y por eso `getTotalesEnvios` resta la mora cobrada de `sin_imputar`
+> (y suma la pagada con crédito a `favor_usado`): sin eso cada peso de mora
+> reaparecía como saldo a favor.
+> **Todo pago pasa por `_imputarFIFO`**, que ahora reparte mora y capital:
+> `mora_primero` (default, Art. 1653: por envío, su mora y después su capital;
+> lo usan gastos, ajustes y el saldo a favor), `capital_primero` (lo elige el
+> local) y `solo_mora` (botón «Pagar mora», exige el envío). Un envío con el
+> capital cubierto y la mora pendiente NO está pagado y entra a la cola.
+> **`deuda_total` sigue siendo CAPITAL** (la identidad Σ saldo = deuda_total no
+> se movió); la mora va en `mora_pendiente` y `total_a_pagar` = capital + mora −
+> a favor, que es lo que muestran cabecera, panel de la bodega, Dashboard y PDF.
+> El extracto mete la mora cobrada como CARGO con la fecha del pago que la cubrió
+> (el pago sale completo como abono) y la condonación como info en 0: así
+> Σ extracto = neto sigue valiendo. Los abonos se fechan cuando el local PAGÓ, no
+> cuando la bodega confirmó (su demora no es atraso del local).
+> Condonar: admin + desde la bodega + motivo + PIN (y opcional quitar el plazo);
+> se anula la condonación, un cobro se deshace anulando su pago. Fijar plazo
+> después: nunca con fecha pasada; en lote (`/mora/plazo-local`) solo a los
+> abiertos SIN plazo. Cargos sueltos no llevan mora. Avisos: `red_envios_vencidos`
+> (urgente: uno a cada local vencido y uno a la bodega) y `red_envios_por_vencer`,
+> con la MISMA función que pinta la cuenta. Reportes: `red_interna.mora`
+> (cobrada/condonada por local) como ingreso financiero, fuera de la utilidad.
+> Sin la migración (`hayMoraEnvios()`) ninguna consulta nombra lo nuevo.
+> Prueba: `60-mora-envios` (85; la sección 1 es la de sin migración, la 5 que la
+> mora no entra en `abonos_remision` y no vuelve como saldo a favor, la 7 que
+> todo se deshace, la 12 que PDF, reportes y avisos dicen la misma cifra).
 
 > **El despacho SALE AL PRECIO DEL CARRITO** (decisión del negocio, sep-2026;
 > `ModalDespachar.conValorInicial`, `valorSegunLista`): el valor de cada línea

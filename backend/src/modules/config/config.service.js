@@ -205,6 +205,26 @@ const saveConfig = async (negocioId, datos) => {
   if (datosProcesados.mora_tope_tasa_mensual !== undefined) {
     _validarTechoMora(datosProcesados.mora_tope_tasa_mensual);
   }
+  // La mora de los ENVÍOS de la red interna: mismas condiciones y mismas
+  // validaciones que la de créditos (las lee la misma `leerConfigMora`), así
+  // no se puede guardar una lista que el despacho luego descarte en silencio.
+  if (datosProcesados.red_interna_mora_lista !== undefined) {
+    _validarMoraLista(String(datosProcesados.red_interna_mora_lista));
+  }
+  if (datosProcesados.red_interna_mora_tope_tasa_mensual !== undefined) {
+    _validarTechoMora(datosProcesados.red_interna_mora_tope_tasa_mensual);
+  }
+  for (const [clave, min, max, etiqueta] of [
+    ['red_interna_mora_plazo_default_dias', 1, 365, 'El plazo de pago por defecto de los envíos'],
+    ['red_interna_mora_aviso_previo_dias',  1,  30, 'El aviso previo al vencimiento de un envío'],
+  ]) {
+    const raw = datosProcesados[clave];
+    if (raw === undefined || raw === '' || raw === null) continue;
+    const v = Number(raw);
+    if (!Number.isInteger(v) || v < min || v > max) {
+      throw { status: 400, message: `${etiqueta} debe ser un número entero de días entre ${min} y ${max}` };
+    }
+  }
   if (datosProcesados.interes_lista !== undefined) {
     _validarInteresLista(String(datosProcesados.interes_lista));
   }

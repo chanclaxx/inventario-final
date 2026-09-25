@@ -1098,13 +1098,18 @@ const FilaEnvioLocal = ({ envio }) => {
   );
 };
 
+// `red.mora` (opt-in) es la mora que los locales le pagaron a la bodega por
+// pagar TARDE. Es ingreso FINANCIERO: va en su propio renglón y nunca dentro de
+// la utilidad de arriba (que mide lo cobrado de la mercancía menos su costo).
+// Puede haber mora en un período sin envíos recibidos en él.
 const SeccionVentasLocales = ({ red }) => {
-  if (!red || !red.envios?.length) return null;
+  if (!red || (!red.envios?.length && !red.mora)) return null;
 
-  const { envios, resumen } = red;
+  const { envios = [], resumen, mora } = red;
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+      {envios.length > 0 && resumen && (<>
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
         <Truck size={15} className="text-cyan-600" />
         Ventas a locales
@@ -1142,6 +1147,34 @@ const SeccionVentasLocales = ({ red }) => {
       <div className="flex flex-col gap-2">
         {envios.map((e) => <FilaEnvioLocal key={e.remision_id} envio={e} />)}
       </div>
+      </>)}
+
+      {mora && (
+        <div className="bg-red-50/60 border border-red-100 rounded-xl p-3">
+          <p className="text-xs font-semibold text-red-700 mb-1.5">
+            Mora cobrada a los locales · ingreso financiero, no suma a la utilidad
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <span className="text-red-700">Cobrada <strong>{formatCOP(mora.cobrada)}</strong></span>
+            {mora.condonada > 0 && (
+              <span className="text-gray-500">Condonada <strong>{formatCOP(mora.condonada)}</strong></span>
+            )}
+          </div>
+          {mora.locales.length > 1 && (
+            <div className="mt-2 flex flex-col gap-0.5">
+              {mora.locales.map((l) => (
+                <div key={l.sucursal_id} className="flex items-center justify-between text-xs text-gray-600">
+                  <span>{l.sucursal_nombre} · {l.envios} envío(s)</span>
+                  <span>
+                    {formatCOP(l.cobrada)}
+                    {l.condonada > 0 && <span className="text-gray-400"> · condonada {formatCOP(l.condonada)}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -1389,7 +1422,7 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
     || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0))
     || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0))
     || (creditos && (creditos.saldados.length > 0 || creditos.activos.total > 0))
-    || (redInterna && redInterna.envios.length > 0)
+    || (redInterna && (redInterna.envios.length > 0 || !!redInterna.mora))
     || !!obsequiosRango;
 
   return (

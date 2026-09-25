@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { EstadoCuentaBase } from '../../components/EstadoCuenta/EstadoCuentaBase';
 import {
-  Truck, Wallet, Undo2, TrendingDown, SlidersHorizontal, Receipt, Filter,
+  Truck, Wallet, Undo2, TrendingDown, SlidersHorizontal, Receipt, Filter, CalendarClock,
 } from 'lucide-react';
 
 /**
@@ -66,6 +66,16 @@ const TIPO_CONFIG_BODEGA = {
     montoClass: 'text-gray-400',
     sufijo:     'no mueve la cuenta',
   },
+  // Mora de un envío vencido: el CARGO sale con la fecha del pago que la cubrió
+  // (el pago aparece completo como abono); la condonación es informativa.
+  mora: {
+    badge:      'bg-red-100 text-red-700',
+    label:      'Mora',
+    Icn:        CalendarClock,
+    lado:       'derecha',
+    bubbleBg:   'bg-red-50 border border-red-200',
+    montoClass: 'text-red-600',
+  },
   correccion: {
     badge:      'bg-gray-100 text-gray-600',
     label:      'Corrección',
@@ -86,6 +96,7 @@ const TIPO_POR_ORIGEN = {
   ajuste:     'ajuste',
   venta:      'venta',
   correccion: 'correccion',
+  mora:       'mora',
 };
 
 export function EstadoCuentaBodega({ extracto = [], isLoading = false }) {

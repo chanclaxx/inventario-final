@@ -14,10 +14,12 @@ import { ModalPedido }       from './ModalPedido';
 import { MisPedidos }        from './PedidosSecciones';
 import { TabResumen, TabMercancia, TabEnvios, TabPagos } from './CuentaSecciones';
 import { EstadoCuentaBodega } from './EstadoCuentaBodega';
+import { ModalPlazoLocal } from './ModalesMora';
+import { useMoraRed } from './moraEnvio';
 import {
   ChevronLeft, Package, Truck, Wallet, FileText, AlertTriangle, Store,
   LayoutDashboard, CheckCircle, Send, Info, PiggyBank, Receipt, SlidersHorizontal,
-  Undo2, ClipboardList,
+  Undo2, ClipboardList, CalendarClock,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,9 +60,12 @@ function PorRecibir({ envios, onAviso, onRefrescar }) {
     mutationFn: (id) => recibirRemision(id, {}).then((r) => r.data.data),
     onSuccess: (res) => {
       const favor = Number(res?.saldo_favor_aplicado || 0);
-      onAviso(favor > 0
+      const vence = res?.fecha_limite
+        ? ` · tienes hasta el ${String(res.fecha_limite).split('-').reverse().join('/')} para pagarlo`
+        : '';
+      onAviso((favor > 0
         ? `Envío recibido — se le aplicaron ${formatCOP(favor)} de tu saldo a favor`
-        : 'Envío recibido — ya está en tu inventario');
+        : 'Envío recibido — ya está en tu inventario') + vence);
       onRefrescar();
     },
     onError: (e) => {
@@ -93,6 +98,13 @@ function PorRecibir({ envios, onAviso, onRefrescar }) {
             <p className="text-xs text-blue-700 mt-1">
               Al recibirlo entra a tu inventario y pasa a tu cuenta con la bodega.
             </p>
+            {/* El plazo empieza a correr al recibir: decirlo ANTES. */}
+            {r.mora_plazo_dias && (
+              <p className="text-xs text-blue-700 font-medium">
+                Plazo de pago: {r.mora_plazo_dias} días desde que lo recibas
+                {r.mora_condicion?.nombre ? ` · mora «${r.mora_condicion.nombre}» si te pasas` : ''}.
+              </p>
+            )}
             <div className="flex gap-2 mt-2.5">
               <Button
                 size="sm" variant="success" className="flex-1"
@@ -122,7 +134,9 @@ function PorRecibir({ envios, onAviso, onRefrescar }) {
 
 // ── La cabecera: lo que debe, y su crédito si lo tiene ──────────────────────
 function Cabecera({ t, propia, onPagar }) {
-  const debe   = Number(t.saldo_por_liquidar || 0);
+  // Lo que se entrega de verdad: la mercancía Y la mora de los envíos vencidos.
+  const debe   = Number(t.total_a_pagar ?? t.saldo_por_liquidar ?? 0);
+  const mora   = Number(t.mora_pendiente || 0);
   const aFavor = Number(t.saldo_a_favor || 0);
 
   return (
@@ -142,6 +156,21 @@ function Cabecera({ t, propia, onPagar }) {
                 ? `${t.envios_abiertos ?? 0} envío(s) por pagar`
                 : 'está al día ✓'}
             </p>
+            {mora > 0 && (
+              <p className="text-xs text-red-600 font-medium mt-0.5">
+                incluye {formatCOP(mora)} de mora · {t.envios_vencidos} envío(s) vencido(s)
+              </p>
+            )}
+            {mora === 0 && t.envios_vencidos > 0 && (
+              <p className="text-xs text-red-600 font-medium mt-0.5">
+                {t.envios_vencidos} envío(s) vencido(s)
+              </p>
+            )}
+            {!t.envios_vencidos && t.envios_por_vencer > 0 && (
+              <p className="text-xs text-amber-700 mt-0.5">
+                {t.envios_por_vencer} envío(s) vencen pronto
+              </p>
+            )}
           </div>
           {propia && debe > 0 && (
             <Button onClick={onPagar} className="flex-shrink-0">
@@ -184,7 +213,9 @@ export function CuentaLocal({
   onVolver = null, onRefrescar, onAviso, esBodega = false,
 }) {
   const [tab,    setTab]    = useState('envios');
-  const [pago,   setPago]   = useState(null);   // null | { envio? }
+  const [pago,   setPago]   = useState(null);   // null | { envio?, soloMora? }
+  const [plazoLocal, setPlazoLocal] = useState(false);
+  const moraRed = useMoraRed();
   const [movim,  setMovim]  = useState(null);   // null | 'gasto' | 'ajuste'
   const [pedir,  setPedir]  = useState(false);
   const [pedido, setPedido] = useState(null);   // id del pedido abierto
@@ -331,6 +362,13 @@ export function CuentaLocal({
             <SlidersHorizontal size={14} /> Ajustar cuenta
           </Button>
         )}
+        {/* Para el día que se enciende la mora: los envíos que ya estaban
+            abiertos nacieron sin plazo. Solo toca los que no tienen uno. */}
+        {esBodega && !propia && moraRed.activa && (
+          <Button variant="secondary" size="sm" onClick={() => setPlazoLocal(true)}>
+            <CalendarClock size={14} /> Plazo a envíos sin plazo
+          </Button>
+        )}
         {/* Los dos PDF de la cuenta. Los ven el local y la bodega; qué valores
             trae cada uno lo decide el backend según quién lo pide. */}
         <Button variant="secondary" size="sm" onClick={() => setDocumentos(true)}>
@@ -369,8 +407,9 @@ export function CuentaLocal({
           devoluciones={data.devoluciones || []}
           resumen={data.envios_resumen}
           sucursalId={sucursalId} nombreLocal={nombreLocal}
-          ocultos={ocultos} propia={propia}
+          ocultos={ocultos} propia={propia} esBodega={esBodega}
           onAbonar={(envio) => setPago({ envio })}
+          onPagarMora={(envio) => setPago({ envio, soloMora: true })}
           onAbonarCargo={(cargo) => setPago({ cargo })}
           onCambio={(msg) => { if (msg) onAviso(msg); onRefrescar(); }}
         />
@@ -391,6 +430,7 @@ export function CuentaLocal({
           remesas={data.remesas} movimientos={data.movimientos_cuenta || []}
           abonos={data.abonos || []} totales={t}
           envios={data.envios || []} esBodega={esBodega}
+          moraCobros={data.mora_cobros || []}
           onHecho={(msg, error) => { onAviso(msg); if (!error) onRefrescar(); }}
         />
       )}
@@ -411,7 +451,9 @@ export function CuentaLocal({
         <ModalPago
           envio={pago.envio || null}
           cargo={pago.cargo || null}
-          sugerido={t.saldo_por_liquidar}
+          soloMora={pago.soloMora === true}
+          sugerido={t.total_a_pagar ?? t.saldo_por_liquidar}
+          moraTotal={t.mora_pendiente || 0}
           onCerrar={() => setPago(null)}
           onListo={cerrarPago}
         />
@@ -424,6 +466,15 @@ export function CuentaLocal({
           nombreLocal={data.sucursal?.nombre || nombre}
           onCerrar={() => setMovim(null)}
           onListo={(msg) => { setMovim(null); onAviso(msg); onRefrescar(); }}
+        />
+      )}
+
+      {plazoLocal && (
+        <ModalPlazoLocal
+          sucursalId={sucursalId}
+          nombreLocal={data.sucursal?.nombre || nombre}
+          onCerrar={() => setPlazoLocal(false)}
+          onListo={(msg) => { setPlazoLocal(false); onAviso(msg); onRefrescar(); }}
         />
       )}
 

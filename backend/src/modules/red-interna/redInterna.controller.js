@@ -1,4 +1,5 @@
 const service = require('./redInterna.service');
+const moraRed = require('./redInterna.mora');
 const audit   = require('../../utils/auditoria.util');
 
 // ── Panel principal: una sola ruta, dos caras ────────────────────────────────
@@ -82,6 +83,9 @@ const despachar = async (req, res, next) => {
     const data = await service.despachar(req, {
       sucursal_destino_id, lineas, notas, clave_idempotencia, permitir_valor_cero,
       pedido_id,
+      // Tal cual llega: AUSENTE (undefined) significa «el plazo por defecto del
+      // negocio» y `null` significa «sin plazo». No se puede normalizar aquí.
+      mora: req.body.mora,
     });
     if (!data.repetido) {
       audit.registrar(req.user.negocio_id, req.user.id, 'Remisión despachada', 'red_interna', data.id, {
@@ -109,9 +113,13 @@ const recibir = async (req, res, next) => {
     });
     res.json({
       ok: true, data,
-      message: data.faltantes
+      message: (data.faltantes
         ? `Recibiste ${data.recibidas}. ${data.faltantes} quedaron reportados como no llegados.`
-        : 'Recepción confirmada',
+        : 'Recepción confirmada')
+        // El plazo de pago empieza a correr ahora: se dice en el mismo mensaje.
+        + (data.fecha_limite
+          ? ` Tienes hasta el ${String(data.fecha_limite).split('-').reverse().join('/')} para pagarlo.`
+          : ''),
     });
   } catch (err) { next(err); }
 };
@@ -246,11 +254,11 @@ const enviarRemesa = async (req, res, next) => {
   try {
     const {
       valor, notas, clave_idempotencia, cuenta_origen_id, metodo,
-      remision_id, cargo_id,
+      remision_id, cargo_id, modo_mora,
     } = req.body;
     const data = await service.enviarRemesa(req, {
       valor, notas, clave_idempotencia, cuenta_origen_id, metodo,
-      remision_id, cargo_id,
+      remision_id, cargo_id, modo_mora,
     });
     if (!data.repetido) {
       audit.registrar(req.user.negocio_id, req.user.id, 'Remesa enviada', 'red_interna', data.id, {
@@ -258,12 +266,18 @@ const enviarRemesa = async (req, res, next) => {
         // A qué envíos se imputó: sin esto la auditoría no explicaría por qué
         // bajó el saldo de un envío concreto.
         reparto: (data.reparto || []).map((r) => r.numero ?? r.remision_id),
+        mora: (data.reparto || []).filter((r) => r.tipo === 'mora').reduce((s, r) => s + Number(r.valor), 0),
       });
     }
-    const n = (data.reparto || []).length;
+    // Documentos distintos, no renglones: un envío puede recibir mora Y capital
+    // del mismo pago y sigue siendo UN envío.
+    const docs = new Set((data.reparto || []).map((r) => (r.cargo_id ? `c${r.cargo_id}` : `e${r.remision_id}`)));
+    const mora = (data.reparto || []).filter((r) => r.tipo === 'mora').reduce((s, r) => s + Number(r.valor), 0);
+    const n = docs.size;
     res.status(201).json({
       ok: true, data,
-      message: n > 1 ? `Pago enviado — cubre ${n} envíos` : 'Pago enviado a la bodega',
+      message: (n > 1 ? `Pago enviado — cubre ${n} envíos` : 'Pago enviado a la bodega')
+        + (mora > 0 ? ` (incluye $${Math.round(mora).toLocaleString('es-CO')} de mora)` : ''),
     });
   } catch (err) { next(err); }
 };
@@ -365,6 +379,69 @@ const moverAbono = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Plazo de pago y mora de los envíos ───────────────────────────────────────
+
+// Poner, cambiar o quitar el plazo de un envío (la bodega).
+const fijarPlazo = async (req, res, next) => {
+  try {
+    const { fecha_limite, plazo_dias, condicion_id, quitar } = req.body || {};
+    const data = await moraRed.fijarPlazo(req, Number(req.params.id), {
+      fecha_limite, plazo_dias, condicion_id, quitar: quitar === true,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id,
+      quitar === true ? 'Plazo de envío quitado' : 'Plazo de envío fijado', 'red_interna', data.id, {
+        sucursal_id: Number(req.sucursal_id), fecha_limite: data.fecha_limite,
+        plazo_dias: data.mora_plazo_dias, condicion: data.mora_condicion?.nombre ?? null,
+      });
+    res.json({ ok: true, data, message: quitar === true ? 'Plazo quitado' : 'Plazo guardado' });
+  } catch (err) { next(err); }
+};
+
+// Poner plazo a todos los envíos abiertos de un local de una vez.
+const fijarPlazoLocal = async (req, res, next) => {
+  try {
+    const { sucursal_id, fecha_limite, condicion_id, reemplazar } = req.body || {};
+    const data = await moraRed.fijarPlazoLocal(req, {
+      sucursal_id, fecha_limite, condicion_id, reemplazar: reemplazar === true,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Plazo de envíos fijado en lote', 'red_interna',
+      Number(sucursal_id), { envios: data.envios, fecha_limite: data.fecha_limite });
+    res.json({
+      ok: true, data,
+      message: data.actualizados
+        ? `Plazo puesto a ${data.actualizados} envío(s)`
+        : 'No había envíos abiertos sin plazo',
+    });
+  } catch (err) { next(err); }
+};
+
+// Condonar la mora de un envío (admin, desde la bodega, con motivo y PIN).
+const condonarMora = async (req, res, next) => {
+  try {
+    const { valor, motivo, pin, quitar_plazo } = req.body || {};
+    const data = await moraRed.condonar(req, Number(req.params.id), {
+      valor, motivo, pin, quitar_plazo: quitar_plazo === true,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Mora de envío condonada', 'red_interna',
+      Number(req.params.id), {
+        sucursal_id: Number(data.envio.sucursal_destino_id), valor: data.condonado,
+        motivo, plazo_quitado: data.plazo_quitado,
+      });
+    const { envio, ...resto } = data;
+    res.json({ ok: true, data: resto, message: 'Mora condonada' });
+  } catch (err) { next(err); }
+};
+
+// Deshacer una condonación.
+const anularMovimientoMora = async (req, res, next) => {
+  try {
+    const data = await moraRed.anularCondonacion(req, Number(req.params.id));
+    audit.registrar(req.user.negocio_id, req.user.id, 'Condonación de mora anulada', 'red_interna',
+      Number(data.remision_id), { valor: data.valor });
+    res.json({ ok: true, data, message: 'Condonación anulada' });
+  } catch (err) { next(err); }
+};
+
 const getMovimientosCuenta = async (req, res, next) => {
   try {
     const data = await service.getMovimientosCuenta(req, req.query.sucursal);
@@ -418,5 +495,6 @@ module.exports = {
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,
   decidirGasto, anularMovimientoCuenta, moverAbono,
+  fijarPlazo, fijarPlazoLocal, condonarMora, anularMovimientoMora,
   getConciliacion, getEstadoCuenta, getSalud, getReferenciasDuplicadas,
 };

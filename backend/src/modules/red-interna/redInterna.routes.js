@@ -72,4 +72,14 @@ router.post('/cuenta/movimientos/:id/anular',  requireNivel('supervisor'), ctrl.
 // Reimputar un abono que entró al envío equivocado.
 router.post('/abonos/:id/mover',               requireNivel('supervisor'), ctrl.moverAbono);
 
+// ── Plazo de pago y mora de los envíos ───────────────────────────────────────
+// Fijar plazos es de la bodega (el service exige `esBodega`). Condonar y anular
+// una condonación son decisiones de plata: solo el admin, y el service pide
+// además motivo y PIN. `/mora/plazo-local` es literal y va antes de cualquier
+// ruta con `:id` bajo `/mora`.
+router.post('/mora/plazo-local',               requireNivel('supervisor'),    ctrl.fijarPlazoLocal);
+router.post('/mora/:id/anular',                requireNivel('admin_negocio'), ctrl.anularMovimientoMora);
+router.post('/remisiones/:id/plazo',           requireNivel('supervisor'),    ctrl.fijarPlazo);
+router.post('/remisiones/:id/mora/condonar',   requireNivel('admin_negocio'), ctrl.condonarMora);
+
 module.exports = router;
