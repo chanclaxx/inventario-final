@@ -1243,14 +1243,28 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > porque SÍ lo elige. La sección «Impresión directa» del modal (y de
 > `ModalEtiquetasCompra`) ofrece cuatro caminos, en el orden en que conviene
 > probarlos:
-> **A · PDF por QZ Tray** (programa gratuito que se instala en el PC de la
-> impresora): el MISMO PDF, pero con `size` en mm, `custom`, sin escalar,
-> orientación elegible (con QZ sí funciona) y rasterizado a los dpi de la
-> impresora. **B · TSPL** y **C · ZPL** por QZ Tray en crudo: la impresora
-> dibuja; `SIZE`/`GAP` (o `^PW`/`^LL`/`^MN`) van dentro del trabajo y no hay
-> driver que decida. **D · archivo .prn** sin QZ: se comparte la impresora
-> (`ETIQUETAS`) y se arrastra el .prn sobre un `imprimir-etiquetas.bat` que la
-> pantalla genera (`copy /b`).
+> **A · TSPL** (el POR DEFECTO) y **C · ZPL** por QZ Tray (programa gratuito
+> que se instala en el PC de la impresora), en crudo: la impresora dibuja;
+> `SIZE`/`GAP` (o `^PW`/`^LL`/`^MN`) van dentro del trabajo y no hay driver que
+> decida. **B · PDF por QZ Tray**: el MISMO PDF, con `size` en mm, `custom`, sin
+> escalar, orientación elegible (con QZ sí funciona) y rasterizado a los dpi de
+> la impresora — pero **depende del driver**: uno que no acepta tamaños libres
+> lo ignora y usa su papel por defecto, que en una térmica es una fila y avance
+> en blanco (el síntoma original). Por eso la pantalla lee los papeles del
+> driver (`printers.details`, `papelesDe`) y avisa si no hay uno de la medida.
+> **D · archivo .prn** sin QZ: se comparte la impresora (`ETIQUETAS`) y se
+> arrastra el .prn sobre un `imprimir-etiquetas.bat` que la pantalla genera
+> (`copy /b`).
+> **Simulado contra QZ Tray 2.3.0 real** (24-sep-2026; una instancia headless
+> propia con `-Dauthcert.override`, `-Dwebsocket.*.ports` y impresoras de
+> Windows con puerto a ARCHIVO, que se crean sin admin): la firma se aceptó sin
+> diálogos; TSPL y ZPL llegaron al puerto byte a byte; el PDF salió a escala
+> exacta y legible pero en CARTA con el driver de Microsoft Print to PDF (no
+> acepta tamaños libres); 300 etiquetas = 165 KB / 2,6 s por TSPL contra
+> 10,9 MB / 15 s por PDF rasterizado. QZ firma un HASH SHA-256 del mensaje, no
+> el trabajo: al backend llegan 64 caracteres. Chrome/Edge recientes pueden
+> pedir permiso para «acceder a otras apps y servicios de este dispositivo»;
+> negado, falla igual que sin QZ, y `mensajeQz` lo dice.
 > **Los comandos NO deciden nada**: el reparto sale de `layout.planear` y la
 > retícula de `layout.celda`, igual que el PDF. El símbolo va barra por barra
 > como `BAR`/`^GB` en puntos ENTEROS con NUESTRO codificador —el `BARCODE "128"`

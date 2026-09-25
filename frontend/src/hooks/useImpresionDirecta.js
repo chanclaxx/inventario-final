@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import {
-  conectarQz, listarImpresoras, imprimirPdfQz, imprimirComandosQz, mensajeQz,
+  conectarQz, listarImpresoras, imprimirPdfQz, imprimirComandosQz, mensajeQz, papelesDe,
 } from '../utils/qzTray';
 
 // ── Impresión directa en la impresora de etiquetas ───────────────────────────
@@ -8,10 +8,16 @@ import {
 // Tres métodos, porque cada impresora y cada driver fallan distinto y quien
 // está frente a la impresora necesita un plan B sin llamar a nadie:
 //
-//   · 'pdf'  → el mismo PDF de la vista previa, por QZ Tray, con el papel y la
-//              orientación fijados por la aplicación. Conserva el diseño exacto.
 //   · 'tspl' → comandos TSPL por QZ Tray: la impresora dibuja la etiqueta. Sin
 //              driver de por medio (TSC, DIG, Xprinter y la mayoría de térmicas).
+//              Es el POR DEFECTO: en la simulación contra QZ Tray 2.3 real los
+//              bytes llegaron idénticos al puerto, y 300 etiquetas fueron 165 KB
+//              en 2,6 s.
+//   · 'pdf'  → el mismo PDF de la vista previa, por QZ Tray, con el papel y la
+//              orientación pedidos por la aplicación. Conserva el diseño exacto,
+//              pero DEPENDE del driver: si no acepta tamaños libres, imprime en
+//              su papel por defecto (`papelesDe` avisa antes). Y pesa: 300
+//              etiquetas rasterizadas fueron 10,9 MB y 15 s.
 //   · 'zpl'  → comandos ZPL (Zebra, o impresoras en emulación ZPL).
 //
 // Y sin QZ Tray, el archivo .prn con los comandos, que se manda a la impresora
@@ -20,9 +26,9 @@ import {
 // Todo se recuerda en ESTE navegador: la impresora es de este computador.
 
 const CLAVE = 'etiquetas_impresion_directa';
-const DEFECTO = { impresora: '', metodo: 'pdf', orientacion: 'auto', compartida: 'ETIQUETAS' };
+const DEFECTO = { impresora: '', metodo: 'tspl', orientacion: 'auto', compartida: 'ETIQUETAS' };
 
-export const METODOS = ['pdf', 'tspl', 'zpl'];
+export const METODOS = ['tspl', 'pdf', 'zpl'];
 export const ORIENTACIONES = ['auto', 'portrait', 'landscape', 'reverse-landscape'];
 
 export const leerDirecta = () => {
@@ -99,12 +105,23 @@ export const useImpresionDirecta = ({ pedirPdf, pedirComandos }) => {
   const [trabajando, setTrabajando] = useState(false);
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
+  // Papeles del driver de la impresora elegida: null = no se sabe (aún, o QZ no respondió).
+  const [papeles, setPapeles] = useState(null);
 
-  const cambiar = useCallback((parcial) => setPrefs((p) => {
-    const n = { ...p, ...parcial };
-    _guardar(n);
-    return n;
-  }), []);
+  const _cargarPapeles = useCallback(async (nombre) => {
+    setPapeles(null);
+    if (!nombre) return;
+    try { setPapeles(await papelesDe(nombre)); } catch { setPapeles(null); }
+  }, []);
+
+  const cambiar = useCallback((parcial) => {
+    setPrefs((p) => {
+      const n = { ...p, ...parcial };
+      _guardar(n);
+      return n;
+    });
+    if (parcial.impresora !== undefined) _cargarPapeles(parcial.impresora);
+  }, [_cargarPapeles]);
 
   const conectar = useCallback(async () => {
     setEstado('conectando');
@@ -117,18 +134,20 @@ export const useImpresionDirecta = ({ pedirPdf, pedirComandos }) => {
       setEstado('conectado');
       // Si la guardada ya no existe, se propone una que diga «etiqueta» o la
       // térmica típica antes que la predeterminada, que suele ser la de oficina.
+      const guardada = leerDirecta().impresora;
+      const elegida = guardada && lista.includes(guardada) ? guardada
+        : (lista.find((n) => /t451|dig|label|etiquet|tsc|xprinter|zebra|zdesigner|4barcode/i.test(n)) || defecto || lista[0] || '');
       setPrefs((p) => {
-        if (p.impresora && lista.includes(p.impresora)) return p;
-        const probable = lista.find((n) => /t451|dig|label|etiquet|tsc|xprinter|zebra|zdesigner|4barcode/i.test(n));
-        const n = { ...p, impresora: probable || defecto || lista[0] || '' };
+        const n = { ...p, impresora: elegida };
         _guardar(n);
         return n;
       });
+      _cargarPapeles(elegida);
     } catch (e) {
       setEstado('sin_qz');
       setError(mensajeQz(e));
     }
-  }, []);
+  }, [_cargarPapeles]);
 
   const _correr = useCallback(async (accion, exito) => {
     setTrabajando(true);
@@ -175,7 +194,7 @@ export const useImpresionDirecta = ({ pedirPdf, pedirComandos }) => {
   }, [prefs.compartida]);
 
   return {
-    prefs, cambiar, estado, firmado, impresoras, trabajando, error, aviso,
+    prefs, cambiar, estado, firmado, impresoras, papeles, trabajando, error, aviso,
     conectar, imprimir, descargarPrn, descargarBat,
   };
 };

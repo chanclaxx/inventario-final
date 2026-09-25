@@ -56,7 +56,10 @@ const _configurarSeguridad = async (qz) => {
 export const mensajeQz = (err) => {
   const m = String(err?.message || err || '');
   if (/establish connection|Unable to connect|websocket/i.test(m)) {
-    return 'No se encontró QZ Tray en este computador. Instálalo desde qz.io/download y ábrelo (queda como un ícono junto al reloj).';
+    // Chrome/Edge recientes piden permiso para que un sitio hable con programas
+    // del propio computador («acceder a otras apps y servicios»): si se negó,
+    // el error es idéntico a no tener QZ instalado.
+    return 'No se pudo conectar con QZ Tray. Revisa que esté instalado y abierto (ícono junto al reloj; se descarga de qz.io/download). Si el navegador preguntó si este sitio puede «acceder a otras apps y servicios de este dispositivo», elige Permitir (se cambia en el candado junto a la dirección).';
   }
   if (/blocked|rejected|denied|not allowed/i.test(m)) {
     return 'QZ Tray bloqueó la impresión. Vuelve a intentarlo y en la ventana de QZ elige «Allow» (Permitir).';
@@ -85,6 +88,28 @@ export const listarImpresoras = async () => {
   ]);
   return { impresoras: Array.isArray(todas) ? todas : [todas].filter(Boolean), defecto };
 };
+
+/**
+ * Los papeles que el DRIVER dice tener, en mm. Sirve para avisar ANTES de
+ * imprimir por PDF: QZ pide el tamaño a medida, pero un driver que no acepta
+ * tamaños libres lo ignora y usa su papel por defecto (probado con el de
+ * «Microsoft Print to PDF»: salió en Carta). En una térmica eso es una fila y
+ * después avance en blanco — el síntoma de siempre. Los comandos (B/C) no
+ * dependen de esto.
+ */
+export const papelesDe = async (impresora) => {
+  const { qz } = await conectarQz();
+  const d = await qz.printers.details(impresora);
+  const det = Array.isArray(d) ? d.find((x) => x.name === impresora) : d;
+  return (det?.sizes || [])
+    .map((s) => ({ nombre: s.name, ancho: Number(s.mm?.width), alto: Number(s.mm?.height) }))
+    .filter((s) => Number.isFinite(s.ancho) && Number.isFinite(s.alto));
+};
+
+/** ¿Hay un papel de ancho × alto (en cualquier sentido, ±1 mm)? */
+export const tienePapel = (papeles, ancho, alto) => papeles.some((p) =>
+  (Math.abs(p.ancho - ancho) <= 1 && Math.abs(p.alto - alto) <= 1)
+  || (Math.abs(p.ancho - alto) <= 1 && Math.abs(p.alto - ancho) <= 1));
 
 /** Blob → base64 sin el prefijo `data:`. */
 export const blobABase64 = (blob) => new Promise((resolve, reject) => {

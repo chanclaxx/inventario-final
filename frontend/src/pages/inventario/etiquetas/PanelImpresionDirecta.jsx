@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/Button';
 import { Opcion, Segmentado } from './ui';
 import { mm } from './etiquetasUi';
 import useImpresionDirecta from '../../../hooks/useImpresionDirecta';
+import { tienePapel } from '../../../utils/qzTray';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPRESIÓN DIRECTA — para impresoras de etiquetas (térmicas)
@@ -14,7 +15,7 @@ import useImpresionDirecta from '../../../hooks/useImpresionDirecta';
 // aplicación lo arreglaba, porque la decisión la toma el navegador.
 //
 // Aquí la aplicación le habla a la impresora sin el navegador de por medio, con
-// tres métodos por QZ Tray (A, B, C) y un plan D sin instalar nada. Están en
+// tres métodos por QZ Tray (A TSPL, B PDF, C ZPL) y un plan D sin instalar nada. Están en
 // orden de lo que conviene probar: si uno falla, el siguiente.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ export function PanelImpresionDirecta({ pedirPdf, pedirComandos, cuerpo, cuerpoP
       </div>
       {d.estado === 'sin_qz' && (
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-snug">
-          {d.error} Mientras tanto puedes usar el plan D (abajo), que no necesita QZ Tray.
+          {d.error} Mientras tanto puedes usar D (abajo), que no necesita QZ Tray.
           {' '}<a href="https://qz.io/download/" target="_blank" rel="noreferrer" className="underline font-medium">Descargar QZ Tray</a>
         </p>
       )}
@@ -85,17 +86,29 @@ export function PanelImpresionDirecta({ pedirPdf, pedirComandos, cuerpo, cuerpoP
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-gray-600">Cómo mandarlo (si uno falla, prueba el siguiente)</span>
             <div className="grid gap-2">
-              <Opcion activo={d.prefs.metodo === 'pdf'} onClick={() => d.cambiar({ metodo: 'pdf' })}
-                titulo="A · PDF a tamaño exacto (recomendado)"
-                desc={`El mismo diseño de la vista previa. QZ fija el papel en ${tam || 'la medida del formato'}; no hay que crear papeles en Windows.`} />
               <Opcion activo={d.prefs.metodo === 'tspl'} onClick={() => d.cambiar({ metodo: 'tspl' })}
-                titulo="B · Comandos TSPL"
-                desc="La impresora dibuja la etiqueta sin driver de por medio. Para DIG, TSC, Xprinter y casi todas las térmicas." />
+                titulo="A · Comandos TSPL (recomendado)"
+                desc="La impresora dibuja la etiqueta: ni Chrome ni el driver deciden papel ni giro. Para DIG, TSC, Xprinter y casi todas las térmicas. El texto usa las letras de la impresora." />
+              <Opcion activo={d.prefs.metodo === 'pdf'} onClick={() => d.cambiar({ metodo: 'pdf' })}
+                titulo="B · PDF a tamaño exacto"
+                desc={`El diseño idéntico a la vista previa. QZ le pide al driver el papel de ${tam || 'la medida del formato'}; funciona si el driver acepta ese tamaño. Más lento en tandas grandes.`} />
               <Opcion activo={d.prefs.metodo === 'zpl'} onClick={() => d.cambiar({ metodo: 'zpl' })}
                 titulo="C · Comandos ZPL"
-                desc="Para Zebra o impresoras en modo ZPL. Úsalo si con B la impresora saca letras sueltas o nada." />
+                desc="Para Zebra o impresoras en modo ZPL. Úsalo si con A la impresora saca letras sueltas o nada." />
             </div>
           </div>
+
+          {d.prefs.metodo === 'pdf' && papel && Array.isArray(d.papeles) && d.papeles.length > 0
+            && !tienePapel(d.papeles, papel.ancho, papel.alto) && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-snug">
+              <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+              <span>
+                El driver de esta impresora no tiene un papel de {tam}. QZ lo pide igual, pero si el driver no lo
+                acepta imprime en su papel por defecto: una fila y después avance en blanco. Usa <strong>A</strong>, o
+                crea ese papel en las Preferencias de impresión de la impresora.
+              </span>
+            </p>
+          )}
 
           {d.prefs.metodo === 'pdf' ? (
             <div className="flex flex-col gap-1">
