@@ -1232,6 +1232,48 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > símbolo; la 19, que la hoja de prueba sale en todos los formatos × 2
 > orientaciones; la 20, el aviso de varias filas por página).
 >
+> **Impresión DIRECTA: sin el navegador de por medio** (`etiquetas.comandos.js`,
+> `etiquetas.qz.js`, `utils/qzTray.js`, `hooks/useImpresionDirecta.js`,
+> `PanelImpresionDirecta.jsx`; sep-2026). El rediseño de arriba dejó el PDF
+> correcto, pero con la DIG T451B seguía saliendo mal: una tira de 3 columnas se
+> imprimía como 3 filas y, en «hoja», con filas en blanco. **El PDF no era el
+> problema**: Chrome imprime sobre el papel que tenga el driver, ignora la
+> orientación de Windows y GIRA la página cuando no calza. Ninguna página web
+> puede elegir el papel, y el «Barcode» que usaba el cliente funcionaba justo
+> porque SÍ lo elige. La sección «Impresión directa» del modal (y de
+> `ModalEtiquetasCompra`) ofrece cuatro caminos, en el orden en que conviene
+> probarlos:
+> **A · PDF por QZ Tray** (programa gratuito que se instala en el PC de la
+> impresora): el MISMO PDF, pero con `size` en mm, `custom`, sin escalar,
+> orientación elegible (con QZ sí funciona) y rasterizado a los dpi de la
+> impresora. **B · TSPL** y **C · ZPL** por QZ Tray en crudo: la impresora
+> dibuja; `SIZE`/`GAP` (o `^PW`/`^LL`/`^MN`) van dentro del trabajo y no hay
+> driver que decida. **D · archivo .prn** sin QZ: se comparte la impresora
+> (`ETIQUETAS`) y se arrastra el .prn sobre un `imprimir-etiquetas.bat` que la
+> pantalla genera (`copy /b`).
+> **Los comandos NO deciden nada**: el reparto sale de `layout.planear` y la
+> retícula de `layout.celda`, igual que el PDF. El símbolo va barra por barra
+> como `BAR`/`^GB` en puntos ENTEROS con NUESTRO codificador —el `BARCODE "128"`
+> del firmware reparte los juegos B/C a su manera y el ancho ya no sería el que
+> calculó el plano—. El texto usa las fuentes internas: en TSPL las de mapa de
+> bits (monoespaciadas, así se sabe cuántas letras caben; se encogen antes de
+> cortar y el código legible **nunca** se corta), CP850 para tildes y ñ; en ZPL
+> la fuente 0 con `^FB` y `^CI28`. La calibración: desvío = puntos, 180° =
+> `DIRECTION`/`^POI`, y la escala NO aplica (un punto es un punto). Sin dpi se
+> asume 203.
+> **La firma de QZ**: sin certificado QZ pregunta «Allow» en cada trabajo. El
+> certificado propio (público) está en `etiquetas/qz-certificado.pem` y se copia
+> en cada PC como `C:\Program Files\QZ Tray\override.crt`; la clave privada vive
+> SOLO en Railway (`QZ_PRIVATE_KEY`, PEM o base64). Sin la variable,
+> `/qz/certificado` responde 404 y se imprime igual, preguntando: la feature no
+> depende de ella. `QZ_CERTIFICATE` permite cambiar el certificado sin desplegar.
+> El certificado y la clave se generaron el 24-sep-2026 (vence 2058); la clave
+> NO está en el repo.
+> Prueba: `59-etiquetas-comandos` (34; decodifica los 53 códigos de barras de
+> todos los formatos a 203 y 300 dpi desde los rectángulos, reconstruye los QR,
+> mide que nada se salga de su etiqueta con el ancho real de las fuentes, y
+> verifica la firma con la clave en PEM, base64 y con `\n` escapados).
+>
 > **Todo nodo nace con su código** (`utils/codigoAuto.util.js`, `codigo_auto`):
 > antes un producto nacía sin código y había que acordarse de ir a Etiquetas →
 > «Generar códigos» antes de poder escanearlo. Ahora, con el código único
@@ -2074,6 +2116,7 @@ SUPABASE_URL, SUPABASE_SERVICE_KEY                   # backup automático
 R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_URL, R2_BUCKET
                                                      # fotos del catálogo web
 CATALOGO_URL, CATALOGO_REVALIDATE_SECRET             # refresco inmediato del catálogo
+QZ_PRIVATE_KEY                                       # etiquetas: QZ Tray imprime sin preguntar
 ```
 
 > **Refresco del catálogo web.** La app pública cachea su HTML 30 min (ISR) para

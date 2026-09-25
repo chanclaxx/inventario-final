@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Printer, Download, AlertTriangle, Wand2, Check, ChevronRight, Package,
-  Ruler, Palette, Settings2, ExternalLink,
+  Ruler, Palette, Settings2, ExternalLink, Zap,
 } from 'lucide-react';
 import { Modal }       from '../../components/ui/Modal';
 import { Button }      from '../../components/ui/Button';
@@ -15,6 +15,7 @@ import { getUbicaciones }   from '../../api/ubicaciones.api';
 import api                  from '../../api/axios.config';
 import {
   getFormatosEtiqueta, getCatalogoEtiquetas, getNodosEtiqueta, planEtiquetas, generarCodigosEtiqueta,
+  pdfEtiquetas, comandosEtiquetas,
 } from '../../api/etiquetas.api';
 import { useAuth }        from '../../context/useAuth';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
@@ -23,6 +24,7 @@ import { Opcion, Seccion, Casilla } from './etiquetas/ui';
 import { SelectorFormato } from './etiquetas/SelectorFormato';
 import { PanelDiseno }     from './etiquetas/PanelDiseno';
 import { PanelImpresora }  from './etiquetas/PanelImpresora';
+import { PanelImpresionDirecta } from './etiquetas/PanelImpresionDirecta';
 import { resolverElegido, resumenCalibracion, mm, TEXTO_AVISO, AVISOS_GRAVES } from './etiquetas/etiquetasUi';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +216,7 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
   // mismas casillas en una plancha nueva.
   const [desde, setDesde] = useState(1);
 
-  const [abiertas, setAbiertas] = useState({ papel: true, diseno: false, impresora: false });
+  const [abiertas, setAbiertas] = useState({ papel: true, diseno: false, impresora: false, directa: false });
   const alternarSeccion = (k) => setAbiertas((a) => ({ ...a, [k]: !a[k] }));
 
   // ── Selección ──────────────────────────────────────────────────────────────
@@ -560,6 +562,15 @@ export function ModalEtiquetas({ onClose, nodoInicial = null, ubicacionActiva = 
               generando={generando}
               onImprimirPrueba={() => imprimir(cuerpoPrueba)}
               onDescargarPrueba={() => descargar(cuerpoPrueba, 'prueba-alineacion.pdf')}
+            />
+          </Seccion>
+
+          <Seccion icon={Zap} titulo="Impresión directa" resumen="impresora de etiquetas · QZ Tray"
+            abierta={abiertas.directa} onAlternar={() => alternarSeccion('directa')}>
+            <PanelImpresionDirecta
+              pedirPdf={pdfEtiquetas} pedirComandos={comandosEtiquetas}
+              cuerpo={cuerpo} cuerpoPrueba={cuerpoPrueba} plan={plan}
+              total={plan?.total || 0} bloqueado={!!errorPlan}
             />
           </Seccion>
 

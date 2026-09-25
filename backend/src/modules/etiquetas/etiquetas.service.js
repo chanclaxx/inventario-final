@@ -294,6 +294,32 @@ const construirPdf = async (negocioId, sucursalId, body, res) => {
   });
 };
 
+/**
+ * Las etiquetas como COMANDOS de impresora (TSPL o ZPL) en vez de PDF: para
+ * imprimir directo con QZ Tray, o mandar el archivo .prn a la impresora sin
+ * pasar por el navegador ni por el papel del driver. Ver etiquetas.comandos.js.
+ * Mismo cuerpo que el PDF, más `lenguaje`.
+ */
+const LENGUAJES = ['tspl', 'zpl'];
+const _lenguaje = (body) => (LENGUAJES.includes(body.lenguaje) ? body.lenguaje : 'tspl');
+
+const construirComandos = async (negocioId, sucursalId, body) => {
+  const { generarComandos } = require('./etiquetas.comandos');
+  const lenguaje = _lenguaje(body);
+  if (body.prueba === true) {
+    const { formato, op } = await _base(negocioId, sucursalId, body);
+    return {
+      nombre: `prueba-alineacion-${lenguaje}.prn`,
+      datos:  generarComandos({ lenguaje, formato, opciones: op, prueba: true }),
+    };
+  }
+  const { formato, op, etiquetas } = await _preparar(negocioId, sucursalId, body);
+  return {
+    nombre: `etiquetas-${new Date().toISOString().slice(0, 10)}-${lenguaje}.prn`,
+    datos:  generarComandos({ lenguaje, etiquetas, formato, opciones: op }),
+  };
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Generación masiva de códigos
 // ─────────────────────────────────────────────────────────────────────────────
@@ -567,8 +593,19 @@ const construirPdfCompra = async (negocioId, usuario, compraId, body, res) => {
   });
 };
 
+const construirComandosCompra = async (negocioId, usuario, compraId, body) => {
+  const { generarComandos } = require('./etiquetas.comandos');
+  const lenguaje = _lenguaje(body);
+  const { compra, formato, op, etiquetas } = await _prepararCompra(negocioId, usuario, compraId, body);
+  return {
+    nombre: `etiquetas-compra-${compra.numero ?? compra.id}-${lenguaje}.prn`,
+    datos:  generarComandos({ lenguaje, etiquetas, formato, opciones: op }),
+  };
+};
+
 module.exports = {
   listarFormatos, catalogo, listar, planear, construirPdf, generarCodigos,
   lineasDeCompra, planearCompra, construirPdfCompra,
+  construirComandos, construirComandosCompra,
   MAX_ETIQUETAS, MAX_CODIGOS_POR_TANDA,
 };

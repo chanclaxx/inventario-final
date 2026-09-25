@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Printer, Download, AlertTriangle, CheckCircle2, ExternalLink, Truck, Tag, Info,
+  Printer, Download, AlertTriangle, CheckCircle2, ExternalLink, Truck, Tag, Info, Zap,
 } from 'lucide-react';
 import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import {
-  getEtiquetasCompra, planEtiquetasCompra, pdfEtiquetasCompra,
+  getEtiquetasCompra, planEtiquetasCompra, pdfEtiquetasCompra, comandosEtiquetasCompra,
 } from '../../api/etiquetas.api';
 import useEtiquetas, { leerPreferencias, calibracionDe } from '../../hooks/useEtiquetas';
 import { resolverElegido, TEXTO_AVISO, AVISOS_GRAVES } from './etiquetas/etiquetasUi';
+import { Seccion } from './etiquetas/ui';
+import { PanelImpresionDirecta } from './etiquetas/PanelImpresionDirecta';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ETIQUETAS DE UNA COMPRA — al recibir, y para reimprimir
@@ -46,6 +48,8 @@ export function ModalEtiquetasCompra({ compraId, onClose, recienRegistrada = fal
 
   const pedirPdf = useCallback((body) => pdfEtiquetasCompra(compraId, body), [compraId]);
   const { generando, error, imprimir, descargar, previsualizar, abrir } = useEtiquetas(pedirPdf);
+  const pedirComandos = useCallback((body) => comandosEtiquetasCompra(compraId, body), [compraId]);
+  const [directaAbierta, setDirectaAbierta] = useState(false);
 
   const { data, isLoading, isError, error: errorCarga } = useQuery({
     queryKey: ['etiquetas-compra', compraId],
@@ -287,6 +291,14 @@ export function ModalEtiquetasCompra({ compraId, onClose, recienRegistrada = fal
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <Seccion icon={Zap} titulo="Impresión directa" resumen="impresora de etiquetas · QZ Tray"
+            abierta={directaAbierta} onAlternar={() => setDirectaAbierta((v) => !v)}>
+            <PanelImpresionDirecta
+              pedirPdf={pedirPdf} pedirComandos={pedirComandos}
+              cuerpo={cuerpo} plan={plan} total={total} bloqueado={!!errorPlan}
+            />
+          </Seccion>
 
           {recienRegistrada && (
             <p className="text-[11px] text-gray-400">

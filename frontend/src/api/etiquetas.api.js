@@ -61,6 +61,22 @@ export const planEtiquetasCompra = (compraId, body) => api.post(`/etiquetas/comp
 export const pdfEtiquetasCompra = (compraId, body) =>
   api.post(`/etiquetas/compra/${compraId}/pdf`, body, { responseType: 'blob', timeout: 180000 });
 
+// ── Impresión directa ────────────────────────────────────────────────────────
+// Las mismas etiquetas (mismo cuerpo) como COMANDOS de la impresora, `lenguaje`
+// 'tspl' o 'zpl': se mandan con QZ Tray o se descargan como .prn. Y la firma
+// que QZ Tray pide para no preguntar permiso en cada impresión (404 = sin
+// certificado configurado: se imprime igual, preguntando).
+
+export const comandosEtiquetas = (body) =>
+  api.post('/etiquetas/comandos', body, { responseType: 'blob', timeout: 180000 });
+
+export const comandosEtiquetasCompra = (compraId, body) =>
+  api.post(`/etiquetas/compra/${compraId}/comandos`, body, { responseType: 'blob', timeout: 180000 });
+
+export const qzCertificado = () => api.get('/etiquetas/qz/certificado', { responseType: 'text' });
+
+export const qzFirmar = (datos) => api.post('/etiquetas/qz/firmar', { datos }, { responseType: 'text' });
+
 /** Asigna código a los nodos seleccionados que no tienen. Solo admin_negocio. */
 export const generarCodigosEtiqueta = (body) =>
   api.post('/etiquetas/codigos', body, { timeout: 120000 });

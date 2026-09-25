@@ -40,6 +40,13 @@ router.get('/nodos',  ctrl.getNodos);
 router.post('/plan',  ctrl.postPlan);
 router.post('/pdf',   ctrl.postPdf);
 
+// Impresión directa: las mismas etiquetas como comandos de la impresora (TSPL
+// o ZPL), y la firma que QZ Tray pide para no preguntar en cada impresión.
+// Ver etiquetas.comandos.js y etiquetas.qz.js.
+router.post('/comandos',        ctrl.postComandos);
+router.get ('/qz/certificado',  ctrl.getQzCertificado);
+router.post('/qz/firmar',       ctrl.postQzFirmar);
+
 // Generar códigos ESCRIBE en los tres niveles del árbol. Asignar el código de un
 // atributo o una variante uno por uno ya exige `admin_negocio` (ver
 // variantes-producto.routes), así que hacerlo en masa no puede pedir menos: con
@@ -70,5 +77,6 @@ const requireCodigoProveedorActivo = async (req, res, next) => {
 router.get ('/compra/:id',      requireCodigoProveedorActivo, ctrl.getCompra);
 router.post('/compra/:id/plan', requireCodigoProveedorActivo, ctrl.postPlanCompra);
 router.post('/compra/:id/pdf',  requireCodigoProveedorActivo, ctrl.postPdfCompra);
+router.post('/compra/:id/comandos', requireCodigoProveedorActivo, ctrl.postComandosCompra);
 
 module.exports = router;

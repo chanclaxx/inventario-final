@@ -86,7 +86,43 @@ const postPdfCompra = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Impresión directa (TSPL / ZPL, y la firma de QZ Tray) ────────────────────
+
+const _enviarComandos = (res, { nombre, datos }) => {
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+  res.send(datos);
+};
+
+const postComandos = async (req, res, next) => {
+  try {
+    if (!_exigirSucursal(req, res)) return;
+    _enviarComandos(res, await service.construirComandos(req.user.negocio_id, req.sucursal_id, req.body || {}));
+  } catch (err) { next(err); }
+};
+
+const postComandosCompra = async (req, res, next) => {
+  try {
+    _enviarComandos(res, await service.construirComandosCompra(req.user.negocio_id, _usuario(req), req.params.id, req.body || {}));
+  } catch (err) { next(err); }
+};
+
+const qz = require('./etiquetas.qz');
+
+const getQzCertificado = (req, res) => {
+  const cert = qz.certificado();
+  if (!cert) return res.status(404).json({ ok: false, error: 'Sin certificado de QZ Tray configurado' });
+  res.type('text/plain').send(cert);
+};
+
+const postQzFirmar = (req, res) => {
+  const firma = qz.firmar(req.body?.datos);
+  if (!firma) return res.status(404).json({ ok: false, error: 'Sin clave de QZ Tray configurada' });
+  res.type('text/plain').send(firma);
+};
+
 module.exports = {
   getFormatos, getCatalogo, getNodos, postPlan, postPdf, postGenerarCodigos,
   getCompra, postPlanCompra, postPdfCompra,
+  postComandos, postComandosCompra, getQzCertificado, postQzFirmar,
 };
