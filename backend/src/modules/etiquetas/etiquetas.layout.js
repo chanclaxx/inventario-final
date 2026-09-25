@@ -293,9 +293,11 @@ const planear = (wPt, hPt, item, op = {}) => {
   // Código legible, siempre. Debajo del símbolo (apilado) o en la columna de
   // texto (lateral).
   texto('codigo', item.codigo, { mono: true });
-  // Pegado al código del producto y con prefijo: dos códigos monoespaciados uno
-  // encima del otro, sin rótulo, no hay quien sepa cuál es cuál.
-  if (activo.proveedor) texto('proveedor', `Prov. ${String(item.codigo_proveedor).trim()}`, { mono: true });
+  // El código del proveedor va SOLO, sin rótulo. Llevó el prefijo «Prov.» y el
+  // negocio lo prohibió (25-sep-2026): la etiqueta la ve el cliente y no puede
+  // decir de quién se compró. Ninguna impresión —PDF, TSPL o ZPL, todas salen
+  // de este plano— puede volver a ponerle una palabra delante.
+  if (activo.proveedor) texto('proveedor', String(item.codigo_proveedor).trim(), { mono: true });
   if (activo.precio) texto('precio', item.precio, { bold: true, esPrecio: true });
   if (activo.pie)    texto('pie', textoPie, { gris: true });
 

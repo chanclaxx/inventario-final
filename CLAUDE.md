@@ -1411,7 +1411,10 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > exactamente como antes.
 > **Qué va en la etiqueta**: el SÍMBOLO sigue siendo el código pelado del
 > producto (o el IMEI de un equipo) —el lector es un teclado y `BarraEscaneo`
-> resuelve eso— y el del proveedor va como TEXTO debajo («Prov. DIS-…»). Es el
+> resuelve eso— y el del proveedor va como TEXTO debajo, **solo el código**
+> (`DIS-900-CAL-003`): llevó el prefijo «Prov.» y el negocio lo prohibió
+> (25-sep-2026) — la etiqueta la ve el cliente, y **ninguna impresión puede
+> decir «Prov»**; la suite 49 lo exige sobre el PDF de verdad. Es el
 > ÚLTIMO texto en caer cuando no cabe (`ORDEN_SACRIFICIO`); sin
 > `codigo_proveedor` en el item el plano es idéntico al de siempre.
 > **El registro que permite reimprimir ES la compra**: `GET/POST

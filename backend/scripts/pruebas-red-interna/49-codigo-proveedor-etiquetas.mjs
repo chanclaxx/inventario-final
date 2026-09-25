@@ -125,7 +125,7 @@ seccion('1. Sin columnas y sin la clave, NADA cambia');
   const antes = layout.planear(w, h, ITEM, op);
   const conMostrar = layout.planear(w, h, ITEM, { ...op, mostrar: { ...op.mostrar, proveedor: true } });
   check('★ sin codigo_proveedor en el item, el plano es idéntico aunque se pida', JSON.stringify(conMostrar) === JSON.stringify(antes), true);
-  check('y no hay ningún bloque de proveedor', antes.bloques.some((b) => String(b.texto).startsWith('Prov.')), false);
+  check('y no hay ningún bloque de proveedor', antes.bloques.some((b) => /prov/i.test(String(b.texto))), false);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -319,13 +319,15 @@ let compraId;
     etiquetas.construirPdfCompra(1, ADMIN, compraId, body, resFalso(ok)).catch(ko);
   }));
   check('★ sale un PDF', buf.subarray(0, 5).toString('latin1'), '%PDF-');
-  check('★ cada etiqueta lleva el código del proveedor', lista.filter((t) => t === 'Prov. DIS-900-CAL-003').length, 8);
+  check('★ cada etiqueta lleva el código del proveedor', lista.filter((t) => t === 'DIS-900-CAL-003').length, 8);
+  // Decisión del negocio (25-sep-2026): la palabra «Prov» no sale en NINGUNA etiqueta.
+  check('★ ninguna etiqueta dice «Prov»', lista.some((t) => /prov/i.test(t)), false);
   check('★ y el código del producto legible (el símbolo es ese mismo)', [lista.filter((t) => t === 'ACC-AUD-BLA-002').length, lista.filter((t) => t === '356000000000011').length], [4, 1]);
 
   const { lista: sinProv } = await textosDelPdf(() => new Promise((ok, ko) => {
     etiquetas.construirPdfCompra(1, ADMIN, compraId, { ...body, mostrar: { ...body.mostrar, proveedor: false } }, resFalso(ok)).catch(ko);
   }));
-  check('pedir sin proveedor lo quita', sinProv.some((t) => t.startsWith('Prov.')), false);
+  check('pedir sin proveedor lo quita', sinProv.some((t) => t.includes('DIS-900-CAL-003')), false);
 
   await q(`UPDATE compras SET estado = 'Cancelada' WHERE id = $1`, [compraId]);
   const e409 = await falla(() => etiquetas.planearCompra(1, ADMIN, compraId, body));
@@ -347,7 +349,7 @@ seccion('8. Entrada de bodega sin proveedor: el código llega al confirmar');
   const { lista } = await textosDelPdf(() => new Promise((ok, ko) => {
     etiquetas.construirPdfCompra(1, ADMIN, c.id, { formato: 'a4-5x13' }, resFalso(ok)).catch(ko);
   }));
-  check('y el PDF no inventa un «Prov.» vacío', [lista.filter((t) => t === 'ACC-EST-001').length, lista.some((t) => t.startsWith('Prov.'))], [2, false]);
+  check('y el PDF no inventa un «Prov.» vacío', [lista.filter((t) => t === 'ACC-EST-001').length, lista.some((t) => /prov/i.test(t))], [2, false]);
 
   // Administración confirma y asigna el proveedor.
   await q(`UPDATE compras SET proveedor_id = $1 WHERE id = $2`, [idAndina, c.id]);
@@ -365,7 +367,7 @@ seccion('9. En una etiqueta chica, el proveedor es lo último que cae');
   const op = { simbologia: 'barras', mostrar: { nombre: true, variante: true, precio: true } };
   const chica = layout.planear(32 * MM, 19 * MM, ITEM, op);
   const textos = chica.bloques.map((b) => b.texto);
-  check('★ en 32 × 19 sigue estando el proveedor', textos.includes('Prov. DIS-900-CAL-003'), true);
+  check('★ en 32 × 19 sigue estando el proveedor', textos.includes('DIS-900-CAL-003'), true);
   check('★ y el código legible', textos.includes('ACC-AUD-BLA-002'), true);
   check('lo que cayó se avisa', chica.avisos.filter((a) => a.startsWith('sin_espacio_')).length > 0, true);
   check('el proveedor no está entre lo que cayó', chica.avisos.includes('sin_espacio_proveedor'), false);
