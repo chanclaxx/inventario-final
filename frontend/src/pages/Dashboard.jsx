@@ -6,7 +6,7 @@ import { formatCOP } from '../utils/formatters';
 import { Spinner } from '../components/ui/Spinner';
 import {
   TrendingUp, FileText, Package, Handshake,
-  CreditCard, ShoppingCart, AlertTriangle, CalendarClock, Truck
+  CreditCard, ShoppingCart, AlertTriangle, CalendarClock, Truck, Hourglass
 } from 'lucide-react';
 
 function StatCard({ icon, label, valor, sub, color = 'blue', onClick }) {
@@ -16,6 +16,7 @@ function StatCard({ icon, label, valor, sub, color = 'blue', onClick }) {
     yellow: 'bg-yellow-50 text-yellow-600',
     red:    'bg-red-50 text-red-600',
     purple: 'bg-purple-50 text-purple-600',
+    indigo: 'bg-indigo-50 text-indigo-600',
   };
 
   return (
@@ -61,6 +62,8 @@ export default function Dashboard() {
   // red interna y cuando la sucursal activa ES la bodega — así que basta con
   // preguntar si vino, sin repetir aquí ninguna regla de negocio.
   const bodega = data?.deuda_bodega;
+  // Null si hoy no se otorgó nada a plazo (o el backend es anterior).
+  const esperadaHoy = data?.utilidad_esperada_hoy ?? null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -166,6 +169,24 @@ export default function Dashboard() {
             sub={`${formatCOP(data?.cartera_vencida?.capital_vencido || 0)} sin cobrar`}
             color="red"
             onClick={() => navigate('/prestamos')}
+          />
+        )}
+
+        {/* Lo que van a dejar los créditos, préstamos y despachos de HOY cuando
+            se paguen completos. Es una proyección: la utilidad real se cuenta
+            al cobrar. Solo aparece si hoy se dio algo a plazo. */}
+        {esperadaHoy && (
+          <StatCard
+            icon={Hourglass}
+            label="Utilidad por generar hoy"
+            valor={formatCOP(esperadaHoy.total.esperada)}
+            sub={[
+              esperadaHoy.creditos  && `${esperadaHoy.creditos.cantidad} crédito(s)`,
+              esperadaHoy.prestamos && `${esperadaHoy.prestamos.cantidad} préstamo(s)`,
+              esperadaHoy.envios    && `${esperadaHoy.envios.cantidad} despacho(s)`,
+            ].filter(Boolean).join(' · ') + ' · cuando se paguen'}
+            color="indigo"
+            onClick={() => navigate('/reportes')}
           />
         )}
       </div>

@@ -49,6 +49,7 @@ node scripts/pruebas-red-interna/54-tecnicos-externos.mjs
 node scripts/pruebas-red-interna/55-pdf-red-interna.mjs
 node scripts/pruebas-red-interna/60-mora-envios.mjs
 node scripts/pruebas-red-interna/63-reserva-transito.mjs
+node scripts/pruebas-red-interna/64-utilidad-esperada.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un

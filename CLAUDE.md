@@ -1851,6 +1851,22 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > el envío desde sin pagar hasta saldado, y la 10 comprueba que una remesa en
 > tránsito no realiza utilidad).
 
+> **Utilidad ESPERADA de lo otorgado a plazo** (`reportes.getUtilidadEsperadaRango`,
+> sección «Utilidad por generar» de la pestaña Ventas, tarjeta «Utilidad por
+> generar hoy» del Dashboard; pedido del usuario, 26-sep-2026): la utilidad REAL
+> de créditos, préstamos y envíos a locales se cuenta al COBRAR y **no se tocó**.
+> Al lado va otra cifra, informativa: cuánto dejará lo que se dio a plazo EN EL
+> PERÍODO si se paga completo (valor − costo), por la fecha de la operación
+> (factura a crédito, préstamo, despacho —aunque vaya en camino—). El contado no
+> entra (ya es real); lo cancelado, lo que no llegó y lo devuelto tampoco. Cada
+> operación trae también su `realizada` (la regla de siempre: lo cobrado cubre
+> primero el costo). Sin costo no se inventa: `esperada: null` y `sin_costo`.
+> **Nunca se suma a ninguna utilidad real.** Mismos costos que el resto del
+> reporte (`_costoPorImei`, `SQL_COSTO_PRESTAMO` —ahora a nivel de módulo—, el
+> costo de la bodega por línea). Los créditos y préstamos activos también
+> traen `utilidad_esperada` al lado de la parcial. Devuelve null si no hubo nada
+> a plazo. Prueba: `64-utilidad-esperada` (20).
+
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),
 > nunca activa para clientes existentes.

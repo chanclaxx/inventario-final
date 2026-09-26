@@ -184,6 +184,9 @@ const getDashboard = async (sucursalId, negocioId = null) => {
     // consistente con Ventas y Análisis.
     utilidad_hoy:       Number(uActiva.utilidad_bruta),
     utilidad_pendiente: Number(uCredito.utilidad_bruta) - Number(uCredito.total_retomas),
+    // Lo que va a dejar lo que HOY se dio a plazo (créditos, préstamos,
+    // despachos), si se paga completo. No es utilidad real: esa es la de arriba.
+    utilidad_esperada_hoy: await _utilidadEsperadaHoy(sucursalId),
     prestamos_activos: {
       cantidad:    prestamosActivos.rows[0].total,
       deuda_total: prestamosActivos.rows[0].deuda_total,
@@ -214,6 +217,21 @@ const getDashboard = async (sucursalId, negocioId = null) => {
 // Dashboard es la primera pantalla del día y no puede caerse porque un negocio
 // no tenga las tablas de la red interna instaladas.
 // ─────────────────────────────────────────────────────────────────────────────
+// Solo las cifras (sin el detalle de cada documento): el Dashboard es la
+// primera pantalla del día y no carga listas. Nunca lanza.
+const _utilidadEsperadaHoy = async (sucursalId) => {
+  try {
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const u = await getUtilidadEsperadaRango(sucursalId, hoy, hoy);
+    if (!u) return null;
+    const corto = (b) => (b ? { cantidad: b.cantidad, esperada: b.esperada, sin_costo: b.sin_costo } : null);
+    return { creditos: corto(u.creditos), prestamos: corto(u.prestamos), envios: corto(u.envios), total: u.total };
+  } catch (err) {
+    console.warn('[reportes] Utilidad esperada de hoy no disponible:', err.message);
+    return null;
+  }
+};
+
 const _getDeudaBodega = async (sucursalId, negocioId) => {
   if (!negocioId || !sucursalId) return null;
   try {
@@ -521,30 +539,9 @@ const getMoraRango = async (sucursalId, desde, hasta) => {
 
 // ─── getVentasRango ───────────────────────────────────────────────────────────
 
-const getVentasRango = async (sucursalId, desde, hasta) => {
-
-  const { rows: facturas } = await pool.query(`
-    WITH retomas_por_factura AS (
-      SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
-      FROM retomas
-      GROUP BY factura_id
-    )
-    SELECT
-      f.id, f.numero, f.nombre_cliente, f.cedula, f.celular,
-      f.fecha, f.estado, f.notas,
-      COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total_venta,
-      COALESCE(r.total_retomas, 0) AS total_retomas
-    FROM facturas f
-    LEFT JOIN lineas_factura l      ON l.factura_id = f.id
-    LEFT JOIN retomas_por_factura r ON r.factura_id = f.id
-    WHERE f.sucursal_id = $1
-      AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
-      AND f.estado != 'Cancelada'
-    GROUP BY f.id, r.total_retomas
-    ORDER BY f.fecha DESC
-  `, [sucursalId, desde, hasta]);
-
-  const costoProductoCase = `
+// Costo del producto de un préstamo (alias `p`). Un serial en un local de la
+// red se mide contra su valor interno, igual que en ventas.
+const SQL_COSTO_PRESTAMO = `
     CASE
       WHEN p.imei IS NOT NULL THEN
         COALESCE(
@@ -569,7 +566,34 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
          LIMIT 1)
       ELSE NULL
     END
-  `;
+`;
+
+const getVentasRango = async (sucursalId, desde, hasta) => {
+
+  const { rows: facturas } = await pool.query(`
+    WITH retomas_por_factura AS (
+      SELECT factura_id, COALESCE(SUM(valor_retoma), 0) AS total_retomas
+      FROM retomas
+      GROUP BY factura_id
+    )
+    SELECT
+      f.id, f.numero, f.nombre_cliente, f.cedula, f.celular,
+      f.fecha, f.estado, f.notas,
+      COALESCE(SUM(${SUBTOTAL_EFECTIVO}), 0) AS total_venta,
+      COALESCE(r.total_retomas, 0) AS total_retomas
+    FROM facturas f
+    LEFT JOIN lineas_factura l      ON l.factura_id = f.id
+    LEFT JOIN retomas_por_factura r ON r.factura_id = f.id
+    WHERE f.sucursal_id = $1
+      AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      AND f.estado != 'Cancelada'
+    GROUP BY f.id, r.total_retomas
+    ORDER BY f.fecha DESC
+  `, [sucursalId, desde, hasta]);
+
+  // El costo de un préstamo vive a nivel de módulo: lo comparte la utilidad
+  // esperada (getUtilidadEsperadaRango), y dos copias acabarían midiendo distinto.
+  const costoProductoCase = SQL_COSTO_PRESTAMO;
 
   const { rows: saldadosRaw } = await pool.query(`
     WITH prestamos_sucursal AS (
@@ -671,6 +695,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       saldo_pendiente:   valorPrestamo - totalAbonado,
       utilidad_parcial:  costo !== null ? totalAbonado - costo : null,
       falta_para_cubrir: costo !== null ? Math.max(0, costo - totalAbonado) : null,
+      // Lo que dejará cuando se pague COMPLETO. Informativa: la real sigue
+      // siendo la de arriba, que solo cuenta lo cobrado.
+      utilidad_esperada: costo !== null ? valorPrestamo - costo : null,
       linea_nombre:      p.linea_nombre || null,
     };
   });
@@ -686,6 +713,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       utilidad_confirmada:  utilidadConfirmada,
       utilidad_parcial:     utilidadParcialTotal,
       por_cubrir:           porCubrirTotal,
+      utilidad_esperada:    activos.reduce((s, p) => (p.utilidad_esperada !== null ? s + p.utilidad_esperada : s), 0),
       total_saldados:       saldados.length,
       total_activos:        activos.length,
     },
@@ -707,6 +735,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
         resumen:  { utilidad_confirmada: 0, total_saldados: 0 },
       },
       mora: await getMoraRango(sucursalId, desde, hasta),
+      // Un período de puros préstamos o despachos también tiene utilidad por
+      // generar, aunque no haya una sola factura.
+      utilidad_esperada: await getUtilidadEsperadaRango(sucursalId, desde, hasta),
     };
   }
 
@@ -993,6 +1024,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     costo_total:       Number(r.costo_total),
     utilidad_parcial:  Number(r.utilidad_parcial),
     falta_para_cubrir: Number(r.falta_para_cubrir),
+    // Lo que dejará cuando se pague completo (informativa, no se suma a nada).
+    utilidad_esperada: Number(r.valor_total) - Number(r.costo_total),
     saldo_pendiente:   Math.max(0, Number(r.valor_total) - Number(r.cuota_inicial) - Number(r.total_abonado)),
   }));
 
@@ -1003,6 +1036,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       saldo_pendiente:   creditosActivos.reduce((s, c) => s + c.saldo_pendiente, 0),
       utilidad_parcial:  creditosActivos.reduce((s, c) => s + c.utilidad_parcial, 0),
       falta_para_cubrir: creditosActivos.reduce((s, c) => s + c.falta_para_cubrir, 0),
+      utilidad_esperada: creditosActivos.reduce((s, c) => s + c.utilidad_esperada, 0),
       detalle:           creditosActivos,
     },
     resumen: {
@@ -1063,6 +1097,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   return {
     facturas: facturasCompletas, resumen, prestamos, servicios,
     creditos: creditosData, mora, red_interna: redInternaConMora,
+    // Lo que va a dejar lo otorgado a plazo en el período, si se paga completo.
+    // Aparte, informativa: nunca se suma a la utilidad real.
+    utilidad_esperada: await getUtilidadEsperadaRango(sucursalId, desde, hasta),
     obsequios: obsequiosRango,
   };
 };
@@ -1421,6 +1458,199 @@ const getMoraEnviosRango = async (sucursalId, desde, hasta) => {
     console.warn('[reportes] Mora de envíos no disponible:', err.message);
     return null;
   }
+};
+
+// ─── Utilidad ESPERADA de lo que se otorgó a plazo ───────────────────────────
+//
+// La utilidad REAL de un crédito, un préstamo o un envío a un local se cuenta
+// cuando se COBRA (lo cobrado cubre primero el costo y solo el excedente es
+// ganancia) y eso NO cambia: es lo único que de verdad entró.
+//
+// Esta es OTRA cifra, informativa: cuánto va a dejar cada operación a plazo
+// que se hizo en el período SI se paga completa (valor − costo). Responde
+// «¿cuánto negocio hice hoy?», que la utilidad real no puede responder: un día
+// de puros créditos se ve en cero hasta que alguien pague.
+//
+// Se mide por la FECHA DE LA OPERACIÓN (la factura a crédito, el préstamo, el
+// despacho), no por la del cobro. El contado no entra: su utilidad ya es real
+// el mismo día. Nunca se suma a ninguna utilidad real.
+//
+// Mismo costo que el resto del reporte: `_costoPorImei` y el nodo en cantidad
+// (créditos), `SQL_COSTO_PRESTAMO` (préstamos) y el costo de la bodega de cada
+// línea del envío. Lo que no tiene costo se cuenta aparte (`sin_costo`) en
+// vez de inventar una ganancia.
+//
+// Devuelve null si en el período no se otorgó nada a plazo.
+const getUtilidadEsperadaRango = async (sucursalId, desde, hasta) => {
+  const redRepo = require('../red-interna/redInterna.repository');
+
+  const [creditos, prestamos, envios] = await Promise.all([
+    // Créditos: facturas a crédito HECHAS en el período (no canceladas).
+    pool.query(`
+      WITH cr AS (
+        SELECT cr.id, cr.factura_id, f.numero, f.nombre_cliente, f.fecha, cr.estado,
+               cr.valor_total, cr.cuota_inicial, cr.total_abonado
+        FROM creditos cr JOIN facturas f ON f.id = cr.factura_id
+        WHERE cr.sucursal_id = $1 AND cr.estado <> 'Cancelada' AND f.estado <> 'Cancelada'
+          AND DATE(f.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      ),
+      costos AS (
+        SELECT l.factura_id,
+          SUM(CASE WHEN l.imei IS NOT NULL THEN
+                ${_costoPorImei('l.imei', 'f.sucursal_id', 'f.fecha', 'f.id')} * ${CANT_EFECTIVA}
+              ELSE COALESCE(
+                (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+                (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+                (SELECT pc.costo_unitario FROM productos_cantidad pc
+                 WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)
+              ) * ${CANT_EFECTIVA} END) AS costo,
+          COUNT(*) FILTER (WHERE l.imei IS NULL AND COALESCE(
+                (SELECT v.costo_unitario FROM variantes_atributo v WHERE v.id = l.variante_id),
+                (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id),
+                (SELECT pc.costo_unitario FROM productos_cantidad pc
+                 WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id LIMIT 1)) IS NULL
+              )::int AS lineas_sin_costo
+        FROM lineas_factura l JOIN facturas f ON f.id = l.factura_id
+        WHERE l.factura_id IN (SELECT factura_id FROM cr)
+        GROUP BY l.factura_id
+      )
+      SELECT cr.*, COALESCE(c.costo, 0) AS costo, COALESCE(c.lineas_sin_costo, 0) AS lineas_sin_costo
+      FROM cr LEFT JOIN costos c ON c.factura_id = cr.factura_id
+      ORDER BY cr.fecha DESC
+    `, [sucursalId, desde, hasta]),
+
+    // Préstamos HECHOS en el período.
+    pool.query(`
+      SELECT p.id, p.numero, p.prestatario, p.nombre_producto, p.fecha, p.estado,
+             p.valor_prestamo, p.total_abonado, ${SQL_COSTO_PRESTAMO} AS costo
+      FROM prestamos p
+      WHERE p.sucursal_id = $1 AND p.estado IN ('Activo', 'Saldado')
+        AND p.valor_prestamo > 0
+        AND DATE(p.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      ORDER BY p.fecha DESC
+    `, [sucursalId, desde, hasta]),
+
+    // Envíos DESPACHADOS en el período por esta sucursal (la bodega). Cuentan
+    // también los que van en camino: ya salieron. Lo que no llegó (Faltante) o
+    // volvió (Devuelta, cantidad_devuelta) no va a dejar nada y sale de la cuenta.
+    pool.query(`
+      WITH env AS (
+        SELECT r.id, COALESCE(r.numero, r.id) AS numero, r.estado, r.fecha_emision AS fecha,
+               su.nombre AS destino
+        FROM remisiones r JOIN sucursales su ON su.id = r.sucursal_destino_id
+        WHERE r.sucursal_origen_id = $1 AND r.tipo = 'entrega' AND r.estado <> 'Anulada'
+          AND DATE(r.fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') BETWEEN $2 AND $3
+      ),
+      lin AS (
+        SELECT lr.remision_id,
+               CASE WHEN lr.tipo = 'serial' THEN 1
+                    ELSE GREATEST(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
+                                  - COALESCE(lr.cantidad_devuelta, 0), 0) END AS unidades,
+               lr.valor_interno,
+               CASE WHEN lr.tipo = 'serial' THEN COALESCE(s.costo_compra, lr.costo_origen)
+                    ELSE lr.costo_origen END AS costo_u
+        FROM lineas_remision lr LEFT JOIN seriales s ON s.id = lr.serial_id
+        WHERE lr.remision_id IN (SELECT id FROM env)
+          AND lr.estado_linea IN ('Pendiente', 'Recibida')
+      ),
+      tot AS (
+        SELECT remision_id,
+               SUM(unidades * valor_interno) AS valor,
+               COALESCE(SUM(unidades * costo_u) FILTER (WHERE costo_u IS NOT NULL), 0) AS costo,
+               COALESCE(SUM(unidades * valor_interno) FILTER (WHERE costo_u IS NOT NULL), 0) AS valor_medible,
+               COUNT(*) FILTER (WHERE costo_u IS NULL)::int AS lineas_sin_costo
+        FROM lin WHERE unidades > 0 GROUP BY remision_id
+      ),
+      abo AS (
+        SELECT a.remision_id, SUM(a.valor) AS cobrado
+        FROM (${redRepo.SQL_ABONOS_EFECTIVOS}) a
+        WHERE a.remision_id IN (SELECT id FROM env)
+        GROUP BY a.remision_id
+      )
+      SELECT env.*, t.valor, t.costo, t.valor_medible, t.lineas_sin_costo,
+             COALESCE(abo.cobrado, 0) AS cobrado
+      FROM env JOIN tot t ON t.remision_id = env.id
+      LEFT JOIN abo ON abo.remision_id = env.id
+      ORDER BY env.fecha DESC
+    `, [sucursalId, desde, hasta]).catch((err) => {
+      // Sin las tablas de la red interna, simplemente no hay envíos.
+      if (err.code === '42P01' || err.code === '42703') return { rows: [] };
+      throw err;
+    }),
+  ]);
+
+  const n = (v) => Number(v || 0);
+  // Utilidad REALIZADA hasta hoy de esa misma operación: la regla de siempre,
+  // lo cobrado cubre primero el costo. Se muestra al lado para ver el avance.
+  const realizada = (cobrado, costo) => Math.max(0, n(cobrado) - n(costo));
+
+  const creditosDet = creditos.rows.map((c) => {
+    const valor   = n(c.valor_total);
+    const cobrado = n(c.cuota_inicial) + n(c.total_abonado);
+    return {
+      id: Number(c.id), factura_id: Number(c.factura_id), numero: c.numero,
+      persona: c.nombre_cliente, fecha: c.fecha, estado: c.estado,
+      valor, costo: n(c.costo), cobrado,
+      esperada: valor - n(c.costo),
+      realizada: realizada(cobrado, c.costo),
+      sin_costo: c.lineas_sin_costo > 0,
+    };
+  });
+  const prestamosDet = prestamos.rows.map((p) => {
+    const costo = p.costo == null ? null : n(p.costo);
+    return {
+      id: Number(p.id), numero: p.numero, persona: p.prestatario, producto: p.nombre_producto,
+      fecha: p.fecha, estado: p.estado,
+      valor: n(p.valor_prestamo), costo, cobrado: n(p.total_abonado),
+      // Sin costo no se inventa: la esperada queda en null y se cuenta aparte.
+      esperada: costo == null ? null : n(p.valor_prestamo) - costo,
+      realizada: costo == null ? null : realizada(p.total_abonado, costo),
+      sin_costo: costo == null,
+    };
+  });
+  const enviosDet = envios.rows.map((e) => ({
+    id: Number(e.id), numero: e.numero, persona: e.destino, fecha: e.fecha, estado: e.estado,
+    valor: n(e.valor), costo: n(e.costo), cobrado: n(e.cobrado),
+    // Solo sobre las líneas con costo: presentar la de todo el envío como si
+    // lo fuera diría que la bodega gana menos de lo que gana.
+    esperada: n(e.valor_medible) - n(e.costo),
+    realizada: realizada(e.cobrado, e.costo),
+    en_camino: e.estado === 'En transito',
+    sin_costo: e.lineas_sin_costo > 0,
+  }));
+
+  const grupo = (det) => {
+    if (!det.length) return null;
+    const suma = (k) => det.reduce((s, d) => s + (d[k] != null ? d[k] : 0), 0);
+    return {
+      cantidad:  det.length,
+      valor:     suma('valor'),
+      costo:     suma('costo'),
+      esperada:  suma('esperada'),
+      realizada: suma('realizada'),
+      por_realizar: Math.max(0, suma('esperada') - suma('realizada')),
+      sin_costo: det.filter((d) => d.sin_costo).length,
+      detalle:   det,
+    };
+  };
+
+  const bloques = {
+    creditos:  grupo(creditosDet),
+    prestamos: grupo(prestamosDet),
+    envios:    grupo(enviosDet),
+  };
+  const presentes = Object.values(bloques).filter(Boolean);
+  if (!presentes.length) return null;
+
+  return {
+    ...bloques,
+    total: {
+      operaciones:  presentes.reduce((s, b) => s + b.cantidad, 0),
+      esperada:     presentes.reduce((s, b) => s + b.esperada, 0),
+      realizada:    presentes.reduce((s, b) => s + b.realizada, 0),
+      por_realizar: presentes.reduce((s, b) => s + b.por_realizar, 0),
+    },
+  };
 };
 
 // ─── getProductosTop ──────────────────────────────────────────────────────────
@@ -2403,7 +2633,7 @@ const eliminarGastoFijo = async (sucursalId, id) => {
 };
 
 module.exports = {
-  getVentasALocales, getMoraEnviosRango,
+  getVentasALocales, getMoraEnviosRango, getUtilidadEsperadaRango,
   getDashboard,
   getVentasRango,
   // Lo expone la prueba 57; la pantalla lo recibe dentro de getVentasRango.

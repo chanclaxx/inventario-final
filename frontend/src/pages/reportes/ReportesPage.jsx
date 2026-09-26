@@ -19,7 +19,7 @@ import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
   Warehouse, Handshake, Wrench, CreditCard, LineChart, Users, Target, Truck,
-  Gift,
+  Gift, Hourglass,
 } from 'lucide-react';
 const PanelAnalisis   = lazy(() => import('./PanelAnalisis'));
 const PanelVendedores = lazy(() => import('./PanelVendedores'));
@@ -502,6 +502,11 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
               ✓ Costo cubierto — pendiente de saldar
             </span>
           )}
+          {!esSaldado && prestamo.utilidad_esperada != null && (
+            <span className="col-span-2 text-indigo-600 mt-0.5">
+              Dejará {formatCOP(prestamo.utilidad_esperada)} cuando se pague completo
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -842,6 +847,11 @@ const FilaCreditoActivo = ({ credito }) => {
         <span className="col-span-2 text-red-500 font-medium mt-0.5">
           Saldo pendiente: {formatCOP(saldo_pendiente)}
         </span>
+        {credito.utilidad_esperada != null && (
+          <span className="col-span-2 text-indigo-600 mt-0.5">
+            Dejará {formatCOP(credito.utilidad_esperada)} cuando se pague completo
+          </span>
+        )}
       </div>
     </div>
   );
@@ -960,6 +970,13 @@ const SeccionCreditos = ({ creditos }) => {
             <p className="text-xs opacity-60 mt-0.5">
               {activos.total} activo{activos.total !== 1 ? 's' : ''} · saldo: {formatCOP(activos.saldo_pendiente)}
             </p>
+          </div>
+        )}
+        {activos.total > 0 && activos.utilidad_esperada != null && (
+          <div className="bg-indigo-50 text-indigo-700 rounded-xl p-3">
+            <p className="text-xs font-medium opacity-70">Utilidad esperada activos</p>
+            <p className="text-lg font-bold mt-0.5">{formatCOP(activos.utilidad_esperada)}</p>
+            <p className="text-xs opacity-60 mt-0.5">si se pagan completos · no es utilidad real</p>
           </div>
         )}
         {activos.falta_para_cubrir > 0 && (
@@ -1173,6 +1190,109 @@ const SeccionVentasLocales = ({ red }) => {
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Utilidad ESPERADA de lo otorgado a plazo ─────────────────────────────────
+//
+// La utilidad REAL de un crédito, un préstamo o un despacho a un local se cuenta
+// al COBRAR y no se toca. Esto es otra cifra, al lado: cuánto va a dejar lo que
+// se dio a plazo EN EL PERÍODO si se paga completo (valor − costo). Responde
+// «¿cuánto negocio hice?», que la real no puede decir en un día de puros
+// créditos. Nunca se suma a la utilidad real; el contado no entra (ya es real).
+const ETIQUETAS_ESPERADA = {
+  creditos:  { titulo: 'Créditos',  Icn: CreditCard },
+  prestamos: { titulo: 'Préstamos', Icn: Handshake },
+  envios:    { titulo: 'Despachos a locales', Icn: Truck },
+};
+
+const SeccionUtilidadEsperada = ({ esperada }) => {
+  const [abierto, setAbierto] = useState(false);
+  if (!esperada) return null;
+  const grupos = Object.entries(ETIQUETAS_ESPERADA).filter(([k]) => esperada[k]);
+  const t = esperada.total;
+  const sinCosto = grupos.reduce((s, [k]) => s + (esperada[k].sin_costo || 0), 0);
+
+  return (
+    <div className="flex flex-col gap-3 border border-indigo-100 bg-indigo-50/40 rounded-2xl p-4">
+      <h3 className="text-sm font-semibold text-indigo-900 flex items-center gap-2">
+        <Hourglass size={15} className="text-indigo-600" />
+        Utilidad por generar de lo otorgado a plazo
+        <span className="text-xs font-normal text-indigo-600/70">
+          {t.operaciones} operación(es) del período
+        </span>
+      </h3>
+      <p className="text-xs text-indigo-700/80 -mt-1">
+        Lo que van a dejar estos créditos, préstamos y despachos <strong>cuando se paguen completos</strong>.
+        Es una proyección: la utilidad real sigue contándose solo cuando se cobra.
+      </p>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {grupos.map(([k, cfg]) => {
+          const g = esperada[k];
+          // Con un const: sin eslint-plugin-react el uso en JSX no cuenta como
+          // referencia de algo destructurado en el parámetro.
+          const Icono = cfg.Icn;
+          return (
+            <div key={k} className="bg-white border border-indigo-100 rounded-xl p-3">
+              <p className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                <Icono size={12} /> {cfg.titulo} ({g.cantidad})
+              </p>
+              <p className="text-lg font-bold text-indigo-700 mt-0.5">{formatCOP(g.esperada)}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                sobre {formatCOP(g.valor)} · ya realizada {formatCOP(g.realizada)}
+              </p>
+            </div>
+          );
+        })}
+        <div className="bg-indigo-600 text-white rounded-xl p-3">
+          <p className="text-xs font-medium opacity-80">Total por generar</p>
+          <p className="text-lg font-bold mt-0.5">{formatCOP(t.esperada)}</p>
+          <p className="text-[11px] opacity-80 mt-0.5">
+            falta realizar {formatCOP(t.por_realizar)}
+          </p>
+        </div>
+      </div>
+
+      {sinCosto > 0 && (
+        <p className="text-xs text-amber-700 flex items-center gap-1.5">
+          <Info size={12} /> {sinCosto} operación(es) tienen productos sin costo registrado: esa parte no se cuenta.
+        </p>
+      )}
+
+      <button type="button" onClick={() => setAbierto((v) => !v)}
+        className="self-start text-xs font-medium text-indigo-700 flex items-center gap-1">
+        {abierto ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        {abierto ? 'Ocultar' : 'Ver'} operación por operación
+      </button>
+
+      {abierto && (
+        <div className="flex flex-col gap-1.5">
+          {grupos.flatMap(([k, { titulo }]) => esperada[k].detalle.map((d) => (
+            <div key={`${k}-${d.id}`}
+              className="bg-white border border-gray-100 rounded-xl px-3 py-2 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-gray-800 truncate">
+                  {titulo.replace(/s$/, '').replace(/ a locales$/, '')} #{d.numero ?? d.id} · {d.persona || '—'}
+                </p>
+                <p className="text-[11px] text-gray-400">
+                  {formatFecha(d.fecha)} · valor {formatCOP(d.valor)} · cobrado {formatCOP(d.cobrado)}
+                  {d.en_camino ? ' · en camino' : ''}
+                </p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                {d.esperada == null
+                  ? <span className="text-xs text-gray-400 italic">Sin costo</span>
+                  : <p className="text-sm font-semibold text-indigo-700">{formatCOP(d.esperada)}</p>}
+                {d.esperada != null && (
+                  <p className="text-[11px] text-gray-400">realizada {formatCOP(d.realizada)}</p>
+                )}
+              </div>
+            </div>
+          )))}
         </div>
       )}
     </div>
@@ -1417,8 +1537,11 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
   const redInterna = ventasData?.red_interna ?? null;
   // Llega en null si el negocio no usa obsequios o no regaló nada en el rango.
   const obsequiosRango = ventasData?.obsequios ?? null;
+  // Lo que va a dejar lo otorgado a plazo en el período (null si no hubo nada).
+  const utilidadEsperada = ventasData?.utilidad_esperada ?? null;
 
   const hayContenido = facturas.length > 0
+    || !!utilidadEsperada
     || (prestamos && (prestamos.saldados.length > 0 || prestamos.activos.length > 0))
     || (servicios && (servicios.cerrados.length > 0 || servicios.activos.total > 0))
     || (creditos && (creditos.saldados.length > 0 || creditos.activos.total > 0))
@@ -1497,6 +1620,10 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
               </div>
             </>
           )}
+
+          {/* Lo que va a dejar lo que se dio a plazo, si se paga completo.
+              Aparte de todas las utilidades reales, que no cambian. */}
+          <SeccionUtilidadEsperada esperada={utilidadEsperada} />
 
           {/* Lo que se regaló con las ventas */}
           <SeccionObsequios
