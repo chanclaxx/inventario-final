@@ -104,9 +104,24 @@ const sqlValorInternoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null) => 
     )`;
 
 /**
+ * La fila de `seriales` que representa a un IMEI en una sucursal.
+ *
+ * Un mismo IMEI puede tener varias filas en la misma sede (una retoma que lo
+ * devolvió como «usado» a otra referencia). Se toma SIEMPRE la misma —la
+ * vendida más reciente, y si ninguna está vendida la más reciente—: el reporte
+ * la lee y la corrección de costo de Reportes la escribe, y si cada uno
+ * eligiera distinto, corregir un costo no movería la cifra que se ve.
+ */
+const ORDEN_FILA_IMEI = 's.vendido DESC, s.id DESC';
+
+/**
  * Costo de una unidad vendida, resuelto en cascada:
- *   valor interno de la remisión → costo de compra propio → promedio del
- *   producto en esa sucursal → 0.
+ *   valor interno de la remisión → costo de compra de ESA unidad → NULL.
+ *
+ * NULL significa «sin costo registrado», y el reporte lo trata como tal (no
+ * suma utilidad y lo marca). Antes caía al promedio del modelo y, sin él, a 0:
+ * un equipo sin costo salía con margen del 100 % en unas pantallas y con un
+ * costo inventado en otras, sin que ninguna lo dijera.
  */
 const sqlCostoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null, facturaAlias = null) => `
   COALESCE(
@@ -117,18 +132,9 @@ const sqlCostoPorImei = (imeiAlias, sucursalAlias, fechaAlias = null, facturaAli
       JOIN productos_serial ps ON ps.id = s.producto_id
       WHERE s.imei = ${imeiAlias}
         AND ps.sucursal_id = ${sucursalAlias}
+      ORDER BY ${ORDEN_FILA_IMEI}
       LIMIT 1
-    ),
-    (
-      SELECT AVG(s2.costo_compra)
-      FROM seriales s2
-      JOIN productos_serial ps2 ON ps2.id = s2.producto_id
-      JOIN seriales s3 ON s3.imei = ${imeiAlias}
-      WHERE s2.producto_id = s3.producto_id
-        AND ps2.sucursal_id = ${sucursalAlias}
-        AND s2.costo_compra IS NOT NULL
-    ),
-    0
+    )
   )${_extraTecnicoVenta(imeiAlias, facturaAlias)}
 `;
 
@@ -173,4 +179,5 @@ module.exports = {
   sqlValorInternoPorImei,
   sqlCostoPorImei,
   sqlValorInternoEnStock,
+  ORDEN_FILA_IMEI,
 };

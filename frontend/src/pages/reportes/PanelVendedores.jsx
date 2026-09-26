@@ -99,7 +99,7 @@ const FilaVendedor = ({ vendedor, posicion }) => {
   const {
     vendedor_nombre, vendedor_activo, num_facturas, unidades,
     total_vendido, utilidad, margen_porcentaje, ticket_promedio,
-    participacion, top_productos,
+    participacion, top_productos, lineas_sin_costo,
     // Cuántas unidades regaló este vendedor. Solo unidades: el apartado de
     // obsequios no lleva costo para nadie (el backend no lo manda).
     unidades_obsequio = 0,
@@ -157,6 +157,9 @@ const FilaVendedor = ({ vendedor, posicion }) => {
               <p className={`text-sm font-bold ${utilidad >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 {formatCOP(utilidad)}
               </p>
+              {lineas_sin_costo > 0 && (
+                <p className="text-[10px] text-amber-600">{lineas_sin_costo} línea(s) sin costo</p>
+              )}
             </div>
             <div className="bg-white rounded-lg p-2 border border-gray-100">
               <p className="text-xs text-gray-400">Margen</p>
@@ -262,7 +265,10 @@ export default function PanelVendedores() {
             <MetricCard label="Total vendido" valor={formatCOP(totales.total_vendido)}
               colorClass="bg-blue-50 text-blue-700" sub={`${totales.num_facturas} factura(s)`} />
             <MetricCard label="Utilidad total" valor={formatCOP(totales.utilidad)}
-              colorClass="bg-emerald-50 text-emerald-700" sub={`${totales.unidades} u. vendidas`} />
+              colorClass="bg-emerald-50 text-emerald-700"
+              sub={totales.lineas_sin_costo > 0
+                ? `${totales.unidades} u. vendidas · ${totales.lineas_sin_costo} línea(s) sin costo`
+                : `${totales.unidades} u. vendidas`} />
             <MetricCard label="Vendedores con ventas" valor={vendedores.length}
               colorClass="bg-purple-50 text-purple-700" />
             <MetricCard label="Mejor vendedor" valor={vendedores[0]?.vendedor_nombre || '—'}
@@ -324,7 +330,7 @@ export default function PanelVendedores() {
 
           <p className="text-xs text-gray-400 flex items-center gap-1.5">
             <Package size={12} />
-            La utilidad usa los costos registrados (faltantes se cuentan como 0). La retoma no se descuenta.
+            La utilidad usa los costos registrados: lo vendido sin costo no suma utilidad y el margen se mide sobre lo que sí lo tiene. La retoma no se descuenta.
           </p>
         </>
       )}

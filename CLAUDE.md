@@ -1865,7 +1865,52 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > reporte (`_costoPorImei`, `SQL_COSTO_PRESTAMO` —ahora a nivel de módulo—, el
 > costo de la bodega por línea). Los créditos y préstamos activos también
 > traen `utilidad_esperada` al lado de la parcial. Devuelve null si no hubo nada
-> a plazo. Prueba: `64-utilidad-esperada` (20).
+> a plazo. En la lista de facturas, una a CRÉDITO sigue con utilidad real 0 pero
+> guarda `utilidad_esperada` (factura y línea) y la marca `en_credito`: la
+> pantalla pinta el número pequeño «→ $X» (`UtilidadEsperadaMini`) al lado de
+> cada badge a plazo —factura, línea, crédito, préstamo y envío sin pagar— y al
+> corregir un costo `recalcularLinea` mueve la ESPERADA, no la real (antes le
+> inventaba utilidad a un crédito sin pagar). Prueba: `64-utilidad-esperada` (28).
+
+> **Reportes: UNA utilidad, UN costo, UNA fecha** (`reportes.service.js`,
+> auditoría y arreglo del 26-sep-2026). Cada pestaña contaba a su manera y
+> daban cifras distintas para el mismo mes. Ahora:
+> **(1) El costo de una línea es `SQL_COSTO_UNIT_LINEA`** (IMEI →
+> `_costoPorImei`; si no, variante > atributo > `producto_id`; el nombre solo
+> como último recurso) y lo usan Ventas, Dashboard, Análisis, Vendedores y
+> Productos. Productos buscaba por NOMBRE (el costo de hoy del producto, no el de
+> la talla vendida) y un IMEI sin costo tomaba el PROMEDIO del modelo
+> (`costoRed.sqlCostoPorImei` ya no lo hace). **NULL = sin costo, nunca 0.**
+> **(2) Lo que no tiene costo no suma utilidad, en ninguna parte**: la línea se
+> excluye y se cuenta (`lineas_sin_costo`, `unidades_sin_costo`); un crédito o
+> un envío con costo PARCIAL mide la parte medible (lo cobrado × valor con costo
+> / valor, `_sqlCostoCreditos` → `proporcion_medible`) y sin ningún costo da
+> `null` («Sin costo»). Los márgenes se miden sobre lo vendido CON costo.
+> Vendedores contaba el faltante como costo 0 (utilidad pura del vendedor).
+> **(3) LA utilidad del período** (`_utilidadDelPeriodo` → `utilidad_periodo`
+> de `/ventas-rango`) = contado + créditos saldados + préstamos saldados +
+> servicios (pagados y garantías) + lo cobrado de los despachos a locales.
+> La serie de Análisis suma lo MISMO por período (`utilidad_desglose`), el PDF
+> contable lo imprime parte por parte, y la Proyección mide el % de costo solo
+> sobre las ventas con costo y cuenta los despachos como venta (la bodega salía
+> en 0). Mora e interés van aparte: ingreso financiero.
+> **Créditos saldados**: el costo se lee de SU factura, sea de cuando sea
+> (`SQL_CREDITOS_SALDADOS`; antes, uno vendido en junio y saldado en julio salía
+> con costo 0), y **sin facturas en el rango el reporte ya no se corta** —
+> `resumen` viene `null` pero créditos, préstamos, servicios y despachos viajan.
+> El último abono que fecha un saldo ignora los **anulados** (créditos y
+> préstamos).
+> **(4) Fechas**: los `TIMESTAMP` se guardan en hora Bogotá (el pool hace
+> `SET TIME ZONE`), así que se leen TAL CUAL: se quitó el
+> `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota'` de todo el módulo (y de
+> `servicios.repository.fechaBogota`), que corría 5 h hacia atrás y mandaba al
+> día anterior lo vendido entre 00:00 y 05:00.
+> **(5) Corregir el costo de un IMEI** escribe la MISMA fila que lee el reporte
+> (`ORDER BY costoRed.ORDEN_FILA_IMEI`; con `LIMIT 1` a secas podía tocar otra
+> fila del fan-out y la utilidad no cambiaba), y responde `COSTO_DE_BODEGA`
+> también si el equipo consignado ya se vendió.
+> Prueba: `65-reportes-coherentes` (32; la sección 1 compara Ventas contra la
+> serie de Análisis y la 8 lee el PDF instrumentando pdfkit).
 
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),

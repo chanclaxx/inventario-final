@@ -64,11 +64,17 @@ const calcularUtilidadNeta = (lineas) => {
 
 const recalcularLinea = (linea, nuevoCosto) => {
   const costoTotal = nuevoCosto * linea.cantidad;
+  const nueva      = Number(linea.subtotal) - costoTotal;
   return {
     ...linea,
     costo_unitario_compra: nuevoCosto,
     costo_total:           costoTotal,
-    utilidad:              Number(linea.subtotal) - costoTotal,
+    // En una factura a CRÉDITO la utilidad real es 0 hasta que se pague: el
+    // costo nuevo mueve solo la ESPERADA. Sin esto, corregir un costo le
+    // inventaba utilidad real a un crédito que nadie ha pagado.
+    ...(linea.en_credito
+      ? { utilidad: 0, utilidad_esperada: nueva }
+      : { utilidad: nueva }),
   };
 };
 
@@ -95,6 +101,22 @@ const ChipObsequio = () => (
     <Gift size={10} /> Obsequio
   </span>
 );
+
+// El número PEQUEÑO que va al lado de la utilidad de algo a plazo (crédito,
+// préstamo, envío a un local): cuánto dejará cuando se pague completo. No es
+// utilidad real —esa es la del badge— y ninguna suma lo usa.
+const UtilidadEsperadaMini = ({ valor }) => {
+  if (valor == null) return null;
+  return (
+    <span
+      title="Utilidad esperada: lo que dejará cuando se pague completo. No es utilidad real todavía."
+      className="text-[10px] font-medium text-indigo-600 bg-indigo-50 border border-indigo-100
+        px-1.5 py-0.5 rounded-full whitespace-nowrap"
+    >
+      → {formatCOP(valor)}
+    </span>
+  );
+};
 
 const UtilidadBadge = ({ valor, sinDato = false }) => {
   if (sinDato) {
@@ -243,6 +265,11 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
   const lineas               = factura.lineas;
   const utilidadNeta         = calcularUtilidadNeta(lineas);
   const tieneCostoIncompleto = lineas.some((i) => i.costo_unitario_compra === null);
+  // A crédito: lo que dejará si se paga completo, sumado de las líneas (así se
+  // mueve solo cuando un admin corrige un costo).
+  const esperada = factura.estado === 'Credito' && lineas.some((l) => l.en_credito)
+    ? lineas.reduce((s, l) => (l.utilidad_esperada != null ? s + l.utilidad_esperada : s), 0)
+    : null;
 
   const estadoVariant =
     factura.estado === 'Activa'  ? 'green'  :
@@ -268,11 +295,12 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
               <p className="text-xs text-gray-400">retoma: {formatCOP(factura.total_retomas)}</p>
             )}
           </div>
-          <div className="text-right hidden sm:block">
+          <div className="text-right hidden sm:flex items-center gap-1">
             <UtilidadBadge
               valor={utilidadNeta}
               sinDato={tieneCostoIncompleto && utilidadNeta === 0}
             />
+            <UtilidadEsperadaMini valor={esperada} />
           </div>
           {expandida ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
         </div>
@@ -280,7 +308,10 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
 
       <div className="flex items-center justify-between px-4 pb-2 sm:hidden">
         <span className="text-sm font-bold text-gray-900">{formatCOP(factura.total_venta)}</span>
-        <UtilidadBadge valor={utilidadNeta} sinDato={tieneCostoIncompleto && utilidadNeta === 0} />
+        <span className="flex items-center gap-1">
+          <UtilidadBadge valor={utilidadNeta} sinDato={tieneCostoIncompleto && utilidadNeta === 0} />
+          <UtilidadEsperadaMini valor={esperada} />
+        </span>
       </div>
 
       {expandida && (
@@ -338,7 +369,10 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
                     </div>
                     <div className="flex justify-between items-center col-span-2">
                       <span className="text-gray-400 font-medium">Utilidad</span>
-                      <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
+                      <span className="flex items-center gap-1">
+                        <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
+                        {!sinCosto && <UtilidadEsperadaMini valor={linea.en_credito ? linea.utilidad_esperada : null} />}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -366,8 +400,9 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
                       sinCosto ? <span className="text-gray-300 italic">N/A</span> : formatCOP(linea.costo_unitario_compra)
                     )}
                   </span>
-                  <span className="col-span-2 text-right">
+                  <span className="col-span-2 text-right flex items-center justify-end gap-1 flex-wrap">
                     <UtilidadBadge valor={linea.utilidad} sinDato={sinCosto} />
+                    {!sinCosto && <UtilidadEsperadaMini valor={linea.en_credito ? linea.utilidad_esperada : null} />}
                   </span>
                 </div>
               </div>
@@ -386,8 +421,16 @@ const FilaFactura = ({ factura, esAdmin, onCostoActualizado }) => {
             )}
             <div className="flex justify-between text-xs font-bold text-gray-800">
               <span>Utilidad productos</span>
-              <UtilidadBadge valor={utilidadNeta} sinDato={tieneCostoIncompleto && utilidadNeta === 0} />
+              <span className="flex items-center gap-1">
+                <UtilidadBadge valor={utilidadNeta} sinDato={tieneCostoIncompleto && utilidadNeta === 0} />
+                <UtilidadEsperadaMini valor={esperada} />
+              </span>
             </div>
+            {esperada != null && (
+              <p className="text-[11px] text-indigo-600 text-right">
+                A crédito: la utilidad se cuenta cuando se paga. → es lo que dejará completo.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -428,6 +471,11 @@ const FilaProducto = ({ producto, posicion }) => {
               ? <span className="italic text-gray-300">Sin costo</span>
               : <span className="font-medium text-gray-600">{formatCOP(producto.costo_unitario_promedio)}</span>}
           </span>
+          {!sinCosto && producto.unidades_sin_costo > 0 && (
+            <span className="text-xs text-amber-600">
+              {producto.unidades_sin_costo} u. sin costo (no suman)
+            </span>
+          )}
           {producto.margen_porcentaje !== null && (
             <span className={`text-xs font-medium ${producto.margen_porcentaje >= 0 ? 'text-green-600' : 'text-red-500'}`}>
               {producto.margen_porcentaje.toFixed(1)}% margen
@@ -483,7 +531,10 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
               <Info size={10} /> Sin costo
             </span>
           ) : (
-            <UtilidadBadge valor={utilidad} />
+            <span className="flex items-center gap-1">
+              <UtilidadBadge valor={utilidad} />
+              {!esSaldado && <UtilidadEsperadaMini valor={prestamo.utilidad_esperada} />}
+            </span>
           )}
         </div>
       </div>
@@ -502,11 +553,7 @@ const FilaPrestamo = ({ prestamo, tipo }) => {
               ✓ Costo cubierto — pendiente de saldar
             </span>
           )}
-          {!esSaldado && prestamo.utilidad_esperada != null && (
-            <span className="col-span-2 text-indigo-600 mt-0.5">
-              Dejará {formatCOP(prestamo.utilidad_esperada)} cuando se pague completo
-            </span>
-          )}
+
         </div>
       )}
     </div>
@@ -825,14 +872,24 @@ const FilaCreditoActivo = ({ credito }) => {
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <Badge variant="yellow">Activo</Badge>
-          {utilidad_parcial > 0
-            ? <UtilidadBadge valor={utilidad_parcial} />
-            : <span className="text-xs text-gray-400 italic">Sin utilidad aún</span>}
+          <span className="flex items-center gap-1">
+            {utilidad_parcial == null
+              ? <UtilidadBadge sinDato />
+              : utilidad_parcial > 0
+                ? <UtilidadBadge valor={utilidad_parcial} />
+                : <span className="text-xs text-gray-400 italic">Sin utilidad aún</span>}
+            <UtilidadEsperadaMini valor={credito.utilidad_esperada} />
+          </span>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-x-3 text-xs text-gray-500 pt-1 border-t border-gray-100">
-        <span>Costo: {formatCOP(costo_total)}</span>
+        <span>
+          Costo: {formatCOP(costo_total)}
+          {credito.sin_costo && utilidad_parcial != null && (
+            <span className="text-amber-600"> · hay productos sin costo</span>
+          )}
+        </span>
         <span className="text-right">Cobrado: {formatCOP(total_cobrado)}</span>
         {falta_para_cubrir > 0 && (
           <span className="col-span-2 text-amber-600 font-medium mt-0.5">
@@ -847,11 +904,7 @@ const FilaCreditoActivo = ({ credito }) => {
         <span className="col-span-2 text-red-500 font-medium mt-0.5">
           Saldo pendiente: {formatCOP(saldo_pendiente)}
         </span>
-        {credito.utilidad_esperada != null && (
-          <span className="col-span-2 text-indigo-600 mt-0.5">
-            Dejará {formatCOP(credito.utilidad_esperada)} cuando se pague completo
-          </span>
-        )}
+
       </div>
     </div>
   );
@@ -859,7 +912,10 @@ const FilaCreditoActivo = ({ credito }) => {
 
 const FilaCreditoSaldado = ({ credito }) => {
   const [expandida, setExpandida] = useState(false);
-  const sinCosto = credito.tiene_costo_incompleto;
+  // «Sin costo» solo cuando NINGÚN producto tiene costo (la utilidad es null).
+  // Con costo parcial la utilidad se mide sobre lo que sí lo tiene y se avisa.
+  const sinCosto = credito.utilidad == null;
+  const incompleto = !sinCosto && credito.tiene_costo_incompleto;
 
   return (
     <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
@@ -876,6 +932,11 @@ const FilaCreditoSaldado = ({ credito }) => {
           <p className="text-xs text-gray-400">
             Saldado: {formatFecha(credito.fecha_saldo)}
           </p>
+          {incompleto && (
+            <p className="text-xs text-amber-600 flex items-center gap-1">
+              <Info size={10} /> Hay productos sin costo: la utilidad es solo la de los que sí tienen
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3 flex-shrink-0 ml-2">
           <div className="text-right">
@@ -1065,6 +1126,9 @@ const FilaEnvioLocal = ({ envio }) => {
                   : 'sin cubrir costo'}
               </span>
             )}
+          {!envio.pagado && (
+            <UtilidadEsperadaMini valor={envio.utilidad_total ?? envio.utilidad_medible} />
+          )}
           {abierto ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
         </div>
       </button>
@@ -1207,6 +1271,56 @@ const ETIQUETAS_ESPERADA = {
   creditos:  { titulo: 'Créditos',  Icn: CreditCard },
   prestamos: { titulo: 'Préstamos', Icn: Handshake },
   envios:    { titulo: 'Despachos a locales', Icn: Truck },
+};
+
+// LA utilidad del período: la misma suma que Análisis, la Proyección y el PDF
+// (contado + créditos saldados + préstamos saldados + servicios + lo cobrado de
+// los despachos a locales). Lo que no tiene costo no suma, y se dice cuánto es.
+const PARTES_UTILIDAD = [
+  ['contado',   'Contado'],
+  ['creditos',  'Créditos saldados'],
+  ['prestamos', 'Préstamos saldados'],
+  ['servicios', 'Servicios'],
+  ['despachos', 'Despachos a locales'],
+];
+
+const TarjetaUtilidadPeriodo = ({ utilidad }) => {
+  if (!utilidad) return null;
+  const partes = PARTES_UTILIDAD.filter(([k]) => utilidad[k]);
+  const sc = utilidad.sin_costo || {};
+  const sinCosto = [
+    sc.lineas_contado && `${sc.lineas_contado} línea(s) de contado`,
+    sc.creditos && `${sc.creditos} crédito(s)`,
+    sc.prestamos && `${sc.prestamos} préstamo(s)`,
+    sc.servicios && `${sc.servicios} servicio(s)`,
+    sc.despachos && `${sc.despachos} despacho(s)`,
+  ].filter(Boolean);
+  return (
+    <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <p className="text-sm font-semibold text-emerald-800">Utilidad total del período</p>
+        <p className={`text-2xl font-bold ${utilidad.total >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+          {formatCOP(utilidad.total)}
+        </p>
+      </div>
+      {partes.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-700">
+          {partes.map(([k, label]) => (
+            <span key={k}>{label}: <strong>{formatCOP(utilidad[k])}</strong></span>
+          ))}
+        </div>
+      )}
+      {sinCosto.length > 0 && (
+        <p className="text-xs text-amber-700 flex items-start gap-1">
+          <Info size={12} className="flex-shrink-0 mt-0.5" />
+          Sin costo registrado, no suman utilidad: {sinCosto.join(', ')}.
+        </p>
+      )}
+      <p className="text-xs text-emerald-600/70">
+        La mora y el interés cobrados van aparte: son ingreso financiero, no margen.
+      </p>
+    </div>
+  );
 };
 
 const SeccionUtilidadEsperada = ({ esperada }) => {
@@ -1455,8 +1569,9 @@ const PanelResumen = ({ dashboard, loading }) => {
 
   const metricas = [
     { label: 'Ventas hoy',         valor: formatCOP(dashboard?.ventas_hoy || 0),                     colorClass: 'bg-green-50 text-green-700'    },
-    { label: 'Utilidad hoy',       valor: formatCOP(dashboard?.utilidad_hoy || 0),                   colorClass: 'bg-emerald-50 text-emerald-700' },
-    { label: 'Utilidad créditos saldados', valor: formatCOP(dashboard?.utilidad_pendiente || 0),      colorClass: 'bg-yellow-50 text-yellow-700'   },
+    { label: 'Utilidad contado hoy', valor: formatCOP(dashboard?.utilidad_hoy || 0),                 colorClass: 'bg-emerald-50 text-emerald-700',
+      sub: dashboard?.utilidad_hoy_sin_costo > 0 ? `${dashboard.utilidad_hoy_sin_costo} línea(s) sin costo no suman` : undefined },
+    { label: 'Créditos saldados hoy', valor: formatCOP(dashboard?.utilidad_creditos_saldados_hoy ?? dashboard?.utilidad_pendiente ?? 0), colorClass: 'bg-yellow-50 text-yellow-700' },
     { label: 'Facturas hoy',       valor: dashboard?.facturas_hoy || 0,                              colorClass: 'bg-blue-50 text-blue-700'       },
     { label: 'Préstamos activos',  valor: dashboard?.prestamos_activos?.cantidad || 0,               colorClass: 'bg-indigo-50 text-indigo-700'   },
     { label: 'Deuda préstamos',    valor: formatCOP(dashboard?.prestamos_activos?.deuda_total || 0), colorClass: 'bg-red-50 text-red-700'         },
@@ -1468,7 +1583,7 @@ const PanelResumen = ({ dashboard, loading }) => {
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {metricas.map((m) => (
-          <MetricCard key={m.label} label={m.label} valor={m.valor} colorClass={m.colorClass} />
+          <MetricCard key={m.label} label={m.label} valor={m.valor} colorClass={m.colorClass} sub={m.sub} />
         ))}
       </div>
       {dashboard?.pagos_hoy?.length > 0 && (
@@ -1567,13 +1682,15 @@ const PanelVentas = ({ desde, hasta, onDesde, onHasta, esAdmin }) => {
       {!isLoading && !isError && hayContenido && (
         <div className="flex flex-col gap-3">
 
+          <TarjetaUtilidadPeriodo utilidad={ventasData?.utilidad_periodo} />
+
           {/* Métricas de facturas */}
           {resumen && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <MetricCard label="Total vendido"      valor={formatCOP(resumen.total_ventas)}       colorClass="bg-green-50 text-green-700"   />
                 <MetricCard
-                  label="Utilidad neta"
+                  label="Utilidad de contado"
                   valor={formatCOP(facturas.reduce((s, f) => s + calcularUtilidadNeta(f.lineas), 0))}
                   colorClass="bg-emerald-50 text-emerald-700"
                 />

@@ -68,8 +68,11 @@ const _crearFacturaPorServicio = async (client, orden, precioServicio) => {
 
 const HOY_BOGOTA = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
 
+// El día de una columna TIMESTAMP: se guardan YA en hora Bogotá (el pool fija
+// la zona en cada conexión), así que no lleva conversión. Misma regla que
+// reportes.service.js.
 const fechaBogota = (col) =>
-  `(${col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')::date`;
+  `(${col})::date`;
 
 const COLS_CALCULADAS = `
   CASE

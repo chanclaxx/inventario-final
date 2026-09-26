@@ -621,16 +621,22 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   const facturas   = ventas.facturas || [];
   const creditos   = ventas.creditos;
   const prestamos  = ventas.prestamos;
-  const servicios  = ventas.servicios;
+  const up         = ventas.utilidad_periodo;
+  const mora       = ventas.mora?.resumen;
 
-  // Estado de resultados de ventas de contado (facturas activas)
+  // Estado de resultados de ventas de contado (facturas activas). Se cuadra
+  // sobre las líneas CON costo —ventas − costo = utilidad— y lo vendido sin
+  // costo va aparte: restar el costo conocido de TODO lo vendido presentaba
+  // esas ventas como utilidad pura.
   const activas = facturas.filter((f) => f.estado === 'Activa');
-  const ventasContado = activas.reduce((s, f) => s + Number(f.total_venta), 0);
-  const costoVentas   = activas.reduce(
-    (s, f) => s + f.lineas.reduce((a, l) => a + (l.costo_total !== null ? l.costo_total : 0), 0), 0,
-  );
-  const utilidadBruta = activas.reduce((s, f) => s + (f.utilidad_neta || 0), 0);
-  const margen = ventasContado > 0 ? (utilidadBruta / ventasContado) * 100 : 0;
+  const lineasContado = activas.flatMap((f) => f.lineas);
+  const ventasContado  = activas.reduce((s, f) => s + Number(f.total_venta), 0);
+  const ventasConCosto = lineasContado.reduce((a, l) => a + (l.costo_total !== null ? l.subtotal : 0), 0);
+  const ventasSinCosto = ventasContado - ventasConCosto;
+  const lineasSinCosto = lineasContado.filter((l) => l.costo_total === null).length;
+  const costoVentas    = lineasContado.reduce((a, l) => a + (l.costo_total !== null ? l.costo_total : 0), 0);
+  const utilidadBruta  = up?.contado ?? 0;
+  const margen = ventasConCosto > 0 ? (utilidadBruta / ventasConCosto) * 100 : 0;
 
   const fechaGeneracion = new Date().toLocaleString('es-CO', {
     day: '2-digit', month: '2-digit', year: 'numeric',
@@ -652,26 +658,62 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   // ── 1. KPIs principales ────────────────────────────────────────────────────
   y = drawKpis(doc, y, [
     { label: 'Total vendido', valor: formatCOP(resumen?.total_ventas || 0), fondo: '#EFF6FF', color: C.azul },
-    { label: 'Utilidad bruta (contado)', valor: formatCOP(utilidadBruta), fondo: C.verdeFondo, color: C.verde },
+    { label: 'Utilidad del período', valor: formatCOP(up?.total || 0), fondo: C.verdeFondo, color: C.verde },
     { label: 'Costo de ventas', valor: formatCOP(costoVentas), fondo: '#FFF7ED', color: '#C2410C' },
   ]);
 
   // ── 2. Estado de resultados resumido ───────────────────────────────────────
   y = tituloSeccion(doc, y, 'Resumen del periodo');
   y = fila(doc, y, 'Ventas de contado (facturado)', formatCOP(ventasContado));
+  if (lineasSinCosto > 0) {
+    y = fila(doc, y, `   de ellas sin costo registrado (${lineasSinCosto} línea${lineasSinCosto === 1 ? '' : 's'}, no suman utilidad)`, formatCOP(ventasSinCosto), { valorColor: C.gris });
+    y = fila(doc, y, 'Ventas de contado con costo', formatCOP(ventasConCosto));
+  }
   y = fila(doc, y, '(-) Costo de mercancía vendida', formatCOP(costoVentas), { valorColor: C.rojo });
   hLine(doc, y); y += 6;
   y = fila(doc, y, 'Utilidad bruta de ventas de contado', formatCOP(utilidadBruta), { bold: true, valorColor: C.verde });
-  y = fila(doc, y, `Margen sobre ventas de contado`, formatPct(margen), { bold: true });
+  y = fila(doc, y, `Margen sobre ventas de contado con costo`, formatPct(margen), { bold: true });
   // La retoma no reduce la utilidad (es un medio de pago / activo recibido);
   // se muestra solo como dato informativo.
   if ((resumen?.total_retomas || 0) > 0) {
     y = fila(doc, y, 'Retomas recibidas (informativo, no afecta la utilidad)', formatCOP(resumen.total_retomas), { valorColor: C.gris });
   }
   y += 4;
-  y = fila(doc, y, 'Utilidad de créditos saldados', formatCOP(resumen?.utilidad_creditos_saldados || 0));
-  y = fila(doc, y, 'Utilidad de servicios técnicos', formatCOP((servicios?.resumen?.utilidad_confirmada || 0) + (servicios?.resumen?.utilidad_garantias || 0)));
-  y = fila(doc, y, 'Utilidad de préstamos saldados', formatCOP(prestamos?.resumen?.utilidad_confirmada || 0));
+  // Las MISMAS partes de la utilidad del período que la pantalla (Ventas) y
+  // que la gráfica de abajo (Análisis): una sola definición en el servicio.
+  y = fila(doc, y, 'Utilidad de créditos saldados', formatCOP(up?.creditos || 0));
+  y = fila(doc, y, 'Utilidad de servicios técnicos', formatCOP(up?.servicios || 0));
+  y = fila(doc, y, 'Utilidad de préstamos saldados', formatCOP(up?.prestamos || 0));
+  if (up?.despachos) {
+    y = fila(doc, y, 'Utilidad de despachos a locales (lo cobrado)', formatCOP(up.despachos));
+  }
+  hLine(doc, y); y += 6;
+  y = fila(doc, y, 'Utilidad total del periodo', formatCOP(up?.total || 0), { bold: true, valorColor: (up?.total || 0) >= 0 ? C.verde : C.rojo });
+  if (up?.sin_costo?.total > 0) {
+    const sc = up.sin_costo;
+    const partes = [
+      sc.lineas_contado && `${sc.lineas_contado} línea(s) de contado`,
+      sc.creditos && `${sc.creditos} crédito(s)`,
+      sc.prestamos && `${sc.prestamos} préstamo(s)`,
+      sc.servicios && `${sc.servicios} servicio(s)`,
+      sc.despachos && `${sc.despachos} despacho(s)`,
+    ].filter(Boolean).join(', ');
+    // Nota a lo ancho (la lista puede ser larga); el alto fijo evita que
+    // PDFKit abra una página por su cuenta.
+    const nota = `Sin costo registrado, no suman utilidad: ${partes}.`;
+    doc.font(FONT.normal).fontSize(8).fillColor(C.gris);
+    const altoNota = Math.min(24, doc.heightOfString(nota, { width: CONTENT_W }));
+    doc.text(nota, MARGIN, y, { width: CONTENT_W, height: altoNota, ellipsis: true });
+    y += altoNota + 5;
+  }
+  // Ingreso financiero: no es margen comercial y no entra en la utilidad.
+  const moraCobrada = (mora?.cobrada || 0) + (ventas.red_interna?.mora?.cobrada || 0);
+  if (moraCobrada > 0) {
+    y = fila(doc, y, 'Intereses de mora cobrados (aparte de la utilidad)', formatCOP(moraCobrada), { valorColor: C.gris });
+  }
+  if ((mora?.interes_cobrado || 0) > 0) {
+    y = fila(doc, y, 'Interés corriente cobrado (aparte de la utilidad)', formatCOP(mora.interes_cobrado), { valorColor: C.gris });
+  }
   y = fila(doc, y, `Facturas en el periodo`, `${resumen?.total_facturas || 0}  (${resumen?.facturas_activas || 0} contado · ${resumen?.facturas_credito || 0} crédito)`);
   y += 10;
 

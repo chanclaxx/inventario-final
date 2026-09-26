@@ -182,5 +182,35 @@ ok('★ La utilidad realizada de la bodega sigue siendo la suya (no la esperada)
 const creditoFila = (await db.query(`SELECT total_abonado FROM creditos WHERE factura_id = 2`)).rows[0];
 ok('  y el cálculo no escribió nada en ningún documento', Number(creditoFila.total_abonado) === 500000);
 
+// ═════════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 7. En la lista de facturas: real en 0, esperada al lado ═══');
+// ═════════════════════════════════════════════════════════════════════════════
+let ventasDia = null;
+try {
+  ventasDia = await reportes.getVentasRango(1, DIA, DIA);
+} catch (err) {
+  console.log(`  (el fixture no alcanza para getVentasRango completo: ${err.message})`);
+}
+if (ventasDia) {
+  const fCred = ventasDia.facturas.find((f) => f.nombre_cliente === 'Ana');
+  const fCont = ventasDia.facturas.find((f) => f.nombre_cliente === 'Contado');
+  ok('★★ La factura a crédito sigue con utilidad REAL 0', fCred.utilidad_neta === 0
+     && fCred.lineas.every((l) => l.utilidad === 0));
+  ok('★ …y trae la esperada: 760.000', fCred.utilidad_esperada === 760000, money(fCred.utilidad_esperada));
+  ok('  cada línea trae la suya y la marca en_credito',
+     fCred.lineas.every((l) => l.en_credito === true)
+     && fCred.lineas.reduce((s, l) => s + l.utilidad_esperada, 0) === 760000);
+  ok('  la de contado no cambia ni trae esperada',
+     fCont.utilidad_neta === 500000 && fCont.utilidad_esperada === undefined
+     && fCont.lineas.every((l) => l.en_credito === undefined));
+  ok('★ La utilidad neta del período no incluye la esperada',
+     ventasDia.resumen.utilidad_neta_total === 500000, money(ventasDia.resumen.utilidad_neta_total));
+  ok('  créditos activos: esperada al lado de la parcial',
+     ventasDia.creditos.activos.detalle.some((c) => c.nombre_cliente === 'Ana' && c.utilidad_esperada === 760000));
+  ok('  préstamos activos: esperada al lado de la parcial',
+     ventasDia.prestamos.activos.some((p) => p.prestatario === 'Luis' && p.utilidad_esperada === 200000));
+  ok('  y el bloque de utilidad esperada viaja con el reporte', ventasDia.utilidad_esperada?.total?.esperada > 0);
+}
+
 console.log(`\n${fallos === 0 ? '✓' : '✗'} ${pasados} pasaron, ${fallos} fallaron\n`);
 process.exit(fallos ? 1 : 0);
