@@ -393,8 +393,35 @@ const enviosRedVencidos = async (negocioId) => {
   }
 };
 
+// ── 7. Envíos de la red que nadie recibe ─────────────────────────────────────
+//
+// Desde 20260926_reserva_transito.sql, lo que va en camino queda BLOQUEADO en
+// la sucursal que lo despachó hasta que se reciba o se anule. Un envío olvidado
+// congela esa mercancía sin que nadie lo note: este aviso es la otra mitad del
+// candado. Los días se restan en SQL, en hora de Bogotá (nunca en JavaScript).
+const enviosSinRecibir = async (negocioId, dias = 2) => {
+  const vacio = { total: 0, items: [] };
+  try {
+    const { rows } = await pool.query(`
+      SELECT r.id, COALESCE(r.numero, r.id) AS numero, r.tipo,
+             so.nombre AS origen, sd.nombre AS destino,
+             ((NOW() AT TIME ZONE 'America/Bogota')::date - (r.fecha_emision)::date)::int AS dias,
+             (SELECT COUNT(*) FROM lineas_remision lr WHERE lr.remision_id = r.id)::int AS lineas
+      FROM remisiones r
+      JOIN sucursales so ON so.id = r.sucursal_origen_id
+      JOIN sucursales sd ON sd.id = r.sucursal_destino_id
+      WHERE r.negocio_id = $1 AND r.estado = 'En transito'
+        AND ((NOW() AT TIME ZONE 'America/Bogota')::date - (r.fecha_emision)::date) >= $2
+      ORDER BY r.fecha_emision
+    `, [negocioId, dias]);
+    return { total: rows.length, items: rows };
+  } catch (err) {
+    return _fallo('envíos sin recibir', negocioId, err, vacio);
+  }
+};
+
 module.exports = {
-  enviosRedVencidos,
+  enviosRedVencidos, enviosSinRecibir,
   garantiasPorVencer, pedidosAtrasados, entradasSinConfirmar, cajasSinCerrar,
   tecnicosPendientes,
   hoyBogota,

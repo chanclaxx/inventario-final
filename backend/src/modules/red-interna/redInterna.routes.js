@@ -35,6 +35,9 @@ router.get('/estado-cuenta/:sucursalId/pdf',  ctrl.pdfEstadoCuenta);
 router.get('/envios-activos/:sucursalId/pdf', ctrl.pdfEnviosActivos);
 router.get('/remesas',                  ctrl.listarRemesas);
 router.get('/cuenta/movimientos',       ctrl.getMovimientosCuenta);
+// Lo reservado en envíos sin recibir (el chip «En camino» del inventario). Sin
+// costos: lo puede pedir cualquiera que vea el inventario de su sucursal.
+router.get('/en-transito',              ctrl.getEnTransito);
 router.get('/conciliacion/:sucursalId', ctrl.getConciliacion);
 router.get('/estado-cuenta/:sucursalId', ctrl.getEstadoCuenta);
 router.get('/salud',                    requireNivel('supervisor'), ctrl.getSalud);

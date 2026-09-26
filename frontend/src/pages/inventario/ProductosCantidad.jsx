@@ -12,6 +12,8 @@ import { formatCOP }                                     from '../../utils/forma
 import useCarritoStore                                   from '../../store/carritoStore';
 import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado }                                  from './ChipApartado';
+import { ChipEnCamino }                                  from './ChipEnCamino';
+import { useEnTransito }                                 from '../../hooks/useEnTransito';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { ModalEtiquetas }                                from './ModalEtiquetas';
@@ -30,6 +32,9 @@ import api                                               from '../../api/axios.c
 
 // ── Tarjeta de producto cantidad ──────────────────────────────────────────────
 function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantesActivo, onVerArbol, onEtiquetar, onPrecios }) {
+  // Unidades que van en un envío de la red sin recibir: siguen en el stock,
+  // pero bloqueadas hasta que se reciban o se anule el envío.
+  const enCamino = useEnTransito().get(`cant-${p.id}`);
   const sinStock  = p.stock === 0;
   const stockBajo = !sinStock && p.stock_bajo;
 
@@ -85,6 +90,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
             </div>
           )}
           <ChipApartado itemKey={`cant-${p.id}`} stock={p.stock} className="mt-1" />
+          <ChipEnCamino reserva={enCamino} stock={p.stock} className="mt-1" />
           {p.dias_en_inventario != null && (
             <UltimaVentaBadge
               tieneVentas={p.ultima_venta != null}

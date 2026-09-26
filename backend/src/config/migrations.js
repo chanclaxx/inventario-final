@@ -1686,6 +1686,23 @@ const aplicarMigraciones = async (client) => {
     if (sqlMoraEnvios) await migrar(client, 'Mora de envíos (red interna)', sqlMoraEnvios);
   }
 
+  // Lo que va en camino no se toca — triggers que reservan la mercancía de los
+  // envíos sin recibir. Ver migrations/20260926_reserva_transito.sql.
+  //
+  // Se lee el mismo archivo: lleva PL/pgSQL. Bloque PROPIO: si fallara, todo
+  // sigue exactamente como hoy (sin reserva). La recepción marca su
+  // transacción con set_config, que no depende de que el trigger exista.
+  {
+    let sqlReserva = null;
+    try {
+      sqlReserva = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20260926_reserva_transito.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Reserva en tránsito: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlReserva) await migrar(client, 'Reserva de mercancía en tránsito (red interna)', sqlReserva);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

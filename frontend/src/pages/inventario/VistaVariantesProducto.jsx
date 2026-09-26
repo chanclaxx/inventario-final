@@ -24,6 +24,8 @@ import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ModalPreciosLista } from './ModalPreciosLista';
 import { useListasPrecios } from '../../hooks/useListasPrecios';
 import { ChipApartado } from './ChipApartado';
+import { ChipEnCamino } from './ChipEnCamino';
+import { useEnTransito } from '../../hooks/useEnTransito';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { ModalEtiquetas } from './ModalEtiquetas';
 
@@ -245,6 +247,8 @@ function TarjetaNodo({
 }) {
   const sinStock  = nodo.stock === 0;
   const stockBajo = !sinStock && nodo.stock_minimo > 0 && nodo.stock <= nodo.stock_minimo;
+  // Lo que va en un envío de la red sin recibir: bloqueado en esta hoja.
+  const enCamino = useEnTransito().get(itemKey);
 
   const bg     = sinStock  ? 'bg-gray-50'      : stockBajo ? 'bg-amber-50/40' : 'bg-white';
   const border = sinStock  ? 'border-gray-200' : stockBajo ? 'border-amber-200' : 'border-green-100';
@@ -338,6 +342,9 @@ function TarjetaNodo({
             hay reserva que mostrar: la mercancía se aparta en las hojas. */}
         {!tieneHijos && itemKey && (
           <ChipApartado itemKey={itemKey} stock={nodo.stock} />
+        )}
+        {!tieneHijos && itemKey && (
+          <ChipEnCamino reserva={enCamino} stock={nodo.stock} />
         )}
 
         {nodo.stock_minimo > 0 && (

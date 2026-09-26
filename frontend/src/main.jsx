@@ -25,6 +25,10 @@ const mutationCache = new MutationCache({
     REPORT_QUERY_KEYS.forEach((key) =>
       queryClient.invalidateQueries({ queryKey: [key], exact: false }),
     )
+    // Lo que va en camino en la red interna (chip «En camino» del inventario):
+    // cambia al despachar, recibir, anular o devolver, desde varias pantallas.
+    // Solo se vuelve a pedir si hay un chip montado.
+    queryClient.invalidateQueries({ queryKey: ['red-en-transito'], exact: false })
   },
 })
 

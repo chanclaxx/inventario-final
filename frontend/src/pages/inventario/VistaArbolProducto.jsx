@@ -16,6 +16,8 @@ import { formatCOP } from '../../utils/formatters';
 import useCarritoStore from '../../store/carritoStore';
 import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado } from './ChipApartado';
+import { ChipEnCamino } from './ChipEnCamino';
+import { useEnTransito } from '../../hooks/useEnTransito';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -144,6 +146,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
 
 function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin, onAgregar }) {
   const queryClient = useQueryClient();
+  const enCamino = useEnTransito().get(`cant-${producto.id}-v-${variante.id}`);
   const [editando, setEditando] = useState(false);
   const [errorM,   setErrorM]   = useState('');
 
@@ -184,6 +187,7 @@ function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin
           stock={variante.stock}
           className="mt-1"
         />
+        <ChipEnCamino reserva={enCamino} stock={variante.stock} className="mt-1" />
       </div>
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -225,6 +229,7 @@ function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin
 
 function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
   const queryClient = useQueryClient();
+  const enCamino = useEnTransito().get(`cant-${producto.id}-a-${atributo.id}`);
   const [expandido,     setExpandido]     = useState(true);
   const [modalVariante, setModalVariante] = useState(false);
   const [editando,      setEditando]      = useState(false);
@@ -323,6 +328,7 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
             stock={atributo.stock}
             className="mt-1"
           />
+          <ChipEnCamino reserva={enCamino} stock={atributo.stock} className="mt-1" />
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">

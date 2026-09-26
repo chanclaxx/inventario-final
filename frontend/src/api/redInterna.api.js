@@ -179,3 +179,8 @@ export const getEstadoCuenta = (sucursalId, params = {}) =>
   api.get(`/red-interna/estado-cuenta/${sucursalId}`, { params });
 
 export const getSalud = () => api.get('/red-interna/salud');
+
+// Lo que la sucursal activa tiene en camino (envíos o devoluciones sin
+// recibir): está bloqueado hasta que se reciba o se anule. Lo pinta el chip
+// «En camino» del inventario.
+export const getEnTransito = () => api.get('/red-interna/en-transito');

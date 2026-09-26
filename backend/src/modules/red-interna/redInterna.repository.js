@@ -2136,6 +2136,29 @@ const findMovimientosCuenta = async (negocioId, sucursalId, limit = 100) => {
   return rows;
 };
 
+// ── Lo que una sucursal tiene RESERVADO en envíos sin recibir ────────────────
+//
+// Es lo que bloquean los triggers de 20260926_reserva_transito.sql, leído con
+// la misma definición (líneas 'Pendiente' de remisiones 'En transito' que
+// SALIERON de esta sucursal): envíos de la bodega y devoluciones de un local.
+// Alimenta el chip «En camino» del inventario, para que el candado se vea
+// ANTES de tropezar con él. No lleva ningún costo.
+const getReservadoEnTransito = async (negocioId, sucursalId) => {
+  const { rows } = await pool.query(`
+    SELECT lr.tipo, lr.serial_id, lr.imei, lr.cantidad,
+           lr.producto_origen_id, lr.atributo_origen_id, lr.variante_origen_id,
+           r.id AS remision_id, COALESCE(r.numero, r.id) AS numero, r.tipo AS remision_tipo,
+           r.fecha_emision, sd.nombre AS destino
+    FROM lineas_remision lr
+    JOIN remisiones r  ON r.id  = lr.remision_id
+    JOIN sucursales sd ON sd.id = r.sucursal_destino_id
+    WHERE r.negocio_id = $1 AND r.sucursal_origen_id = $2
+      AND r.estado = 'En transito' AND lr.estado_linea = 'Pendiente'
+    ORDER BY r.fecha_emision
+  `, [negocioId, sucursalId]);
+  return rows;
+};
+
 // ── Sucursales del negocio (bodega + locales) ────────────────────────────────
 
 const getSucursales = async (negocioId) => {
@@ -2281,5 +2304,5 @@ module.exports = {
   crearRemesa, findRemesaById, findRemesas, marcarRemesaRecibida, marcarRemesaAnulada,
   findRemesaPorClave, findRemisionPorClave,
   insertarMovimientoCuenta, findMovimientosCuenta,
-  getSucursales, getChequeosSalud,
+  getSucursales, getChequeosSalud, getReservadoEnTransito,
 };

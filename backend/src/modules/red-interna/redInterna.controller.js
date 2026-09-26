@@ -442,6 +442,14 @@ const anularMovimientoMora = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Lo que la sucursal activa tiene en camino: el inventario lo pinta como
+// «En camino» para que el bloqueo se vea antes de tropezar con él.
+const getEnTransito = async (req, res, next) => {
+  try {
+    res.json({ ok: true, data: await service.getEnTransito(req) });
+  } catch (err) { next(err); }
+};
+
 const getMovimientosCuenta = async (req, res, next) => {
   try {
     const data = await service.getMovimientosCuenta(req, req.query.sucursal);
@@ -495,6 +503,6 @@ module.exports = {
   enviarRemesa, confirmarRemesa, anularRemesa, listarRemesas,
   gastoAutorizado, ajuste, getMovimientosCuenta,
   decidirGasto, anularMovimientoCuenta, moverAbono,
-  fijarPlazo, fijarPlazoLocal, condonarMora, anularMovimientoMora,
+  fijarPlazo, fijarPlazoLocal, condonarMora, anularMovimientoMora, getEnTransito,
   getConciliacion, getEstadoCuenta, getSalud, getReferenciasDuplicadas,
 };

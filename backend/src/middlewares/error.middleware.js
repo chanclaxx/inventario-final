@@ -8,6 +8,13 @@ const errorHandler = (err, req, res, next) => {
   // la BASE, así que llega por cualquiera de los caminos que tocan `seriales`
   // —vender, prestar, retomar, recibir una remisión—; su mensaje ya dice dónde
   // está el equipo y qué hacer, y es lo que la pantalla tiene que mostrar.
+  // Lo que va en camino en un envío de la red interna no se vende, presta ni
+  // baja (triggers de 20260926_reserva_transito.sql). El mensaje ya dice qué
+  // envío es y qué hacer.
+  if (err.code === 'RT001') {
+    return res.status(409).json({ ok: false, error: err.message, code: 'EN_TRANSITO' });
+  }
+
   if (err.code === 'ST001') {
     return res.status(409).json({ ok: false, error: err.message, code: 'EQUIPO_EN_TECNICO' });
   }

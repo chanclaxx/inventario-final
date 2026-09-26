@@ -123,7 +123,7 @@ const recolectar = async (negocioId) => {
   const u = await _umbrales(negocioId);
 
   const [cartera, proveedores, plan, stock, borradores,
-    garantias, pedidos, entradas, cajas, tecnicos, red] = await Promise.all([
+    garantias, pedidos, entradas, cajas, tecnicos, red, sinRecibir] = await Promise.all([
     alertas.cartera(negocioId),
     alertas.carteraProveedores(negocioId),
     alertas.planPorVencer(negocioId),
@@ -135,6 +135,7 @@ const recolectar = async (negocioId) => {
     operaciones.cajasSinCerrar(negocioId, u.caja_horas),
     operaciones.tecnicosPendientes(negocioId),
     operaciones.enviosRedVencidos(negocioId),
+    operaciones.enviosSinRecibir(negocioId),
   ]);
 
   const senales = [];
@@ -211,6 +212,22 @@ const recolectar = async (negocioId) => {
       titulo: `${_plural(n, 'envío se vence', 'envíos se vencen')} pronto`,
       cuerpo: `Envíos a los locales con plazo de ${red.dias_aviso} días o menos.`,
       url: '/bodega', valor: red.por_vencer.reduce((s, l) => s + l.por_vencer_capital, 0), n,
+    }));
+  }
+
+  // ── Envíos de la red que nadie recibe ─────────────────────────────────────
+  // La mercancía queda BLOQUEADA en la bodega mientras va en camino. Pasada
+  // una semana ya no es "en camino": es mercancía congelada, y es urgente.
+  if (sinRecibir?.total) {
+    const peor = sinRecibir.items[0];
+    senales.push(_senal({
+      clave: 'red_envios_sin_recibir',
+      prioridad: peor.dias >= 7 ? 'urgente' : 'normal',
+      categoria: 'red_interna',
+      titulo: `${_plural(sinRecibir.total, 'envío sin recibir', 'envíos sin recibir')}`,
+      cuerpo: `El más viejo lleva ${_plural(peor.dias, 'día', 'días')} en camino hacia ${peor.destino}. `
+        + 'Su mercancía está bloqueada hasta que se reciba o se anule.',
+      url: '/bodega', n: sinRecibir.total,
     }));
   }
 
@@ -353,7 +370,7 @@ const recolectar = async (negocioId) => {
     normales: senales.filter((s) => s.prioridad === 'normal'),
     // El detalle crudo, para la pantalla de Avisos. El push nunca lo lleva: en
     // una pantalla bloqueada no van nombres de clientes con sus montos.
-    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos, red },
+    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos, red, sin_recibir: sinRecibir },
     umbrales: u,
   };
 };

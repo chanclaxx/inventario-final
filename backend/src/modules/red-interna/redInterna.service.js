@@ -1023,12 +1023,24 @@ const despachar = async (req, {
 // sigue siendo inventario de la bodega. Es el default seguro.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Deja a ESTA transacción mover mercancía que va en camino. Solo la usan la
+// recepción de un envío y la confirmación de una devolución: son las que
+// entregan lo reservado a su destino. Sin los triggers instalados no hace nada.
+const _liberarTransitoEnTx = (client) =>
+  client.query(`SELECT set_config('app.red_transito_libre', '1', true)`);
+
 const _ejecutarRecepcion = async (client, {
   negocioId, remision, lineas, recibidasIds, cantidadesRecibidas, usuarioId,
 }) => {
   const setRecibidas = new Set(recibidasIds.map(Number));
   const origenId  = remision.sucursal_origen_id;
   const destinoId = remision.sucursal_destino_id;
+
+  // La mercancía de este envío está RESERVADA (20260926_reserva_transito.sql):
+  // los triggers no dejan bajar ese stock ni mover esos IMEI. Recibir es
+  // justamente lo único que sí puede moverla. La marca muere con la
+  // transacción (`true` = local), así que no se le escapa a nadie más.
+  await _liberarTransitoEnTx(client);
 
   await _verificarStockRecepcion(client, { origenId, lineas, setRecibidas, cantidadesRecibidas });
 
@@ -1591,6 +1603,9 @@ const confirmarDevolucion = async (req, remisionId, { lineas_recibidas } = {}) =
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Confirmar la devolución ENTREGA la mercancía reservada a la bodega.
+    await _liberarTransitoEnTx(client);
 
     const remision = await repo.findRemisionById(negocioId, remisionId, client);
     if (!remision) throw { status: 404, message: 'Devolución no encontrada' };
@@ -3931,6 +3946,42 @@ const _configMoraPublica = (m) => ({
   aviso_previo_dias: m?.aviso_previo_dias ?? 3,
 });
 
+/**
+ * Lo que la sucursal activa tiene en camino (envíos o devoluciones sin
+ * recibir), agrupado para pintar el inventario: por IMEI y por NODO (la clave
+ * es la misma del despacho, producto-atributo-variante). Es exactamente lo que
+ * los triggers de reserva no dejan tocar.
+ */
+const getEnTransito = async (req) => {
+  const filas = await repo.getReservadoEnTransito(req.user.negocio_id, Number(req.sucursal_id));
+  const envio = (f) => ({
+    remision_id: Number(f.remision_id), numero: f.numero,
+    tipo: f.remision_tipo, destino: f.destino, fecha: f.fecha_emision,
+  });
+  const seriales = [];
+  const nodos = new Map();
+  for (const f of filas) {
+    if (f.tipo === 'serial') {
+      seriales.push({ serial_id: Number(f.serial_id), imei: f.imei, ...envio(f) });
+      continue;
+    }
+    const clave = [f.producto_origen_id, f.atributo_origen_id ?? '', f.variante_origen_id ?? ''].join('-');
+    if (!nodos.has(clave)) {
+      nodos.set(clave, {
+        clave,
+        producto_id: Number(f.producto_origen_id),
+        atributo_id: f.atributo_origen_id != null ? Number(f.atributo_origen_id) : null,
+        variante_id: f.variante_origen_id != null ? Number(f.variante_origen_id) : null,
+        cantidad: 0, envios: [],
+      });
+    }
+    const n = nodos.get(clave);
+    n.cantidad += Number(f.cantidad || 0);
+    if (!n.envios.some((e) => e.remision_id === Number(f.remision_id))) n.envios.push(envio(f));
+  }
+  return { sucursal_id: Number(req.sucursal_id), seriales, nodos: [...nodos.values()] };
+};
+
 const getMovimientosCuenta = async (req, sucursalId) => {
   const objetivo = Number(sucursalId || req.sucursal_id);
   if (!req.esBodega && objetivo !== Number(req.sucursal_id)) {
@@ -4019,6 +4070,6 @@ module.exports = {
   getCuentasParaRemesa,
   buscarParaDespacho, catalogoCantidad, resolverItems,
   previsualizarDestino, catalogoReferencias,
-  getSucursalesRed, getContexto, getMovimientosCuenta,
+  getSucursalesRed, getContexto, getMovimientosCuenta, getEnTransito,
   ETIQUETAS_ESTADO,
 };

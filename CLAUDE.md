@@ -2023,6 +2023,38 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > mora no entra en `abonos_remision` y no vuelve como saldo a favor, la 7 que
 > todo se deshace, la 12 que PDF, reportes y avisos dicen la misma cifra).
 
+> **Lo que va en camino NO SE TOCA** (`20260926_reserva_transito.sql`,
+> triggers `fn_serial_en_transito` / `fn_stock_en_transito`, SQLSTATE `RT001` →
+> 409 `EN_TRANSITO`): despachar no mueve inventario (lo mueve la recepción), y
+> mientras tanto la bodega podía vender, prestar, ajustar o trasladar lo que ya
+> iba en el camión — el envío quedaba imposible de recibir (Tesla #21). Decisión
+> del usuario (26-sep-2026): **RESERVAR, no descontar**. El stock sigue en la
+> sucursal que despacha pero ninguna escritura lo baja por debajo de lo que va en
+> líneas `'Pendiente'` de remisiones `'En transito'` (mismo nodo exacto que
+> `_comprometidoSinRecibir`), y un IMEI en camino no se vende, presta, cambia de
+> referencia ni borra. Aplica igual a las DEVOLUCIONES del local. Se bloquea
+> también el ajuste manual y desactivar/borrar el producto. Solo se mira lo que
+> BAJA; subir nunca se bloquea. Un CONTENEDOR (producto con tallas, talla con
+> colores) se salta: su stock es derivado y sus hojas ya están protegidas.
+> **Trigger y no chequeos por pantalla** (criterio de técnicos): más de veinte
+> sitios escriben stock. La única puerta es la recepción y la confirmación de
+> devolución, que marcan su transacción con
+> `set_config('app.red_transito_libre','1', true)` (`_liberarTransitoEnTx`): la
+> marca muere con la transacción. Anular el envío o reportar faltantes libera
+> solo (la reserva se DERIVA de las líneas, no se guarda).
+> Se VE antes de tropezar: `GET /red-interna/en-transito` + `useEnTransito` +
+> `ChipEnCamino` junto a `ChipApartado` en las cuatro filas del inventario (mismas
+> claves); el serial en camino deshabilita «Agregar». La `MutationCache` global
+> invalida `red-en-transito`. Aviso `red_envios_sin_recibir` (2+ días; urgente a
+> los 7): un envío olvidado congela su mercancía.
+> OJO: datos viejos donde el stock YA quedó por debajo de lo reservado (el #21)
+> no se corrigen solos: ese nodo no puede bajar más hasta recibir o anular.
+> Prueba: `63-reserva-transito` (41; la 1 es que sin envíos todo sigue igual, la
+> 3 el caso #21, la 5 que recibir/anular/faltante liberan, la 7 que la marca no
+> se escapa a la transacción siguiente). La sección 6 de `48-stock-comprometido`
+> fabrica a propósito el estado roto del #21 y con los triggers ya no se puede
+> producir: esa suite no carga esta migración.
+
 > **El despacho SALE AL PRECIO DEL CARRITO** (decisión del negocio, sep-2026;
 > `ModalDespachar.conValorInicial`, `valorSegunLista`): el valor de cada línea
 > se pregraba en este orden — **`precio_carrito`** (el precio con el que el ítem
