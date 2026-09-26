@@ -1104,6 +1104,17 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > puede abrir el árbol cuando el código es del producto y hay variantes activas
 > (`onProducto`): el carrito es una columna, no una pantalla, y lo explica en
 > vez de agregar a ciegas.
+> **El guion que llega como `'`** (`utils/codigoEscaneado.util.js`, opt-in
+> `escaneo_corregir_guiones`, **ausente = apagado**; Ajustes → Código único):
+> un lector configurado con teclado en inglés sobre Windows en español manda el
+> `-` en la tecla que en español escribe `'`, así que `ACC-AUD-001` llega como
+> `ACC'AUD'001` (reportado por un cliente, sep-2026). Encendido, un código que
+> NO se encontró se reintenta cambiando `' ´ \` ’ ‘ ‚ ,` por guion; el código
+> tal cual siempre gana, y la clave solo se lee tras un fallo (apagado, cero
+> consultas más). El IMEI no se corrige: son dígitos. La cura de raíz es poner
+> el lector en español con el código de configuración de su manual. Copia del
+> navegador en `frontend/src/utils/codigoEscaneado.js` (el atajo local del
+> carrito). Prueba: `62-escaneo-guiones` (27; la sección 1 es la de apagado).
 
 > **Etiquetas imprimibles — el símbolo manda sobre el texto** (`etiquetas/`,
 > `utils/code128.util.js`, `utils/qr.util.js`): el código único ya se podía

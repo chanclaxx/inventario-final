@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import api from '../api/axios.config';
 import { escanearCodigo } from '../api/busqueda.api';
 import useCarritoStore from '../store/carritoStore';
+import { corregirGuiones, correccionGuionesActiva } from '../utils/codigoEscaneado';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Escaneo hacia el carrito — un solo campo para los DOS catálogos.
@@ -30,6 +33,15 @@ export function useEscanerCarrito({
   const [scan,     setScan]     = useState('');
   const [scanMsg,  setScanMsg]  = useState(null); // { tipo: 'ok' | 'error', texto }
   const [buscando, setBuscando] = useState(false);
+
+  // Corrección del guion (opt-in `escaneo_corregir_guiones`). Reusa el query
+  // ['config'] que ya comparten Carrito y Ajustes: no hay petición extra.
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 60 * 1000,
+  });
+  const corregirActivo = correccionGuionesActiva(config);
 
   // Del store se toman solo las acciones (identidad estable). Los ítems NO se
   // suscriben: se consultan con getState() dentro del handler, o el inventario
@@ -183,7 +195,11 @@ export function useEscanerCarrito({
     setScanMsg(null);
 
     // Atajo local: la pantalla ya tiene ese producto en memoria.
-    const local = resolverLocal?.(codigo) || null;
+    // Con la corrección del guion encendida, el atajo prueba también el código
+    // corregido (lector en inglés sobre Windows en español: `-` llega como `'`).
+    // El servidor hace el mismo reintento por su lado.
+    const corregido = corregirActivo ? corregirGuiones(codigo) : null;
+    const local = resolverLocal?.(codigo) || (corregido && resolverLocal?.(corregido)) || null;
     if (local) { _agregarNodo(local); return; }
 
     setBuscando(true);

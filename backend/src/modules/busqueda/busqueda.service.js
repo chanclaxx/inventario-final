@@ -1,4 +1,6 @@
 const repo = require('./busqueda.repository');
+const { pool } = require('../../config/db');
+const { codigoParaReintento } = require('../../utils/codigoEscaneado.util');
 
 const _esAdmin = (rol) => rol === 'admin_negocio';
 
@@ -227,7 +229,16 @@ const buscarPorCodigo = async (codigo, negocioId, sucursalId, rol) => {
 
   // El escaneo se resuelve en la sucursal activa si la hay; un admin sin
   // sucursal seleccionada ve las coincidencias de todas.
-  const resultados = await repo.buscarCantidadPorCodigo(codigo, negocioId, sucursalId || null);
+  let resultados = await repo.buscarCantidadPorCodigo(codigo, negocioId, sucursalId || null);
+
+  // Lector con teclado en inglés sobre Windows en español: el guion llega como
+  // apóstrofo (utils/codigoEscaneado.util.js). Opt-in, y solo tras un fallo.
+  if (!resultados.length) {
+    const reintento = await codigoParaReintento(pool, negocioId, codigo);
+    if (reintento) {
+      resultados = await repo.buscarCantidadPorCodigo(reintento, negocioId, sucursalId || null);
+    }
+  }
 
   if (!admin) {
     resultados.forEach((p) => { delete p.costo_unitario; });
@@ -251,6 +262,8 @@ const escanear = async (codigo, negocioId, sucursalId, rol) => {
   const nodos = await buscarPorCodigo(codigo, negocioId, sucursalId, rol);
   if (nodos.length) return { tipo: 'cantidad', nodos };
 
+  // `buscarPorCodigo` ya reintentó el código corregido; el IMEI son dígitos y
+  // el choque de teclado no lo toca, así que ese se busca tal cual.
   const serial = await repo.buscarSerialPorCodigoExacto(codigo, negocioId, sucursalId || null);
   if (!serial) return null;
 

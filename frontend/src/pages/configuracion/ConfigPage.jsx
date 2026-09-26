@@ -25,6 +25,7 @@ import { Button }   from '../../components/ui/Button';
 import { Input }    from '../../components/ui/Input';
 import { Modal }    from '../../components/ui/Modal';
 import { Spinner }  from '../../components/ui/Spinner';
+import { CLAVE_CORREGIR_GUIONES } from '../../utils/codigoEscaneado';
 import {
   Settings, Save, Eye, EyeOff, Plus, Trash2,
   GripVertical, ToggleLeft, ToggleRight, Tag, Lock,
@@ -679,6 +680,15 @@ function CodigoProductoConfig({ valores, set }) {
 
       {activo && (
         <div className="flex flex-col gap-3 pl-3 border-l-2 border-blue-100">
+          {/* Opt-in (`escaneo_corregir_guiones`, ausente = apagado): es el
+              arreglo para UN lector mal configurado, no un cambio para todos.
+              Ver utils/codigoEscaneado.util.js en el backend. */}
+          <Toggle
+            label="Corregir los guiones del lector"
+            description="Si al escanear los guiones (-) salen como ' o , el lector está configurado con teclado en inglés. Con esto encendido, un código que no se encuentra se vuelve a buscar cambiando esos signos por guion. Lo ideal es configurar el lector en español."
+            enabled={valores[CLAVE_CORREGIR_GUIONES] === '1'}
+            onChange={(val) => set(CLAVE_CORREGIR_GUIONES, val ? '1' : '0')}
+          />
           <Toggle
             label="Generar el código automáticamente"
             description="Cada producto nuevo nace con su código. Si tiene variantes, cada talla o color nace con el suyo."
