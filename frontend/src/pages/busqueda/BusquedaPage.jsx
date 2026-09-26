@@ -76,9 +76,41 @@ function EventoTecnico({ d }) {
   );
 }
 
+// Quién entregó el equipo: el cliente de una compra a cliente o de una retoma.
+// La misma tarjeta en la entrada, en la retoma y en la ficha del serial.
+function DatosPersona({ nombre, cedula, celular, etiqueta }) {
+  if (!nombre && !cedula && !celular) return null;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <p className="text-sm text-gray-700">
+        {etiqueta && <span className="font-medium">{etiqueta}: </span>}
+        <span className="font-semibold text-gray-800">{nombre || 'Sin nombre'}</span>
+      </p>
+      {(cedula || celular) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+          {cedula  && <span className="flex items-center gap-1"><CreditCard size={11} />{cedula}</span>}
+          {celular && <span className="flex items-center gap-1"><Phone size={11} />{celular}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ETIQUETA_ENTRADA = {
+  cliente:   'Compra a cliente',
+  retoma:    'Entrada por retoma',
+  proveedor: 'Compra a proveedor',
+};
+
 function EventoEntrada({ d }) {
   return (
     <div className="flex flex-col gap-1">
+      {d.cliente && (
+        <DatosPersona
+          etiqueta={d.origen === 'retoma' ? 'Entregado por' : 'Comprado a'}
+          nombre={d.cliente} cedula={d.cliente_cedula} celular={d.cliente_celular}
+        />
+      )}
       {d.proveedor_nombre && (
         <p className="text-sm text-gray-600">
           <span className="font-medium">Proveedor:</span> {d.proveedor_nombre}
@@ -99,7 +131,7 @@ function EventoEntrada({ d }) {
           <span className="font-medium">{d.costo_local != null ? 'Costo de la bodega' : 'Costo'}:</span> {formatCOP(d.costo_compra)}
         </p>
       )}
-      {!d.proveedor_nombre && d.costo_compra == null && (
+      {!d.cliente && !d.proveedor_nombre && d.costo_compra == null && (
         <p className="text-sm text-gray-400">Sin información de compra registrada</p>
       )}
     </div>
@@ -143,16 +175,39 @@ function EventoPrestamo({ d }) {
   );
 }
 
+// De dónde salió la retoma: una venta, un préstamo o una retoma suelta.
+function documentoRetoma(d) {
+  if (d.origen === 'factura')  return d.factura_numero  != null ? `En la factura #${String(d.factura_numero).padStart(6, '0')}` : 'En una factura';
+  if (d.origen === 'prestamo') return d.prestamo_numero != null ? `Contra el préstamo #${d.prestamo_numero}` : 'Contra un préstamo';
+  if (d.origen === 'directa')  return 'Retoma directa (sin factura ni préstamo)';
+  return null;
+}
+
 function EventoRetoma({ d }) {
+  const doc = documentoRetoma(d);
+  const cancelada = d.estado_factura === 'cancelada';
   return (
-    <div className="flex flex-col gap-1">
-      {d.cliente     && <p className="text-sm font-medium text-gray-700">{d.cliente}</p>}
-      {d.descripcion && <p className="text-sm text-gray-600">{d.descripcion}</p>}
-      <div className="flex flex-wrap gap-x-4 text-xs text-gray-500">
+    <div className="flex flex-col gap-1.5">
+      <DatosPersona
+        etiqueta={d.persona_tipo === 'companero' ? 'Compañero' : 'Cliente'}
+        nombre={d.cliente} cedula={d.cedula} celular={d.celular}
+      />
+      {d.nombre_producto && <p className="text-sm text-gray-600">{d.nombre_producto}</p>}
+      {d.descripcion && d.descripcion !== d.nombre_producto && (
+        <p className="text-sm text-gray-500">{d.descripcion}</p>
+      )}
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
         {d.valor_retoma != null && <span>Valor: <span className="font-medium text-gray-700">{formatCOP(d.valor_retoma)}</span></span>}
         {d.ingreso_inventario && <span className="text-green-600 font-medium">Ingresó al inventario</span>}
         {d.sucursal && <span className="flex items-center gap-1"><MapPin size={11} />{d.sucursal}</span>}
+        {d.usuario  && <span className="flex items-center gap-1"><User size={11} />{d.usuario}</span>}
       </div>
+      {doc && (
+        <p className="text-xs text-gray-400">
+          {doc}
+          {cancelada && <span className="ml-1 text-red-500 font-medium">(factura cancelada)</span>}
+        </p>
+      )}
     </div>
   );
 }
@@ -209,6 +264,7 @@ function LineaTiempo({ historial }) {
           const cfg = tipoConfig[ev.tipo] || tipoConfig.entrada;
           const Icon = cfg.icon;
           const Detalle = detalleComponentes[ev.tipo];
+          const label = (ev.tipo === 'entrada' && ETIQUETA_ENTRADA[ev.detalle?.origen]) || cfg.label;
           return (
             <div key={i} className="flex gap-4 pb-6 last:pb-0">
               {/* Dot + icono */}
@@ -221,7 +277,7 @@ function LineaTiempo({ historial }) {
               <div className="flex-1 min-w-0 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                    {cfg.label}
+                    {label}
                   </span>
                   <span className="text-xs text-gray-400 flex-shrink-0">{formatFecha(ev.fecha)}</span>
                 </div>
@@ -327,6 +383,18 @@ function TarjetaSerial({ serial }) {
                   <span className="font-medium">{k}:</span> {v}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* A quién se le compró cuando no vino de un proveedor. */}
+          {serial.cliente_origen && (
+            <div className="mt-2 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
+              <DatosPersona
+                etiqueta="Comprado a"
+                nombre={serial.cliente_origen}
+                cedula={serial.cliente_origen_cedula}
+                celular={serial.cliente_origen_celular}
+              />
             </div>
           )}
 
@@ -462,6 +530,7 @@ function HistorialCantidad({ productoId }) {
                 {h.sucursal_nombre && <span className="flex items-center gap-0.5"><MapPin size={9} />{h.sucursal_nombre}</span>}
                 {h.proveedor_nombre && <span>Proveedor: <span className="text-gray-600">{h.proveedor_nombre}</span></span>}
                 {h.cliente_origen   && <span>Cliente: <span className="text-gray-600">{h.cliente_origen}</span></span>}
+                {h.cedula_cliente   && <span className="flex items-center gap-0.5"><CreditCard size={9} />{h.cedula_cliente}</span>}
               </div>
               {h.notas && <p className="text-xs text-gray-400 mt-0.5 italic">{h.notas}</p>}
             </div>

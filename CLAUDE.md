@@ -809,6 +809,18 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > primero —el equipo ajeno entra como siempre—, la 5 comprueba que anular
 > restaura en vez de borrar, la 7 corre la aritmética del caso completo y la 9
 > que sin migración retomar sigue funcionando).
+>
+> **De quién vino el equipo: una sola lectura** (`utils/retomaOrigen.util.js`):
+> una retoma nace por TRES puertas —factura, préstamo y directa
+> (`tipo_persona`/`persona_id`)— y la búsqueda por IMEI y Proveedores → Retomas
+> solo leían la de factura (`JOIN facturas`): la de préstamo no salía en la línea
+> de tiempo y en Proveedores aparecía como «Compra a cliente» sin cédula. Todo
+> lector de retomas usa ese fragmento. La **compra a cliente** solo guarda el
+> NOMBRE (`seriales.cliente_origen`): la cédula y el celular salen de la retoma
+> que la ingresó o de la ficha del cliente **solo si hay UNA con ese nombre**
+> (con homónimos no se muestra cédula). Quién vendió el equipo lo ve cualquier
+> rol; el costo sigue siendo del admin.
+> Prueba: `61-busqueda-cliente-retomas` (38).
 
 > **Técnicos externos — un equipo NUESTRO sale a reparación**
 > (`tecnicos/`, `20260918_tecnicos_externos.sql`, Servicios → pestaña «Técnicos

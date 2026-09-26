@@ -2,6 +2,9 @@ const { pool } = require('../../config/db');
 const costoRed = require('../../utils/costoRed.util');
 const { hayListasPrecios, hayTecnicos } = require('../../config/columnas');
 const { selPreciosNodo: selPreciosSql } = require('../../utils/listasPreciosSql.util');
+const {
+  JOINS_ORIGEN_RETOMA, COLUMNAS_ORIGEN_RETOMA, NEGOCIO_RETOMA,
+} = require('../../utils/retomaOrigen.util');
 
 // ── Listas de precios en el escaneo (feature opt-in) ─────────────────────────
 //
@@ -40,6 +43,11 @@ const buscarSerialPorIMEI = async (query, negocioId) => {
     SELECT
       s.id, s.imei, s.fecha_entrada, s.vendido, s.prestado,
       s.costo_compra, s.color, s.caracteristicas,
+      -- De quién se compró cuando no vino de un proveedor (compra a cliente o
+      -- retoma). Como texto y no como DATE la fecha, para compararla con el
+      -- día de la retoma sin que la zona del servidor la corra.
+      s.cliente_origen,
+      to_char(s.fecha_entrada, 'YYYY-MM-DD') AS fecha_entrada_dia,
       -- Lo que esta unidad le cuesta AL LOCAL cuando vino de la bodega de la
       -- red: el valor interno de la remisión. NULL en la bodega, en una unidad
       -- propia y en un negocio sin red.
@@ -98,24 +106,41 @@ const getVentasPorIMEI = async (imei, negocioId) => {
   return rows;
 };
 
-const getRetomasPorIMEI = async (imei, negocioId) => {
+// Las retomas de las TRES puertas (factura, préstamo y retoma directa), con la
+// persona que entregó el equipo ya resuelta: antes solo salían las de factura y
+// solo con el nombre. `parcial` lo usa el buscador de compras, que busca por
+// un pedazo del IMEI igual que sus líneas de compra.
+const getRetomasPorIMEI = async (imei, negocioId, { parcial = false } = {}) => {
+  const filtroImei = parcial
+    ? `LOWER(r.imei) LIKE '%' || LOWER(BTRIM($1)) || '%'`
+    : 'UPPER(BTRIM(r.imei)) = UPPER(BTRIM($1))';
   const { rows } = await pool.query(`
     SELECT
-      r.id, r.descripcion, r.valor_retoma, r.ingreso_inventario,
+      r.id, r.imei, r.descripcion, r.valor_retoma, r.ingreso_inventario,
       r.nombre_producto,
-      f.id         AS factura_id,
-      f.numero     AS factura_numero,
-      f.fecha,
-      f.nombre_cliente,
-      f.estado,
-      su.nombre    AS sucursal_nombre
-    FROM retomas    r
-    JOIN facturas   f  ON f.id  = r.factura_id
-    JOIN sucursales su ON su.id = f.sucursal_id
-    WHERE r.imei = $1 AND su.negocio_id = $2
-    ORDER BY f.fecha DESC
+      ${COLUMNAS_ORIGEN_RETOMA}
+    FROM retomas r
+    ${JOINS_ORIGEN_RETOMA}
+    WHERE ${filtroImei} AND ${NEGOCIO_RETOMA} = $2
+    ORDER BY fecha DESC, r.id DESC
+    LIMIT 40
   `, [imei, negocioId]);
   return rows;
+};
+
+// El cliente de una COMPRA A CLIENTE. La unidad solo guarda el nombre
+// (`seriales.cliente_origen`), así que la cédula y el celular se buscan en la
+// ficha por nombre — y solo si hay UNA ficha con ese nombre: con dos, cualquier
+// cédula que se mostrara podría ser la de otra persona.
+const getClientePorNombre = async (nombre, negocioId) => {
+  if (!nombre || !String(nombre).trim()) return null;
+  const { rows } = await pool.query(`
+    SELECT MIN(c.cedula) AS cedula, MIN(c.celular) AS celular
+    FROM clientes c
+    WHERE c.negocio_id = $2 AND LOWER(BTRIM(c.nombre)) = LOWER(BTRIM($1))
+    HAVING COUNT(*) = 1
+  `, [nombre, negocioId]);
+  return rows[0] || null;
 };
 
 const getPrestamosPorIMEI = async (imei, negocioId) => {
@@ -705,7 +730,7 @@ const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, 
 };
 
 module.exports = {
-  buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI,
+  buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI, getClientePorNombre,
   getPrestamosPorIMEI, getTrasladosPorIMEI, getTecnicosPorIMEI,
   buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, buscarSerialPorCodigoExacto,
   getHistorialCantidad,

@@ -69,7 +69,7 @@ const OPCIONES_TIPO = [
 function TipoBadge({ tipo }) {
   const cfg = {
     compra:           { label: 'Compra a cliente',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icn: Package       },
-    retoma:           { label: 'Retoma de factura',  cls: 'bg-purple-100  text-purple-700  border-purple-200',  Icn: ArrowLeftRight },
+    retoma:           { label: 'Retoma',             cls: 'bg-purple-100  text-purple-700  border-purple-200',  Icn: ArrowLeftRight },
     compra_cliente:   { label: 'Compra a cliente',   cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', Icn: Package       },
     compra_proveedor: { label: 'Compra a proveedor', cls: 'bg-blue-100    text-blue-700    border-blue-200',    Icn: Truck         },
     ajuste:           { label: 'Ajuste de stock',    cls: 'bg-gray-100    text-gray-600    border-gray-200',    Icn: ShoppingBag   },
@@ -103,14 +103,26 @@ function ProveedorTipoBadge({ tipo }) {
 
 // ─── Modal detalle retoma/compra serial ───────────────────────────────────────
 
+// De dónde salió una retoma: una venta, un préstamo o una retoma suelta. El
+// backend lo resuelve (`utils/retomaOrigen.util.js`) para las tres puertas.
+function origenRetoma(item) {
+  if (item.origen === 'factura') {
+    return `Factura #${String(item.factura_numero ?? item.factura_id).padStart(6, '0')}`;
+  }
+  if (item.origen === 'prestamo') return `Préstamo #${item.prestamo_numero ?? item.prestamo_id}`;
+  if (item.origen === 'directa')  return 'Retoma directa';
+  return null;
+}
+
 function ModalDetalleSerial({ item, historial, onClose }) {
+  const esCompanero = item.persona_tipo === 'companero';
   return (
     <Modal open onClose={onClose} title="Detalle" size="md">
       <div className="flex flex-col gap-4">
         <TipoBadge tipo={item.tipo} />
 
         <div className="bg-emerald-50 rounded-xl p-3 flex flex-col gap-2">
-          <p className="text-xs font-semibold text-emerald-700 mb-0.5">Cliente</p>
+          <p className="text-xs font-semibold text-emerald-700 mb-0.5">{esCompanero ? 'Compañero' : 'Cliente'}</p>
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Nombre</span>
             <span className="font-medium text-gray-900">{item.nombre_cliente || '—'}</span>
@@ -119,6 +131,12 @@ function ModalDetalleSerial({ item, historial, onClose }) {
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Cédula</span>
               <span className="font-mono text-gray-900">{item.cedula_cliente}</span>
+            </div>
+          )}
+          {item.celular_cliente && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Celular</span>
+              <span className="font-mono text-gray-900">{item.celular_cliente}</span>
             </div>
           )}
         </div>
@@ -153,10 +171,16 @@ function ModalDetalleSerial({ item, historial, onClose }) {
             <span className="text-gray-500">Sucursal</span>
             <span className="text-gray-700">{item.sucursal_nombre}</span>
           </div>
-          {item.factura_id && (
+          {item.tipo === 'retoma' && origenRetoma(item) && (
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Factura</span>
-              <span className="font-mono text-gray-700">#{String(item.factura_numero ?? item.factura_id).padStart(6, '0')}</span>
+              <span className="text-gray-500">Origen</span>
+              <span className="font-mono text-gray-700">{origenRetoma(item)}</span>
+            </div>
+          )}
+          {item.usuario_nombre && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Registrado por</span>
+              <span className="text-gray-700">{item.usuario_nombre}</span>
             </div>
           )}
         </div>
@@ -442,6 +466,7 @@ function TabRetomas() {
                     )}
                     <p className="text-xs text-gray-400 mt-0.5">
                       {formatFechaHora(item.fecha)} · {item.sucursal_nombre}
+                      {esSerial && item.tipo === 'retoma' && origenRetoma(item) ? ` · ${origenRetoma(item)}` : ''}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -2448,15 +2473,23 @@ function TabBusquedaCompras() {
       {retomas.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
-            Retomada en facturas ({retomas.length})
+            Retomas ({retomas.length})
           </p>
           {retomas.map((r) => (
             <div key={r.id} className="bg-purple-50 border border-purple-100 rounded-xl p-3 flex items-start gap-3">
               <TipoBadge tipo="retoma" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">{r.nombre_producto || r.descripcion || '—'}</p>
-                <p className="text-xs text-gray-600 mt-0.5">{r.nombre_cliente}</p>
-                <p className="text-xs text-gray-400">{formatFechaHora(r.fecha)} · {r.sucursal_nombre}</p>
+                {r.imei && <p className="text-xs text-gray-400 font-mono">{r.imei}</p>}
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {r.nombre_cliente || 'Sin nombre'}
+                  {r.cedula_cliente  && <span className="font-mono text-gray-400"> · CC {r.cedula_cliente}</span>}
+                  {r.celular_cliente && <span className="font-mono text-gray-400"> · {r.celular_cliente}</span>}
+                </p>
+                <p className="text-xs text-gray-400">
+                  {formatFechaHora(r.fecha)} · {r.sucursal_nombre}
+                  {origenRetoma(r) ? ` · ${origenRetoma(r)}` : ''}
+                </p>
               </div>
               {r.valor_retoma && Number(r.valor_retoma) > 0 && (
                 <span className="text-sm font-bold text-purple-700 flex-shrink-0">

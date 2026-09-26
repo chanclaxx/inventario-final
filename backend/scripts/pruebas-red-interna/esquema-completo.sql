@@ -129,6 +129,14 @@ CREATE TABLE IF NOT EXISTS retomas (
   ingreso_inventario BOOLEAN DEFAULT FALSE, nombre_producto TEXT, imei TEXT,
   cantidad_retoma INT DEFAULT 1, color TEXT
 );
+-- Las tres puertas de la retoma (factura, préstamo y directa) y su fecha, como
+-- en producción: `utils/retomaOrigen.util.js` las lee todas.
+ALTER TABLE retomas  ADD COLUMN IF NOT EXISTS prestamo_id  INT;
+ALTER TABLE retomas  ADD COLUMN IF NOT EXISTS tipo_persona TEXT;
+ALTER TABLE retomas  ADD COLUMN IF NOT EXISTS persona_id   INT;
+ALTER TABLE retomas  ADD COLUMN IF NOT EXISTS sucursal_id  INT;
+ALTER TABLE retomas  ADD COLUMN IF NOT EXISTS fecha        TIMESTAMP DEFAULT NOW();
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS celular      TEXT;
 CREATE TABLE IF NOT EXISTS ordenes_servicio (
   id SERIAL PRIMARY KEY, numero INT, sucursal_id INT, factura_id INT,
   cliente_nombre TEXT, equipo_nombre TEXT, equipo_tipo TEXT, equipo_serial TEXT,

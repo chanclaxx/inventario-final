@@ -1,5 +1,8 @@
 const { pool } = require('../../config/db');
 const { hayUbicacion, hayListasPrecios, hayTecnicos } = require('../../config/columnas');
+const {
+  JOINS_ORIGEN_RETOMA, COLUMNAS_ORIGEN_RETOMA, NEGOCIO_RETOMA,
+} = require('../../utils/retomaOrigen.util');
 
 // Ubicación espacial (feature opt-in). En serial la ubicación pertenece a la
 // REFERENCIA, no a cada IMEI: un modelo vive en un estante, no cada unidad.
@@ -318,51 +321,76 @@ const findComprasCliente = async (negocioId, q) => {
     ? `%${qNorm.replace(/[%_\\]/g, '\\$&').slice(0, 100)}%`
     : '%';
 
+  // Compra a cliente: la unidad solo guarda el NOMBRE de quien la vendió. La
+  // cédula y el celular se toman de la ficha del cliente cuando hay UNA sola
+  // con ese nombre (con dos, cualquier cédula podría ser la de otra persona).
+  // En CTE y no en un LATERAL por fila: la lista no tiene tope.
+  //
+  // Se excluyen los IMEI que tienen una retoma de CUALQUIER puerta: esos salen
+  // abajo como retoma, con la persona completa. Antes solo se excluían las de
+  // factura, y una retoma hecha desde Préstamos salía aquí como «Compra a
+  // cliente» y sin cédula.
   const { rows: seriales } = await pool.query(`
+    WITH fichas AS (
+      SELECT LOWER(BTRIM(nombre)) AS k, MIN(cedula) AS cedula, MIN(celular) AS celular
+      FROM clientes
+      WHERE negocio_id = $1 AND nombre IS NOT NULL
+      GROUP BY 1
+      HAVING COUNT(*) = 1
+    )
     SELECT
       'compra' AS tipo, s.id, s.imei,
       s.cliente_origen AS nombre_cliente,
-      NULL AS cedula_cliente, NULL AS cliente_id,
+      fi.cedula  AS cedula_cliente,
+      fi.celular AS celular_cliente,
+      NULL AS cliente_id,
       ps.nombre AS nombre_producto, ps.marca, ps.modelo,
       s.creado_en AS fecha, s.costo_compra AS valor,
       su.nombre AS sucursal_nombre, NULL AS factura_id
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales        su ON su.id = ps.sucursal_id
+    LEFT JOIN fichas       fi ON fi.k  = LOWER(BTRIM(s.cliente_origen))
     WHERE su.negocio_id = $1
       AND s.cliente_origen IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM retomas r
-        JOIN facturas f ON f.id = r.factura_id
-        JOIN sucursales sf ON sf.id = f.sucursal_id
-        WHERE r.imei = s.imei AND sf.negocio_id = $1
+        ${JOINS_ORIGEN_RETOMA}
+        WHERE UPPER(BTRIM(r.imei)) = UPPER(BTRIM(s.imei))
+          AND ${NEGOCIO_RETOMA} = $1
       )
       AND (
-        ${sn('s.cliente_origen')} LIKE $2 ESCAPE '\\'
-        OR ${sn('ps.nombre')}     LIKE $2 ESCAPE '\\'
-        OR LOWER(s.imei)          LIKE $2 ESCAPE '\\'
+        ${sn('s.cliente_origen')}        LIKE $2 ESCAPE '\\'
+        OR ${sn('ps.nombre')}            LIKE $2 ESCAPE '\\'
+        OR LOWER(s.imei)                 LIKE $2 ESCAPE '\\'
+        OR LOWER(COALESCE(fi.cedula,'')) LIKE $2 ESCAPE '\\'
       )
     ORDER BY s.creado_en DESC
   `, [negocioId, filtro]);
 
+  // Las retomas de las tres puertas. Las de préstamo y directas POR CANTIDAD
+  // ya salen como movimiento en «Por cantidad» (historial_stock_cantidad,
+  // tipo 'retoma'), así que aquí solo entran las que traen IMEI; las de
+  // factura entran todas, como siempre.
   const { rows: retomas } = await pool.query(`
-    SELECT
-      'retoma' AS tipo, r.id, r.imei,
-      f.nombre_cliente, f.cedula AS cedula_cliente, f.cliente_id,
-      r.nombre_producto, NULL AS marca, NULL AS modelo,
-      r.fecha, r.valor_retoma AS valor,
-      su.nombre AS sucursal_nombre, f.id AS factura_id
-    FROM retomas r
-    JOIN facturas   f  ON f.id  = r.factura_id
-    JOIN sucursales su ON su.id = f.sucursal_id
-    WHERE su.negocio_id = $1
-      AND (
-        ${sn('f.nombre_cliente')}          LIKE $2 ESCAPE '\\'
-        OR LOWER(f.cedula)                 LIKE $2 ESCAPE '\\'
-        OR ${sn('r.nombre_producto')}      LIKE $2 ESCAPE '\\'
-        OR LOWER(COALESCE(r.imei, ''))     LIKE $2 ESCAPE '\\'
-      )
-    ORDER BY r.fecha DESC
+    SELECT * FROM (
+      SELECT
+        'retoma' AS tipo, r.id, r.imei,
+        r.nombre_producto, NULL AS marca, NULL AS modelo,
+        r.valor_retoma AS valor,
+        f.cliente_id,
+        ${COLUMNAS_ORIGEN_RETOMA}
+      FROM retomas r
+      ${JOINS_ORIGEN_RETOMA}
+      WHERE ${NEGOCIO_RETOMA} = $1
+        AND (r.factura_id IS NOT NULL OR NULLIF(BTRIM(r.imei), '') IS NOT NULL)
+    ) t
+    WHERE ${sn("COALESCE(t.nombre_cliente, '')")}  LIKE $2 ESCAPE '\\'
+       OR LOWER(COALESCE(t.cedula_cliente, ''))    LIKE $2 ESCAPE '\\'
+       OR LOWER(COALESCE(t.celular_cliente, ''))   LIKE $2 ESCAPE '\\'
+       OR ${sn("COALESCE(t.nombre_producto, '')")} LIKE $2 ESCAPE '\\'
+       OR LOWER(COALESCE(t.imei, ''))              LIKE $2 ESCAPE '\\'
+    ORDER BY t.fecha DESC, t.id DESC
   `, [negocioId, filtro]);
 
   return { seriales, retomas };

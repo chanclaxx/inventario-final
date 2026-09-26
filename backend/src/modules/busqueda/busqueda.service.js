@@ -35,15 +35,49 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
     repo.getTecnicosPorIMEI(serial.imei, negocioId),
   ]);
 
+  // ── De quién se compró (compra a cliente o retoma) ─────────────────────────
+  // La unidad solo guarda el nombre; la cédula y el celular salen de la retoma
+  // que la ingresó (si fue una) o de la ficha del cliente. No es un dato
+  // sensible —la venta ya muestra al comprador a cualquier rol— y es justo lo
+  // que se necesita cuando alguien pregunta «¿a quién le compramos esto?».
+  // La retoma "ingresó" la unidad si es del mismo día de su entrada.
+  const retomaDeEntrada = serial.cliente_origen
+    ? retomas.find((r) => r.dia && r.dia === serial.fecha_entrada_dia && r.ingreso_inventario)
+    : null;
+  let clienteOrigen = null;
+  if (serial.cliente_origen) {
+    const ficha = retomaDeEntrada
+      ? { cedula: retomaDeEntrada.cedula_cliente, celular: retomaDeEntrada.celular_cliente }
+      : await repo.getClientePorNombre(serial.cliente_origen, negocioId);
+    clienteOrigen = {
+      nombre:  serial.cliente_origen,
+      cedula:  ficha?.cedula  || null,
+      celular: ficha?.celular || null,
+    };
+  }
+  serial.cliente_origen_cedula  = clienteOrigen?.cedula  ?? null;
+  serial.cliente_origen_celular = clienteOrigen?.celular ?? null;
+  const origenEntrada = retomaDeEntrada ? 'retoma'
+    : (clienteOrigen && !serial.proveedor_id) ? 'cliente'
+    : serial.proveedor_id ? 'proveedor'
+    : null;
+  delete serial.fecha_entrada_dia;
+
   // Capturar info sensible antes de borrarla del objeto serial
-  const entradaDetalle = admin
-    ? {
-        costo_compra:     serial.costo_compra,
-        // El costo que de verdad rige en esta sucursal si es un local de la red.
-        costo_local:      serial.costo_local,
-        proveedor_nombre: serial.proveedor_nombre,
-      }
-    : {};
+  const entradaDetalle = {
+    origen:          origenEntrada,
+    cliente:         clienteOrigen?.nombre  ?? null,
+    cliente_cedula:  clienteOrigen?.cedula  ?? null,
+    cliente_celular: clienteOrigen?.celular ?? null,
+    ...(admin
+      ? {
+          costo_compra:     serial.costo_compra,
+          // El costo que de verdad rige en esta sucursal si es un local de la red.
+          costo_local:      serial.costo_local,
+          proveedor_nombre: serial.proveedor_nombre,
+        }
+      : {}),
+  };
 
   // Eliminar campos sensibles para no-admin
   if (!admin) {
@@ -103,15 +137,27 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
         sucursal:       p.sucursal_nombre,
       },
     })),
+    // Las tres puertas de la retoma (factura, préstamo y directa), con la
+    // persona completa. El valor pagado no es un costo oculto: es lo que dice
+    // la factura del cliente y lo que ve quien hace la retoma.
     ...retomas.map((r) => ({
       tipo:           'retoma',
       fecha:          r.fecha,
-      referencia_id:  r.factura_id,
+      referencia_id:  r.factura_id ?? r.prestamo_id ?? r.id,
       detalle: {
+        origen:             r.origen,
+        factura_numero:     r.factura_numero,
+        prestamo_numero:    r.prestamo_numero,
+        estado_factura:     r.estado_factura,
+        nombre_producto:    r.nombre_producto,
         descripcion:        r.descripcion,
         valor_retoma:       r.valor_retoma,
         ingreso_inventario: r.ingreso_inventario,
         cliente:            r.nombre_cliente,
+        cedula:             r.cedula_cliente,
+        celular:            r.celular_cliente,
+        persona_tipo:       r.persona_tipo,
+        usuario:            r.usuario_nombre,
         sucursal:           r.sucursal_nombre,
       },
     })),
@@ -229,7 +275,7 @@ const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds =
   if (modo === 'imei') {
     const [lineas, retomas] = await Promise.all([
       repo.buscarComprasPorIMEI(q, negocioId, proveedorIds),
-      repo.getRetomasPorIMEI(q, negocioId),
+      repo.getRetomasPorIMEI(q, negocioId, { parcial: true }),
     ]);
     return { lineas, retomas };
   }
