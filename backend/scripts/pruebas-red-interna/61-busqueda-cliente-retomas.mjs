@@ -42,6 +42,10 @@ await db.exec(`
   ALTER TABLE compras ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'Activa';
   ALTER TABLE compras ADD COLUMN IF NOT EXISTS fecha TIMESTAMP DEFAULT NOW();
   ALTER TABLE seriales ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP DEFAULT NOW();
+  -- En producción un compañero NO tiene cédula (solo nombre y teléfono); el
+  -- fixture compartido sí la declara y por eso \`prp.cedula\` pasó aquí y tumbó
+  -- la búsqueda por IMEI en producción (42703).
+  ALTER TABLE prestatarios DROP COLUMN IF EXISTS cedula;
 `);
 for (const m of ['20260725_red_interna', '20260726_red_interna_v2', '20260822_red_interna_envios',
   '20260823_red_interna_control', '20260823_red_interna_cargos_pagables', '20260823_remision_variantes',
@@ -82,8 +86,8 @@ await q(`INSERT INTO clientes (id, negocio_id, nombre, cedula, celular) VALUES
   (3, 1, 'Carlos Ruiz','2021', '3009998877'),
   (4, 1, 'Dora Díaz',  '4040', '3004445566'),
   (9, 2, 'Ana Pérez',  '9999', '3999999999')`);
-await q(`INSERT INTO prestatarios (id, negocio_id, nombre, cedula, telefono) VALUES
-  (1, 1, 'Local Centro', '800', '6011234567')`);
+await q(`INSERT INTO prestatarios (id, negocio_id, nombre, telefono) VALUES
+  (1, 1, 'Local Centro', '6011234567')`);
 await q(`INSERT INTO productos_serial (id, nombre, sucursal_id) VALUES (1, 'iPhone 11 usado', 1), (2, 'Moto G', 2)`);
 
 // Compra a cliente: la unidad solo guarda el NOMBRE.
@@ -167,9 +171,9 @@ seccion('3. Las tres puertas de la retoma en la línea de tiempo');
   // La directa no tiene serial en el fixture: se ve desde el buscador de compras.
   const c = await busqueda.buscarCompras('555555555555555', 'imei', 1, 1, 'admin_negocio', null);
   checkEq('★ retoma DIRECTA: aparece', c.retomas.length, 1);
-  checkEq('  a nombre del compañero, con su teléfono',
+  checkEq('  a nombre del compañero, con su teléfono (un compañero no tiene cédula)',
     [c.retomas[0].nombre_cliente, c.retomas[0].cedula_cliente, c.retomas[0].celular_cliente, c.retomas[0].persona_tipo],
-    ['Local Centro', '800', '6011234567', 'companero']);
+    ['Local Centro', null, '6011234567', 'companero']);
   checkEq('  marcada como directa', c.retomas[0].origen, 'directa');
 }
 

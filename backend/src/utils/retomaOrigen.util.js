@@ -37,6 +37,9 @@ const JOINS_ORIGEN_RETOMA = `
 
 // NULLIF(…, '') en los textos copiados: una factura sin cédula la guarda como
 // cadena vacía y el COALESCE se quedaría con ella en vez de ir a la ficha.
+// `prestatarios` NO tiene cédula (solo nombre y teléfono): nombrar
+// `prp.cedula` tumbó la búsqueda por IMEI entera en producción. El fixture de
+// pruebas sí la declara, así que la suite no lo cazaba.
 const COLUMNAS_ORIGEN_RETOMA = `
   CASE WHEN r.factura_id  IS NOT NULL THEN 'factura'
        WHEN r.prestamo_id IS NOT NULL THEN 'prestamo'
@@ -52,8 +55,8 @@ const COLUMNAS_ORIGEN_RETOMA = `
            prp.nombre, cp.nombre, NULLIF(BTRIM(p.prestatario), ''),
            prd.nombre, cd.nombre)                                    AS nombre_cliente,
   COALESCE(NULLIF(BTRIM(f.cedula), ''), cf.cedula,
-           prp.cedula, cp.cedula, NULLIF(BTRIM(p.cedula), ''),
-           prd.cedula, cd.cedula)                                    AS cedula_cliente,
+           cp.cedula, NULLIF(BTRIM(p.cedula), ''),
+           cd.cedula)                                                AS cedula_cliente,
   COALESCE(NULLIF(BTRIM(f.celular), ''), cf.celular,
            prp.telefono, cp.celular, NULLIF(BTRIM(p.telefono), ''),
            prd.telefono, cd.celular)                                 AS celular_cliente,
