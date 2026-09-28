@@ -6,13 +6,14 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, ToggleLeft, ToggleRight, Building2 } from 'lucide-react';
+import { Plus, Pencil, ToggleLeft, ToggleRight, Building2, FileText } from 'lucide-react';
+import { ModalDatosDocumentoSucursal } from './ModalDatosDocumentoSucursal';
 
 const FORM_INICIAL = { nombre: '', direccion: '', telefono: '' };
 
 const fetchSucursales = () => api.get('/sucursales').then((r) => r.data.data);
 
-function FilaSucursal({ sucursal, onEditar, onToggle }) {
+function FilaSucursal({ sucursal, onEditar, onToggle, onDocumentos }) {
   return (
     <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
       <div className="flex-1 min-w-0">
@@ -25,6 +26,13 @@ function FilaSucursal({ sucursal, onEditar, onToggle }) {
         )}
       </div>
       <div className="flex gap-1 flex-shrink-0">
+        <button
+          onClick={() => onDocumentos(sucursal)}
+          className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+          title="Datos para documentos (nombre, NIT, logo en facturas y recibos)"
+        >
+          <FileText size={14} />
+        </button>
         <button
           onClick={() => onEditar(sucursal)}
           className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
@@ -53,6 +61,7 @@ export function SucursalesConfig() {
   const [editando,  setEditando]  = useState(null);
   const [form,      setForm]      = useState(FORM_INICIAL);
   const [error,     setError]     = useState('');
+  const [documentos, setDocumentos] = useState(null);   // sucursal cuyos datos de documento se editan
 
   const { data: sucursales = [] } = useQuery({
     queryKey: ['sucursales'],
@@ -135,6 +144,7 @@ export function SucursalesConfig() {
               sucursal={s}
               onEditar={abrirEditar}
               onToggle={(suc) => mutToggle.mutate(suc.id)}
+              onDocumentos={setDocumentos}
             />
           ))}
           {inactivas.length > 0 && (
@@ -146,11 +156,20 @@ export function SucursalesConfig() {
                   sucursal={s}
                   onEditar={abrirEditar}
                   onToggle={(suc) => mutToggle.mutate(suc.id)}
+                  onDocumentos={setDocumentos}
                 />
               ))}
             </>
           )}
         </div>
+      )}
+
+      {documentos && (
+        <ModalDatosDocumentoSucursal
+          key={documentos.id}
+          sucursal={documentos}
+          onClose={() => setDocumentos(null)}
+        />
       )}
 
       <Modal

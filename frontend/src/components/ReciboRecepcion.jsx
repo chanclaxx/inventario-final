@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import { createPortal } from 'react-dom';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 
@@ -111,7 +112,9 @@ function ContenidoRecepcion({ orden, config }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export function ReciboRecepcion({ orden, config = {}, onClose }) {
+export function ReciboRecepcion({ orden, config: configNegocio = {}, onClose }) {
+  // Encabezado de la sede que recibió el equipo (sus datos propios, si los tiene).
+  const config = useConfigDocumento(configNegocio, orden?.sucursal_id);
   const yaImprimio = useRef(false);
   const [portalContainer] = useState(() => {
     const el = document.createElement('div');

@@ -42,10 +42,14 @@ const _num = (v) => Number(v || 0);
 // Se vio al renderizar el PDF, no leyendo su texto: el texto decía «−$».
 const _menos = (v) => (_num(v) > 0 ? `- ${formatCOP(v)}` : formatCOP(0));
 
-const _config = async (negocioId) => {
+// El encabezado es el de la sede que EMITE el documento, con sus datos propios
+// si los tiene (`emisor.util`): el envío, quien lo manda; la cuenta del local
+// y sus pendientes, la bodega, que es quien cobra.
+const _config = async (negocioId, sucursalEmisora = null) => {
   const { rows } = await pool.query(
     'SELECT clave, valor FROM config_negocio WHERE negocio_id = $1', [negocioId]);
-  return Object.fromEntries(rows.map((r) => [r.clave, r.valor]));
+  return require('../../utils/emisor.util').configDocumento(
+    negocioId, sucursalEmisora, Object.fromEntries(rows.map((r) => [r.clave, r.valor])));
 };
 
 const _nuevoDoc = (titulo, config) => new PDFDocument({
@@ -443,7 +447,7 @@ const construirPdfEnvio = (r, config) => {
 const generarPdfEnvio = async (req, remisionId) => {
   const service = require('./redInterna.service');
   const r = await service.getRemision(req, remisionId);
-  const config = await _config(req.user.negocio_id);
+  const config = await _config(req.user.negocio_id, r.sucursal_origen_id);
   return construirPdfEnvio(r, config);
 };
 
@@ -582,7 +586,7 @@ const construirPdfEnviosActivos = (data, config) => {
 const generarPdfEnviosActivos = async (req, sucursalId) => {
   const service = require('./redInterna.service');
   const data = await service.getEstadoCuenta(req, sucursalId, {});
-  const config = await _config(req.user.negocio_id);
+  const config = await _config(req.user.negocio_id, req.red?.bodega_id);
   return construirPdfEnviosActivos(data, config);
 };
 
@@ -634,7 +638,7 @@ const generarPdfEstadoCuentaLocal = async (req, sucursalId) => {
   const movimientos = movimientosDeExtracto(extracto);
   const conSaldo = movimientos.filter((m) => m.saldo != null);
   const saldoFinal = conSaldo.length ? conSaldo[conSaldo.length - 1].saldo : 0;
-  const config = await _config(req.user.negocio_id);
+  const config = await _config(req.user.negocio_id, req.red?.bodega_id);
   return {
     saldoFinal,
     doc: construirPdfEstadoCuenta({

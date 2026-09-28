@@ -509,9 +509,11 @@ const crearFactura = async ({
               facturasRepo.getRetomas(factura.id),
               garantiasRepo.findPorFactura(factura.id),
             ]);
+            // El correo lleva el nombre y los datos de la sucursal que vendió.
+            const { configDocumento } = require('../../utils/emisor.util');
             await enviarFactura(
               { ...factura, lineas: lineasEmail, pagos: pagosEmail, retomas: retomasEmail, garantias: garantiasEmail, email },
-              configMap
+              await configDocumento(negocio_id, factura.sucursal_id, configMap)
             );
           }
         } catch (err) {

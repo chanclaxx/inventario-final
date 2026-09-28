@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 
 /**
@@ -16,7 +17,10 @@ import { formatCOP, formatFechaHora } from '../utils/formatters';
  * Los 4 parámetros de impresión se leen de config_negocio,
  * misma fuente que usa FacturaTermica. Fallback = valores originales.
  */
-export function ReciboAcreedor({ acreedor, movimiento, config = {}, onClose }) {
+export function ReciboAcreedor({ acreedor, movimiento, config: configNegocio = {}, onClose }) {
+  // Encabezado de la sede cuya caja hizo el movimiento (sus datos propios, si
+  // los tiene); sin sede, el del negocio.
+  const config = useConfigDocumento(configNegocio, movimiento?.sucursal_id);
   useEffect(() => {
     const timer = setTimeout(() => window.print(), 300);
     return () => clearTimeout(timer);

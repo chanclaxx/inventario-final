@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import { createPortal } from 'react-dom';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 
@@ -168,7 +169,9 @@ function ContenidoComprobante({ orden, config, garantias }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export function ComprobanteServicio({ orden, config = {}, garantias = [], onClose }) {
+export function ComprobanteServicio({ orden, config: configNegocio = {}, garantias = [], onClose }) {
+  // Encabezado de la sede de la orden (sus datos propios, si los tiene).
+  const config = useConfigDocumento(configNegocio, orden?.sucursal_id);
   const yaImprimio = useRef(false);
   const [portalContainer] = useState(() => {
     const el = document.createElement('div');

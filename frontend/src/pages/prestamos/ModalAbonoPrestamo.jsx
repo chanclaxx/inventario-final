@@ -135,6 +135,7 @@ export function ModalAbonoPrestamo({ prestamo, onClose }) {
         },
         deuda: {
           tipo: 'prestamo', numero: prestamo.numero ?? prestamo.id,
+          sucursal_id: prestamo.sucursal_id,   // encabezado de la sede que prestó
           persona: prestamo.prestatario, cedula: prestamo.cedula,
           descripcion: prestamo.nombre_producto,
           fecha_limite: data?.mora?.fecha_limite ?? prestamo.mora?.fecha_limite ?? null,

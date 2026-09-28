@@ -1703,6 +1703,21 @@ const aplicarMigraciones = async (client) => {
     if (sqlReserva) await migrar(client, 'Reserva de mercancía en tránsito (red interna)', sqlReserva);
   }
 
+  // Datos de cada sucursal para los documentos (nombre comercial, NIT,
+  // dirección, teléfono, logo). Ver migrations/20260928_datos_documento_sucursal.sql.
+  // Bloque PROPIO: si fallara, `hayDatosDocumentoSucursal()` queda en falso y
+  // todo documento sale con los datos del negocio, como siempre.
+  {
+    let sqlDocSuc = null;
+    try {
+      sqlDocSuc = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20260928_datos_documento_sucursal.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Datos de sucursal en documentos: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlDocSuc) await migrar(client, 'Datos de sucursal para documentos', sqlDocSuc);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

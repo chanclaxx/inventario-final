@@ -1,5 +1,6 @@
 import { formatCOP, formatFechaHora } from '../utils/formatters';
 import { fechaLegible } from '../utils/mora';
+import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import {
   DocumentoTermico, EncabezadoNegocio, Divisor, Fila,
 } from './documentos/DocumentoTermico';
@@ -22,7 +23,9 @@ import {
  *   config  config_negocio
  *   onClose () => void
  */
-export function ReciboAbono({ abono, deuda, config = {}, onClose }) {
+export function ReciboAbono({ abono, deuda, config: configNegocio = {}, onClose }) {
+  // Encabezado de la sede del crédito o del préstamo (sus datos propios, si los tiene).
+  const config = useConfigDocumento(configNegocio, deuda?.sucursal_id);
   if (!abono || !deuda) return null;
 
   const capital     = Number(abono.capital || 0);

@@ -51,6 +51,7 @@ const detectarColumnas = async () => {
   await _detectarTecnicos();
   await _detectarObsequios();
   await _detectarMoraEnvios();
+  await _detectarDatosDocumentoSucursal();
   return _ubicacionDisponible;
 };
 
@@ -506,6 +507,26 @@ const _detectarMoraEnvios = async () => {
 
 const hayMoraEnvios = () => _moraEnviosDisponible;
 
+// ── Datos de cada sucursal para los documentos ───────────────────────────────
+// Sin la tabla, `emisor.util` no la nombra y todo documento sale con los datos
+// del negocio: exactamente lo de antes.
+let _datosDocSucursalDisponible = false;
+const _detectarDatosDocumentoSucursal = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+         AND table_name = 'sucursales_documento'`
+    );
+    _datosDocSucursalDisponible = rows.length > 0;
+  } catch (err) {
+    _datosDocSucursalDisponible = false;
+    console.error('⚠️  No se pudo verificar `sucursales_documento` (feature desactivada):', err.message);
+  }
+};
+const hayDatosDocumentoSucursal = () => _datosDocSucursalDisponible;
+const _setDatosDocumentoSucursalDisponible = (v) => { _datosDocSucursalDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -533,4 +554,5 @@ module.exports = {
   hayTecnicos, _setTecnicosDisponible,
   hayObsequios, _setObsequiosDisponible,
   hayMoraEnvios, _setMoraEnviosDisponible,
+  hayDatosDocumentoSucursal, _setDatosDocumentoSucursalDisponible,
 };

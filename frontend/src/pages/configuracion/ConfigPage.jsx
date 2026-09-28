@@ -10,6 +10,7 @@ import { UsuariosConfig }    from './UsuariosConfig';
 import { SucursalesConfig }  from './SucursalesConfig';
 import { RedInternaConfig } from './RedInternaConfig';
 import { UsuariosAutorizados } from './UsuariosAutorizados';
+import { comprimirLogo } from '../../utils/logoDataUrl';
 import { VendedoresConfig }  from './VendedoresConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
@@ -1276,29 +1277,6 @@ function LogoConfig({ valores, set }) {
   const logo = valores.logo_negocio || '';
   const [error, setError] = useState('');
 
-  const comprimirImagen = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new window.Image();
-        img.onload = () => {
-          const MAX = 400;
-          const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-          const w = Math.round(img.width * scale);
-          const h = Math.round(img.height * scale);
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL('image/jpeg', 0.8));
-        };
-        img.onerror = () => reject(new Error('Imagen inválida'));
-        img.src = e.target.result;
-      };
-      reader.onerror = () => reject(new Error('Error leyendo archivo'));
-      reader.readAsDataURL(file);
-    });
-
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1309,7 +1287,7 @@ function LogoConfig({ valores, set }) {
       return;
     }
     try {
-      const b64 = await comprimirImagen(file);
+      const b64 = await comprimirLogo(file);
       set('logo_negocio', b64);
     } catch {
       setError('No se pudo procesar la imagen.');

@@ -10,6 +10,7 @@
  */
 
 const { pool } = require('../../config/db');
+const { configDocumento, encabezadoPara, aplicarDatosSucursal } = require('../../utils/emisor.util');
 const { construirPdfEstadoCuenta } = require('../../utils/estadoCuenta.pdf');
 const { generarAvisoMora, generarPazYSalvo } = require('../../utils/obligacion.pdf');
 const service = require('./creditos.service');
@@ -35,8 +36,12 @@ const generarPdfEstadoCuenta = async ({ clave, negocioId, negocioNombre, logoNeg
     `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`,
     [negocioId]
   );
-  const config = {};
-  for (const row of configRows) config[row.clave] = row.valor;
+  const configNegocio = {};
+  for (const row of configRows) configNegocio[row.clave] = row.valor;
+  // Encabezado de la sede de quien lo imprime (sin sede elegida, el negocio).
+  const enc = await encabezadoPara(negocioId, sucursalId, { nombre: negocioNombre, logo: logoNegocio });
+  const config = aplicarDatosSucursal(configNegocio, enc.datos);
+  negocioNombre = enc.nombre; logoNegocio = enc.logo;
 
   // Lo que no arrastra deuda se lista en gris y sin saldo, con la razon a la
   // vista. Son dos casos distintos y el cliente tiene que poder distinguirlos:
@@ -79,24 +84,26 @@ const _configNegocio = async (negocioId) => {
 };
 
 const generarPdfAvisoMora = async ({ creditoId, negocioId }) => {
-  const { persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
+  const { credito, persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
 
   if (!resumen.vencido) {
     throw { status: 400, message: 'Esta factura no está vencida: no procede un aviso de mora' };
   }
 
-  const config = await _configNegocio(negocioId);
+  // Con los datos de la sede que vendió a crédito.
+  const config = await configDocumento(negocioId, credito.sucursal_id, await _configNegocio(negocioId));
   return generarAvisoMora({ config, persona, resumen, descripcion });
 };
 
 const generarPdfPazYSalvo = async ({ creditoId, negocioId }) => {
-  const { persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
+  const { credito, persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
 
   if (!resumen.pagada) {
     throw { status: 400, message: 'La factura aún tiene saldo pendiente: no se puede expedir paz y salvo' };
   }
 
-  const config = await _configNegocio(negocioId);
+  // Con los datos de la sede que vendió a crédito.
+  const config = await configDocumento(negocioId, credito.sucursal_id, await _configNegocio(negocioId));
   return generarPazYSalvo({ config, persona, resumen, descripcion });
 };
 

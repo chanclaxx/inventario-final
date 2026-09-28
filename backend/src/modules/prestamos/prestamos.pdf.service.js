@@ -1,6 +1,7 @@
 'use strict';
 
 const PDFDocument = require('pdfkit');
+const { configDocumento, encabezadoPara, aplicarDatosSucursal } = require('../../utils/emisor.util');
 const { pool }    = require('../../config/db');
 const repo        = require('./prestamos.repository');
 
@@ -289,7 +290,11 @@ const drawResumenGlobal = (doc, prestamos, y) => {
   return y + 46;
 };
 
-const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio }) => {
+const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {
+  // Reúne préstamos de varias sedes: el encabezado es el de la sede de quien
+  // lo imprime (sin sede elegida, el del negocio).
+  ({ nombre: negocioNombre, logo: logoNegocio } =
+    await encabezadoPara(negocioId, sucursalId, { nombre: negocioNombre, logo: logoNegocio }));
   let prestamos;
   if (tipo === 'prestatario') {
     prestamos = await repo.findActivosPorPrestatario(personaId, negocioId);
@@ -551,6 +556,9 @@ const generarPdfPrestamoIndividual = async ({ prestamoId, negocioId, negocioNomb
     err.status = 400;
     throw err;
   }
+  // El encabezado es el de la sede que prestó, si tiene datos propios.
+  ({ nombre: negocioNombre, logo: logoNegocio } =
+    await encabezadoPara(negocioId, prestamo.sucursal_id, { nombre: negocioNombre, logo: logoNegocio }));
 
   const { rows: extra } = await pool.query(`
     SELECT
@@ -660,6 +668,9 @@ const TIPO_LABEL = {
 };
 
 const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {
+  // Encabezado de la sede de quien lo imprime (sin sede elegida, el negocio).
+  const enc = await encabezadoPara(negocioId, sucursalId, { nombre: negocioNombre, logo: logoNegocio });
+  negocioNombre = enc.nombre; logoNegocio = enc.logo;
   // Datos de persona (prestatarios no tiene cedula/celular)
   const personaQuery = tipo === 'prestatario'
     ? `SELECT nombre, NULL AS cedula, NULL AS celular, telefono FROM prestatarios WHERE id = $1`
@@ -711,7 +722,7 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
     subtitulo: tipo === 'prestatario' ? 'Prestatario' : 'Cliente',
     movimientos,
     saldoFinal,
-    config,
+    config: aplicarDatosSucursal(config, enc.datos),
     logoNegocio,
     tipoLabels: TIPO_LABEL,
     negocioNombre,
@@ -760,10 +771,8 @@ const _documentoPrestamo = async (prestamoId, negocioId) => {
     }
   }
 
-  const { rows: configRows } = await pool.query(
-    `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`, [negocioId]);
-  const config = {};
-  for (const row of configRows) config[row.clave] = row.valor;
+  // Aviso de mora y paz y salvo: con los datos de la sede que prestó.
+  const config = await configDocumento(negocioId, datos.sucursal_id);
 
   const descripcion = [
     datos.nombre_producto,
@@ -773,6 +782,8 @@ const _documentoPrestamo = async (prestamoId, negocioId) => {
 
   return {
     config,
+    // Para el ticket POS: con ella la pantalla resuelve el mismo encabezado.
+    sucursal_id: datos.sucursal_id,
     persona: {
       nombre:  datos.persona_nombre,
       cedula:  datos.persona_cedula !== 'COMPANERO' ? datos.persona_cedula : null,

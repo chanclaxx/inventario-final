@@ -4,6 +4,7 @@ const { generarPdfServicio, generarPdfRecepcion } = require('./servicios.pdf');
 const repo                   = require('./servicios.repository');
 const garantiasRepo          = require('../garantias/garantias.repository');
 const { pool }               = require('../../config/db');
+const { configDocumento }    = require('../../utils/emisor.util');
 
 const getPdfServicio = async (req, res, next) => {
   try {
@@ -19,8 +20,10 @@ const getPdfServicio = async (req, res, next) => {
       'SELECT clave, valor FROM config_negocio WHERE negocio_id = $1',
       [negocioId],
     );
-    const config = {};
-    for (const row of configRows) config[row.clave] = row.valor;
+    const configNegocio = {};
+    for (const row of configRows) configNegocio[row.clave] = row.valor;
+    // El encabezado es el de la sucursal de la orden, si tiene datos propios.
+    const config = await configDocumento(negocioId, orden.sucursal_id, configNegocio);
 
     const garantias = await garantiasRepo.findAll(negocioId);
 
@@ -42,8 +45,10 @@ const getPdfRecepcion = async (req, res, next) => {
       'SELECT clave, valor FROM config_negocio WHERE negocio_id = $1',
       [negocioId],
     );
-    const config = {};
-    for (const row of configRows) config[row.clave] = row.valor;
+    const configNegocio = {};
+    for (const row of configRows) configNegocio[row.clave] = row.valor;
+    // El encabezado es el de la sucursal de la orden, si tiene datos propios.
+    const config = await configDocumento(negocioId, orden.sucursal_id, configNegocio);
 
     generarPdfRecepcion({ orden, config, res });
   } catch (err) {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useConfigDocumento } from '../../hooks/useConfigDocumento';
 import { Modal }   from '../ui/Modal';
 import { Spinner } from '../ui/Spinner';
 import { Printer, FileDown, Loader2, AlertTriangle, CheckCircle, FileText } from 'lucide-react';
@@ -21,7 +22,7 @@ import { formatCOP } from '../../utils/formatters';
  * @param {object}   config   config_negocio (parámetros de impresión)
  * @param {node}     [extra]  documentos propios del módulo (ej. la factura)
  */
-export function ModalDocumentosObligacion({ api, id, config = {}, onClose, extra = null }) {
+export function ModalDocumentosObligacion({ api, id, config: configNegocio = {}, onClose, extra = null }) {
   const [pos,      setPos]      = useState(null);   // 'mora' | 'paz'
   const [cargando, setCargando] = useState(null);
   const [error,    setError]    = useState('');
@@ -32,6 +33,10 @@ export function ModalDocumentosObligacion({ api, id, config = {}, onClose, extra
     enabled:  !!id,
     staleTime: 0,
   });
+
+  // Encabezado de la sede del documento: el préstamo trae `sucursal_id`; el
+  // crédito, dentro de `credito`. Mismo criterio que el PDF.
+  const config = useConfigDocumento(configNegocio, data?.sucursal_id ?? data?.credito?.sucursal_id);
 
   const resumen     = data?.resumen;
   const persona     = data?.persona;

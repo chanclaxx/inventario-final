@@ -140,6 +140,7 @@ function ModalAbonoCredito({ credito, onClose }) {
           deuda: {
             tipo: 'credito',
             numero: credito.factura_numero ?? credito.factura_id,
+            sucursal_id: credito.sucursal_id,   // encabezado de la sede que vendió
             persona: credito.nombre_cliente, cedula: credito.cedula,
             fecha_limite: d.mora?.fecha_limite ?? null,
             dias_mora:    d.mora?.dias_vencidos ?? 0,

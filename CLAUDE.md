@@ -2365,6 +2365,38 @@ QZ_PRIVATE_KEY                                       # etiquetas: QZ Tray imprim
 - **Excel**: Inventory/product imports handled via `multer` + `xlsx` on the backend; frontend also exports Excel directly.
 - **PDF**: Generated server-side with `pdfkit`.
 
+> **Cada sucursal con SUS datos en los documentos** (`sucursales_documento`,
+> `utils/emisor.util.js`, `hooks/useConfigDocumento.js`, Ajustes → Sucursales →
+> icono de documento; pedido de Tesla, 28-sep-2026: la sede «BUNNY MOBILE»
+> entregaba facturas con el nombre y el NIT de Tesla). Nombre comercial, NIT,
+> dirección, teléfono y logo propios por sede; **lo vacío se hereda** del
+> negocio y sin fila (o sin la tabla) todo documento sale idéntico — aditivo
+> para los 28 negocios. Tabla aparte y no columnas de `sucursales`: el logo es
+> base64 y `sucursales` se lee en decenas de sitios. `sucursales.direccion` /
+> `telefono` **no** son respaldo automático (existían sin imprimirse; empezar a
+> usarlos cambiaría facturas en silencio): la pantalla solo los precarga.
+> **La regla es una: la sede del DOCUMENTO, no la de quien imprime** —un admin
+> que reimprime una factura de Bunny desde otra sede saca el encabezado de
+> Bunny—. `emisor.util` devuelve el MISMO mapa de `config_negocio` con
+> `nombre_negocio`/`nit`/`direccion`/`telefono`/`logo_negocio` reemplazados,
+> así ningún generador cambió su forma de leer. Dónde se aplica: factura PDF y
+> su correo (`factura.sucursal_id`), orden de servicio y recepción
+> (`orden.sucursal_id`), aviso de mora y paz y salvo (sede del crédito o del
+> préstamo), comprobante de préstamo, envío de la red interna (la sede que lo
+> MANDA), cuenta y pendientes del local (la bodega, que cobra) y el encabezado de
+> las etiquetas. Los documentos que juntan varias sedes (estado de cuenta,
+> préstamos activos de una persona) usan la sede de quien imprime; sin sede
+> elegida, el negocio. Préstamos usaba `req.user.negocio_nombre` (el nombre del
+> REGISTRO, no el de Ajustes) y así sigue cuando la sede no tiene nombre propio:
+> `encabezadoPara` solo reemplaza. En el navegador, `useConfigDocumento(config,
+> sucursalId)` hace lo mismo con `GET /sucursales/documentos` (sin logo: los
+> tickets no lo imprimen); la mezcla está duplicada en
+> `frontend/src/utils/emisor.js` y la prueba compara las dos. Fuera, a
+> propósito: los PDF de acreedores (son del negocio) y el reporte contable.
+> Prueba: `67-datos-documento-sucursal` (59; la sección 1 es la de sin datos, la
+> 4 renderiza la factura PDF de verdad y la 8 revisa que cada documento lea la
+> sede del documento).
+
 > **PDFKit pagina SOLO si no se lo impides — y lo hace mal**
 > (`utils/pdf.base.js`, `facturas.pdf.js`): `doc.text` con `width` llama por
 > dentro a `continueOnNewPage()` en cuanto la `y` cae por debajo del borde

@@ -8,6 +8,7 @@
 const { generarPdfFactura } = require('./facturas.pdf');
 const garantiasRepo         = require('../garantias/garantias.repository');
 const { pool }              = require('../../config/db');
+const { configDocumento }   = require('../../utils/emisor.util');
 
 
 const getPdfFactura = async (req, res, next) => {
@@ -25,8 +26,10 @@ const getPdfFactura = async (req, res, next) => {
       `SELECT clave, valor FROM config_negocio WHERE negocio_id = $1`,
       [req.user.negocio_id]
     );
-    const config = {};
-    for (const row of configRows) config[row.clave] = row.valor;
+    const configNegocio = {};
+    for (const row of configRows) configNegocio[row.clave] = row.valor;
+    // El encabezado es el de la sucursal que vendió, si tiene datos propios.
+    const config = await configDocumento(req.user.negocio_id, factura.sucursal_id, configNegocio);
 
     // Carga garantías activas para este negocio
     const garantias = await garantiasRepo.findPorFactura(factura.id);

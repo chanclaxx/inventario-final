@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useConfigDocumento } from '../../../hooks/useConfigDocumento';
 import { Printer, FileDown, Share2, Loader2, Truck, Undo2 } from 'lucide-react';
 import { Modal }   from '../../../components/ui/Modal';
 import { Spinner } from '../../../components/ui/Spinner';
@@ -143,10 +144,12 @@ export function ModalDocumentoEnvio({ remisionId, onClose }) {
     queryFn:  () => getRemision(remisionId).then((res) => res.data.data),
     staleTime: 30 * 1000,
   });
-  const { data: config } = useQuery({
+  const { data: configNegocio } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((res) => res.data.data),
   });
+  // Encabezado de la sede que MANDA la mercancía, como el PDF.
+  const config = useConfigDocumento(configNegocio, r?.sucursal_origen_id);
 
   if (vista === 'pos' && r) return <EnvioTermico r={r} config={config} onClose={onClose} />;
 

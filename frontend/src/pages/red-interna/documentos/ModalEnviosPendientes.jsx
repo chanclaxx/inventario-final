@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useConfigDocumento } from '../../../hooks/useConfigDocumento';
 import { Printer, FileDown, Share2, Loader2, ChevronRight, Receipt, Truck } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import api from '../../../api/axios.config';
@@ -102,10 +103,12 @@ export function ModalEnviosPendientes({
   const [vista, setVista] = useState('lista'); // 'lista' | 'pos'
   const [envioAbierto, setEnvioAbierto] = useState(null);
   const { exportando, error, exportar, puedeCompartir } = useExportarPdfRedInterna();
-  const { data: config } = useQuery({
+  const { data: configNegocio } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
+  // Lo cobra la bodega: su encabezado, como el PDF.
+  const config = useConfigDocumento(configNegocio, configNegocio?.red_interna_bodega_id);
 
   // Del más viejo al más nuevo: es el orden en que se cobran (el pago total los
   // tapa en ese mismo orden).

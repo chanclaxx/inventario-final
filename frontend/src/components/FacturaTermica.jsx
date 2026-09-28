@@ -1,4 +1,5 @@
 import { formatCOP, formatFechaHora } from '../utils/formatters';
+import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import { DocumentoTermico, Firma } from './documentos/DocumentoTermico';
 import {
   EstadoObligacionTermico, HistorialAbonosTermico, CondicionesTermico,
@@ -271,9 +272,9 @@ function ContenidoFactura({ factura, garantias, config, fuenteSize }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function FacturaTermica({ factura, garantias = [], onClose }) {
+  // Encabezado de la sede que vendió (sus datos propios, si los tiene).
+  const config = useConfigDocumento(factura?.config || {}, factura?.sucursal_id);
   if (!factura) return null;
-
-  const config = factura.config || {};
 
   return (
     <DocumentoTermico

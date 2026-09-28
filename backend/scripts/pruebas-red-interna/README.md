@@ -932,3 +932,13 @@ que el `costo_compra` de la BODEGA no llega a nadie del local ni por el listado
 de IMEI ni por el escáner; la 5, que la lista no abre la bodega ni otro local; y
 la 8 (★), dos fugas previas: el listado de productos por cantidad no se
 recortaba (`{ modo, items }`) y editar sin permiso habría borrado el costo.
+
+### `67-datos-documento-sucursal.mjs` — 59 verificaciones
+
+Cada sede imprime sus documentos con su nombre comercial, NIT, dirección,
+teléfono y logo (`sucursales_documento`); lo vacío se hereda del negocio. La
+sección 1 es la que protege a los negocios: sin tabla, sin fila o con todo vacío
+el mapa de config sale idéntico. La 4 renderiza la factura PDF de verdad, la 5
+el envío de la red interna (sale con la sede que lo manda), la 6 corre los
+endpoints de Ajustes, la 7 compara la mezcla del navegador contra la del backend
+y la 8 revisa que cada PDF y cada ticket lean la sede del DOCUMENTO.

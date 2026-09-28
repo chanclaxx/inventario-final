@@ -170,12 +170,19 @@ const nodosPorSeleccion = async (negocioId, sucursalId, seleccion) => {
   return rows;
 };
 
-/** Datos del encabezado que va en la etiqueta (nombre del negocio, sucursal). */
+/** Datos del encabezado que va en la etiqueta (nombre del negocio, sucursal).
+ *  Con nombre comercial propio de la sede (`sucursales_documento`), ese. */
 const contextoImpresion = async (negocioId, sucursalId) => {
+  const { hayDatosDocumentoSucursal } = require('../../config/columnas');
+  const propio = hayDatosDocumentoSucursal()
+    ? `(SELECT NULLIF(BTRIM(sd.nombre_comercial), '') FROM sucursales_documento sd
+         WHERE sd.sucursal_id = su.id),`
+    : '';
   const { rows } = await pool.query(
     `SELECT su.nombre AS sucursal_nombre,
-            (SELECT valor FROM config_negocio
-              WHERE negocio_id = $1 AND clave = 'nombre_negocio') AS negocio_nombre
+            COALESCE(${propio}
+              (SELECT valor FROM config_negocio
+                WHERE negocio_id = $1 AND clave = 'nombre_negocio')) AS negocio_nombre
      FROM sucursales su
      WHERE su.id = $2 AND su.negocio_id = $1`,
     [negocioId, sucursalId]

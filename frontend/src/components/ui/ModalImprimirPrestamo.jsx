@@ -1,6 +1,7 @@
 // src/components/ui/ModalImprimirPrestamo.jsx
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useConfigDocumento } from '../../hooks/useConfigDocumento';
 import { Modal }   from './Modal';
 import { Spinner } from './Spinner';
 import { Printer, FileDown, Share2, Loader2 } from 'lucide-react';
@@ -106,10 +107,12 @@ export function ModalImprimirPrestamo({ prestamo, onClose }) {
     enabled:  !!prestamo.id,
     staleTime: 0,
   });
-  const { data: config } = useQuery({
+  const { data: configNegocio } = useQuery({
     queryKey: ['config'],
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
+  // Encabezado de la sede que prestó (sus datos propios, si los tiene).
+  const config = useConfigDocumento(configNegocio, prestamo.sucursal_id);
 
   if (vista === 'pos') {
     return (

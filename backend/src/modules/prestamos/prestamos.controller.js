@@ -242,6 +242,7 @@ const exportarPdfPorPersona = async (req, res, next) => {
       negocioId:    req.user.negocio_id,
       negocioNombre,
       logoNegocio,
+      sucursalId:   req.todasSucursales ? null : req.sucursal_id,
     });
  
     // Nombre de archivo sugerido para el navegador
