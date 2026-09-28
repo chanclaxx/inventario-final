@@ -5,8 +5,8 @@
 //
 //   · Sección 1 — el envío: productos, IMEI, cargo, abonos, saldo y firmas; el
 //                 PDF dice las MISMAS cifras que la pantalla (getRemision).
-//   · Sección 2 — quién ve valores: el vendedor NO ve el valor de cada línea
-//                 (salvo que el negocio lo encienda), pero SÍ su cuenta; y
+//   · Sección 2 — quién ve valores: nadie del local ve el valor de cada línea
+//                 (salvo que el admin lo ponga en la lista), pero SÍ su cuenta; y
 //                 nadie del local ve el costo de la BODEGA, ni en el PDF ni en
 //                 el JSON del detalle (esa fuga existía).
 //   · Sección 3 — abonos ajenos: el detalle del envío sumaba los abonos de un
@@ -196,14 +196,18 @@ seccion('2. Quién ve qué valores');
   ok('  pero SÍ su cuenta: cargo y saldo', pVende.texto.includes(money(CARGO_E1)) && pVende.texto.includes(money(CARGO_E1 - 1000000)));
   ok('  y los productos con su IMEI', pVende.texto.includes('IMEI-111'));
 
-  // La opción de Ajustes (red_interna_ocultar_costos = '0'): el vendedor ve
-  // el valor del envío. Es lo que el local debe, no el costo de la bodega.
-  const vendeVe = { ...vende, red: red({ ocultar_costos: false }) };
+  // La lista de Ajustes (red_interna_valores_usuarios, sep-2026; reemplazó a
+  // red_interna_ocultar_costos): el vendedor autorizado ve el valor del envío.
+  // Es lo que el local debe, no el costo de la bodega. La suite 66 lo cubre
+  // entero.
+  const vendeVe = { ...vende, red: red({ valores_usuarios: [3] }) };
   const pVe = await leer(() => pdf.generarPdfEnvio(vendeVe, e1.id));
-  ok('con la opción encendida, el vendedor ve el valor de cada línea', pVe.texto.includes(money(1300000)));
+  ok('en la lista, el vendedor ve el valor de cada línea', pVe.texto.includes(money(1300000)));
+  const pSupSin = await leer(() => pdf.generarPdfEnvio(centro, e1.id));
+  ok('fuera de la lista, ni el supervisor lo ve (ausente = solo admin)', !pSupSin.texto.includes(money(1300000)));
 
   // El costo de la BODEGA ($1.000.000 por iPhone) no lo ve nadie del local.
-  for (const [quien, req] of [['supervisor', centro], ['vendedor', vende], ['vendedor con la opción', vendeVe]]) {
+  for (const [quien, req] of [['supervisor', centro], ['vendedor', vende], ['vendedor en la lista', vendeVe]]) {
     const det = await service.getRemision(req, e1.id);
     const serial = det.lineas.find((l) => l.imei === 'IMEI-111');
     ok(`JSON del detalle, ${quien} del local: sin el costo de la bodega`, serial.costo_origen == null);

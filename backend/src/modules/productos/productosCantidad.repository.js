@@ -161,15 +161,22 @@ const update = async (id, {
 }) => {
   // Misma escritura condicional que `nota` y `codigo`: si el campo no viene en
   // el payload no se toca. Así un guardado parcial nunca borra la ubicación.
+  //
+  // Costo y proveedor también: quien no puede verlos recibe `null` en el
+  // listado, y si el modal se los devolviera tal cual, editar el stock mínimo
+  // BORRARÍA el costo del producto. El controlador los descarta para ese
+  // usuario; aquí, ausentes, no se tocan.
   const conUbicacion = hayUbicacion();
+  const pCosto = conUbicacion ? 15 : 13;
+  const pProv  = pCosto + 1;
   const { rows } = await pool.query(`
     UPDATE productos_cantidad
     SET nombre         = $1,
         stock_minimo   = $2,
         unidad_medida  = $3,
-        costo_unitario = $4,
+        costo_unitario = CASE WHEN $${pCosto}::boolean THEN $4::numeric ELSE costo_unitario END,
         precio         = $5,
-        proveedor_id   = $6,
+        proveedor_id   = CASE WHEN $${pProv}::boolean THEN $6::int ELSE proveedor_id END,
         linea_id       = $7,
         nota           = CASE WHEN $8::boolean  THEN $9  ELSE nota   END,
         codigo         = CASE WHEN $10::boolean THEN $11 ELSE codigo END
@@ -186,6 +193,8 @@ const update = async (id, {
     codigo || null,
     id,
     ...(conUbicacion ? [ubicacion !== undefined, ubicacion || null] : []),
+    costo_unitario !== undefined,
+    proveedor_id !== undefined,
   ]);
   return rows[0] || null;
 };

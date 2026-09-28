@@ -72,7 +72,7 @@ await db.exec(`
 `);
 
 const bodega = { user:{id:1,negocio_id:1,rol:'admin_negocio'}, sucursal_id:1, esBodega:true,
-  red:{activa:true,bodega_id:1,confirmar_recepcion:true,confirmar_remesa:true, ocultar_costos: false } };
+  red:{activa:true,bodega_id:1,confirmar_recepcion:true,confirmar_remesa:true, valores_usuarios: [1] } }; /* sep-2026: el que ve valores está en la lista (ausente = solo admin) */
 const centro = { user:{id:1,negocio_id:1,rol:'vendedor'}, sucursal_id:2, esBodega:false, red:{...bodega.red} };
 
 console.log('\n═══ 1. El escáner acepta IMEI Y código en el mismo campo ═══');

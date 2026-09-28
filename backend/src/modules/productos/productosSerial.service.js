@@ -93,6 +93,12 @@ const getSeriales = async (negocioId, productoId, vendido) => {
   });
 };
 
+// La sede de un producto serial (para decidir el recorte de costos del local).
+const sucursalDeProducto = async (negocioId, productoId) => {
+  const producto = await repo.perteneceAlNegocio(productoId, negocioId);
+  return producto?.sucursal_id ?? null;
+};
+
 const agregarSerial = async (
   negocioId,
   productoId,
@@ -293,6 +299,6 @@ const buscarPorImei = async (q, sucursalId, negocioId) => {
 
 module.exports = {
   getProductos, getProductoById, crearProducto, actualizarProducto,
-  getSeriales, agregarSerial, actualizarSerial, eliminarSerial,
+  getSeriales, sucursalDeProducto, agregarSerial, actualizarSerial, eliminarSerial,
   verificarImei, getComprasCliente, eliminarProductoSerial, buscarPorImei,
 };

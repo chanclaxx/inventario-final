@@ -22,7 +22,11 @@ const CLAVES = {
   confirmarRecepcion:'red_interna_confirmar_recepcion',// '1' = el local confirma
   confirmarRemesa:   'red_interna_confirmar_remesa',   // '1' = la bodega confirma
   bloquearTraslados: 'red_interna_bloquear_traslados', // '1' = traslado libre off
-  ocultarCostos:     'red_interna_ocultar_costos',     // '1' = vendedor sin costos
+  ocultarCostos:     'red_interna_ocultar_costos',     // obsoleta: la reemplazó la lista de abajo
+  // Quién, además del admin, ve el precio de cada línea de los despachos (y el
+  // costo del inventario de su local, que es ese mismo precio). Arreglo JSON de
+  // ids de usuario. Ausente = solo el admin.
+  valoresUsuarios:   'red_interna_valores_usuarios',
   pedidos:           'red_interna_pedidos',            // '0' = el local no pide
   // Plazo de pago y mora de los envíos (20260925_mora_envios.sql). Mismas
   // claves que la mora de créditos con el prefijo de la red: las condiciones
@@ -46,6 +50,18 @@ const DEFAULTS = {
 // en Configuración se sienta inmediato.
 const _cache = new Map(); // negocio_id → { valor, expira }
 const TTL_MS = 60 * 1000;
+
+// Arreglo JSON de ids → números válidos. Ilegible = lista vacía (solo admin).
+const _idsDeLista = (raw) => {
+  try {
+    const lista = JSON.parse(raw ?? '[]');
+    return Array.isArray(lista)
+      ? lista.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
+  } catch {
+    return [];
+  }
+};
 
 const invalidarCache = (negocioId) => {
   if (negocioId == null) _cache.clear();
@@ -83,6 +99,7 @@ const getConfigRed = async (negocioId) => {
     // no los ve: confirma entregas y remite el dinero, pero no sabe a cuánto
     // le compró la bodega cada equipo.
     ocultar_costos:      map[CLAVES.ocultarCostos]      !== '0',
+    valores_usuarios:    _idsDeLista(map[CLAVES.valoresUsuarios]),
     // Ausente = ENCENDIDO, al revés que casi todo lo demás del sistema y a
     // propósito: la red interna YA es opt-in, así que quien llegó hasta aquí
     // encendió a mano la distribución desde bodega. Pedir no compromete

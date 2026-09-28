@@ -1,3 +1,4 @@
+import { formatCOP }      from '../../utils/formatters';
 import { useState, useMemo }                  from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2, StickyNote, Truck, ChevronDown, ChevronUp } from 'lucide-react';
@@ -12,13 +13,14 @@ import { InputUbicacion } from '../../components/ui/InputUbicacion';
 import { Button }       from '../../components/ui/Button';
 import { useAuth }      from '../../context/useAuth';
 import { PanelProcedencia } from '../../components/ui/PanelProcedencia';
-import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
+import { usePuedeVerCostos, usePuedeVerCostoInventario } from '../../hooks/usePuedeVerCostos';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, garantiaActiva, onClose }) {
   const [verProcedencia, setVerProcedencia] = useState(false);
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const puedeVerCostos = usePuedeVerCostos();
+  const puedeVerCostoInv = usePuedeVerCostoInventario();
   const esAdmin    = esAdminNegocio();
   const campos     = camposEdicionProductos(); // null = todos, array = permitidos
   const tiene      = (c) => campos === null || campos.includes(c);
@@ -105,8 +107,10 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
         unidad_medida : form.unidad_medida.trim() || 'unidad',
         stock_minimo  : Number(form.stock_minimo)  || 0,
         precio        : form.precio         !== '' ? Number(form.precio)         : null,
-        costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null,
-        proveedor_id  : form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null,
+        // Costo y proveedor solo viajan si este usuario los puede editar: sin
+        // permiso llegan en null en el listado, y devolverlos así los borraría.
+        ...(tiene('costo')     ? { costo_unitario: form.costo_unitario !== '' ? Number(form.costo_unitario) : null } : {}),
+        ...(tiene('proveedor') ? { proveedor_id:   form.proveedor_id   !== '' ? Number(form.proveedor_id)   : null } : {}),
         linea_id      : form.linea_id       !== '' ? Number(form.linea_id)       : null,
         nota          : form.nota.trim() || null,
         // Solo se envía si la feature está activa: negocios sin código no tocan la columna
@@ -230,6 +234,16 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
                   />
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Sin permiso para editarlo, pero autorizado a verlo: en un local de
+              la red, el costo es el precio del despacho (Ajustes → Red
+              interna). Con variantes, el de cada talla está en su tarjeta. */}
+          {!tiene('costo') && puedeVerCostoInv && !tieneAtributos && producto.costo_unitario != null && (
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-xl">
+              <span className="text-sm text-gray-500">Costo</span>
+              <span className="text-sm font-medium text-gray-700">{formatCOP(producto.costo_unitario)}</span>
             </div>
           )}
 

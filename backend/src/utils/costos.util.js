@@ -125,10 +125,13 @@ const puedeVerCostosCon = (user, configMap) => {
 
 // Todo nombre de campo monetario de ENTRADA que exista en el sistema. Cuando se
 // agregue uno nuevo va aquí, no en cada pantalla.
+// `costo_tarifa` es el valor interno de la remisión que `anotarConsignacionSeriales`
+// le pega a cada equipo de un local: es el costo de ESE local, y viajaba sin
+// recorte al lado del `costo_compra` que sí se anulaba.
 const CLAVES_COSTO = [
   'costo_unitario', 'costo_compra', 'costo', 'costo_total', 'costo_local',
   'costo_promedio', 'precio_unitario', 'precio_compra', 'costo_origen',
-  'valor_compra', 'precio_usd', 'valor_traida',
+  'valor_compra', 'precio_usd', 'valor_traida', 'costo_tarifa',
 ];
 
 // El proveedor viaja junto al costo en casi todas estas consultas y responde a
@@ -148,8 +151,8 @@ const _anular = (obj, claves) => {
  * anidadas por nombre (el árbol de variantes trae `variantes` dentro de cada
  * atributo, y el costo vive en los tres niveles).
  */
-const recortar = (dato, { proveedor = true, anidados = [] } = {}) => {
-  const claves = proveedor ? [...CLAVES_COSTO, ...CLAVES_PROVEEDOR] : CLAVES_COSTO;
+const recortar = (dato, { proveedor = true, costo = true, anidados = [] } = {}) => {
+  const claves = [...(costo ? CLAVES_COSTO : []), ...(proveedor ? CLAVES_PROVEEDOR : [])];
 
   const unNodo = (n) => {
     if (!n || typeof n !== 'object') return n;
@@ -170,12 +173,58 @@ const recortar = (dato, { proveedor = true, anidados = [] } = {}) => {
 const recortarSiToca = async (user, dato, opciones) =>
   (await puedeVerCostos(user)) ? dato : recortar(dato, opciones);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EL COSTO DE UN LOCAL DE LA RED INTERNA
+//
+// En un local, el costo de la mercancía que llegó de la bodega ES el precio del
+// despacho (`valor_interno`): lo que el local le debe. No es un costo del
+// negocio sino la cuenta del local, y el negocio decide quién la ve en Ajustes →
+// Red interna (`red_interna_valores_usuarios`, arreglo de ids; ausente = solo
+// admin). Quien está en esa lista ve el costo del inventario de SU local aunque
+// el candado `costos_solo_admin` esté puesto — y nada más: ni el proveedor, ni
+// las compras, ni el inventario de la bodega.
+//
+// Solo AGREGA sobre `puedeVerCostos`: quien ya veía costos los sigue viendo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** ¿`user` está autorizado a ver los valores de la red en `sucursalId` (un local)? */
+const veValoresDeLocal = async (user, sucursalId) => {
+  if (!user?.id || !sucursalId) return false;
+  try {
+    const { getConfigRed } = require('../middlewares/redInterna.middleware');
+    const red = await getConfigRed(Number(user.negocio_id));
+    if (!red.activa || !red.bodega_id) return false;
+    if (Number(sucursalId) === Number(red.bodega_id)) return false;
+    // Su PROPIO local: la cuenta de otro local no es la suya.
+    if (Number(sucursalId) !== Number(user.sucursal_id)) return false;
+    return (red.valores_usuarios || []).includes(Number(user.id));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Recorte del INVENTARIO. `sucursal` es la sede de los datos, o una función
+ * que la resuelve (solo se llama cuando hace falta: el camino de siempre no
+ * paga una consulta más).
+ */
+const recortarInventarioSiToca = async (user, dato, { sucursal, anidados = [] } = {}) => {
+  if (await puedeVerCostos(user)) return dato;
+  const sucursalId = typeof sucursal === 'function' ? await sucursal() : sucursal;
+  if (await veValoresDeLocal(user, sucursalId)) {
+    return recortar(dato, { costo: false, proveedor: true, anidados });
+  }
+  return recortar(dato, { anidados });
+};
+
 module.exports = {
   CLAVE,
   puedeVerCostos,
   puedeVerCostosCon,
   recortar,
   recortarSiToca,
+  veValoresDeLocal,
+  recortarInventarioSiToca,
   invalidarCache,
   CLAVES_COSTO,
   CLAVES_PROVEEDOR,

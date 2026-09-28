@@ -284,11 +284,48 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > módulo. Ahora lo exige `requirePermisoVerCompras`.
 > La red interna también lo respeta: su `_puedeVerCostos` miraba
 > `rol !== 'vendedor'`, así que a un SUPERVISOR no le escondía nada — y el
-> bodeguero es supervisor. Ahora exige las DOS reglas (la de la red y el candado
-> global) y sigue siendo puramente restrictiva: con el candado apagado se
-> comporta igual que siempre.
+> bodeguero es supervisor. Desde sep-2026 ya no depende de este candado: el
+> precio de los despachos va con su propia lista (`red_interna_valores_usuarios`,
+> ausente = solo admin; ver «Quién ve el precio de los despachos»).
 > Prueba: `31-costos-solo-admin` (42 verificaciones; la sección 1 falla si
 > alguien invierte el default).
+
+> **Quién ve el precio de los despachos — una LISTA, no el candado de costos**
+> (`red_interna_valores_usuarios`, `redInterna.service._puedeVerCostos`,
+> `costos.util.veValoresDeLocal` / `recortarInventarioSiToca`, Ajustes → Red
+> interna; pedido de Tesla, 28-sep-2026: «Bunny Mobile ve el precio del
+> despacho, pero solo ciertos usuarios»). Antes eran dos reglas encadenadas
+> (`rol !== 'vendedor'` o `red_interna_ocultar_costos`, Y `costos_solo_admin`):
+> la única forma de mostrárselo a un supervisor del local era darle el campo
+> «Costo», que le abría TODOS los costos, le dejaba editarlos y le mandaba el
+> costo de la bodega en cada IMEI. Ahora es un arreglo JSON de ids en
+> `config_negocio`, validado con la misma función que la lista del PIN (y con el
+> mismo selector, `UsuariosAutorizados.jsx`). **Ausente = solo admin**
+> (decisión del usuario; al decidirlo solo Tesla y el negocio 4 tenían red, los
+> dos con el candado puesto, así que nadie perdió nada). Quien está en la lista
+> ve (1) el precio de cada línea de los envíos en pantalla, ticket y PDF, y
+> (2) el costo del inventario de **SU** local —que para lo que llegó de la
+> bodega ES ese precio—, aunque el candado esté puesto. Nada más: ni
+> proveedor, ni compras, ni procedencia, ni la bodega, ni otro local, ni editar
+> costos. `costo_origen` sigue siendo solo del admin. En la pantalla,
+> `usePuedeVerCostoInventario` (espejo del backend) muestra el costo de SOLO
+> LECTURA en `ModalEditarSerial`, `ModalEditarProductoCantidad` y las tarjetas
+> del árbol de variantes; los formularios siguen con `usePuedeVerCostos`.
+> **De paso, tres fugas cerradas**: (a) el listado de IMEI y el escáner del
+> carrito mandaban en un local el `costo_compra` de la BODEGA a cualquiera que
+> pasara `puedeVerCostos` (con el candado apagado, a todos) —
+> `redInterna.sinCostoDeBodega` lo cambia por el precio del despacho y quita el
+> proveedor para quien no es admin; el escáner además no recortaba nada—;
+> (b) **el listado de productos por cantidad nunca se recortó**: `findAll`
+> responde `{ modo, items }` y el recorte solo miraba el primer nivel (ahora
+> `anidados: ['items']`); y (c) por eso mismo, `productos_cantidad.update`
+> escribía `costo_unitario` y `proveedor_id` sin condición: con el listado
+> recortado, editar el stock mínimo los habría BORRADO. Ahora se escriben solo
+> si vienen, el controlador los descarta si quien edita no ve costos, y el
+> modal solo los manda con el campo concedido. `costo_tarifa` entró a
+> `CLAVES_COSTO` (el valor interno viajaba al lado del costo anulado).
+> Prueba: `66-valores-despacho` (59; la sección 1 es la de sin lista, la 4 la
+> fuga del IMEI y la 8 —★— el listado y el guardado sin permiso).
 
 > **Entradas de bodega — el bodeguero recibe sin ver ni teclear precios**
 > (`compras.service.registrarEntrada`, `pages/entradas/EntradasPage.jsx`,
@@ -1943,7 +1980,8 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > dos pagos seguidos sin confirmar taparían el mismo envío dos veces.
 > **Invariante probado**: `Σ saldo(envío) + cargos_sueltos = deuda_total`, y
 > `Σ movimientos del extracto = totales.neto`.
-> **Costos ocultos a vendedores** (`red_interna_ocultar_costos`, default on): el
+> **Valores ocultos a quien no está autorizado** (`red_interna_valores_usuarios`,
+> ausente = solo admin; antes `red_interna_ocultar_costos`): el
 > recorte va en el backend (`_recortarParaVendedor`), nunca solo en la pantalla.
 > Desde el cambio de modelo el vendedor **sí ve la cuenta** (la tiene que pagar);
 > lo que se esconde es la valorización de la mercancía. Todo campo monetario
@@ -2005,13 +2043,13 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > así que el PDF dice lo mismo que la pantalla y hereda el acceso (un local no
 > imprime lo de otro) y el recorte del vendedor. El estado de cuenta pide el
 > extracto SIN el tope de 300 de la pantalla. Dice «no es factura de venta».
-> **El vendedor y los valores por línea**: la clave `red_interna_ocultar_costos`
-> existía (ausente = ocultar) sin control en pantalla; ahora está en Ajustes →
-> Red interna como «el vendedor ve el valor de cada producto del envío» (pantalla
-> y PDF). El valor del envío es lo que el local DEBE; el costo de la BODEGA
+> **Quién ve los valores por línea**: desde sep-2026 lo decide la lista
+> `red_interna_valores_usuarios` (ver «Quién ve el precio de los despachos»,
+> abajo); `red_interna_ocultar_costos` ya no se lee. El valor del envío es lo
+> que el local DEBE; el costo de la BODEGA
 > (`costo_origen`) no lo ve nadie del local — **viajaba en el JSON de
 > `getRemision`** (`lr.*`) a supervisores y vendedores, y ya no: solo el admin.
-> `costos_solo_admin` sigue mandando por encima. Lo **acreditado** de una
+> Lo **acreditado** de una
 > devolución lo calcula `getRemision` (`resumen.acreditado`) antes del recorte:
 > es cuenta, y el vendedor la ve.
 > **`getAbonosDeEnvio` filtraba `remision_id = $2 OR cargo_id = $2`**: envíos y

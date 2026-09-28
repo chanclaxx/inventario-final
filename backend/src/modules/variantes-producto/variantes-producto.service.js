@@ -30,6 +30,11 @@ const getArbol = async (negocioId, productoId, sucursalId) => {
   return repo.getArbol(productoId, sucursalId || producto.sucursal_id);
 };
 
+const sucursalDeProducto = async (negocioId, productoId) => {
+  const producto = await repo.verificarProductoNegocio(productoId, negocioId);
+  return producto?.sucursal_id ?? null;
+};
+
 const crearAtributo = async (negocioId, productoId, datos) => {
   const producto = await repo.verificarProductoNegocio(productoId, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
@@ -181,5 +186,5 @@ module.exports = {
   getArbol,
   crearAtributo, actualizarAtributo, eliminarAtributo,
   crearVariante, actualizarVariante, eliminarVariante,
-  ajustarStockAtributo, ajustarStockVariante,
+  ajustarStockAtributo, ajustarStockVariante, sucursalDeProducto,
 };

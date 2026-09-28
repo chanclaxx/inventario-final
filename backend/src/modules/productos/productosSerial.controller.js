@@ -82,8 +82,14 @@ const getSeriales = async (req, res, next) => {
   try {
     const vendido = req.query.vendido !== undefined ? req.query.vendido === 'true' : null;
     const data    = await service.getSeriales(req.user.negocio_id, req.params.id, vendido);
-    // `SELECT s.*` arrastra costo_compra y proveedor_id de cada unidad.
-    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
+    // `SELECT s.*` arrastra costo_compra y proveedor_id de cada unidad. En un
+    // local, el de un equipo consignado es el de la BODEGA: se cambia por el
+    // precio del despacho antes de decidir si se recorta.
+    const { sinCostoDeBodega } = require('../red-interna/redInterna.service');
+    res.json({ ok: true, data: await costos.recortarInventarioSiToca(
+      req.user, sinCostoDeBodega(data, req.user),
+      { sucursal: () => service.sucursalDeProducto(req.user.negocio_id, req.params.id) },
+    ) });
   } catch (err) { next(err); }
 };
 

@@ -82,7 +82,7 @@ await db.exec(`
 `);
 
 const red = { activa:true, bodega_id:1, confirmar_recepcion:true, confirmar_remesa:true,
-              ocultar_costos:true };
+              ocultar_costos:true, valores_usuarios: [2] }; /* sep-2026: el que ve valores está en la lista (ausente = solo admin) */
 const bodega = { user:{id:1,negocio_id:1,rol:'admin_negocio'}, sucursal_id:1, esBodega:true, red };
 const centro = { user:{id:2,negocio_id:1,rol:'supervisor'},    sucursal_id:2, esBodega:false, red };
 const vende  = { user:{id:3,negocio_id:1,rol:'vendedor'},      sucursal_id:2, esBodega:false, red };

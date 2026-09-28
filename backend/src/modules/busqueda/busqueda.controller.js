@@ -1,4 +1,5 @@
 const service = require('./busqueda.service');
+const costos  = require('../../utils/costos.util');
 
 const buscarPorIMEI = async (req, res, next) => {
   try {
@@ -61,6 +62,15 @@ const escanear = async (req, res, next) => {
 
     if (!resultado) {
       return res.status(404).json({ ok: false, error: 'Código o IMEI no encontrado en este negocio' });
+    }
+    // El equipo escaneado traía `costo_compra` sin ningún recorte: en un local,
+    // el de la BODEGA. Misma regla que el listado de IMEI del inventario.
+    if (resultado.tipo === 'serial') {
+      const { sinCostoDeBodega } = require('../red-interna/redInterna.service');
+      const [serial] = sinCostoDeBodega([resultado.serial], req.user);
+      resultado.serial = await costos.recortarInventarioSiToca(req.user, serial, {
+        sucursal: serial.sucursal_id,
+      });
     }
     res.json({ ok: true, data: resultado });
   } catch (err) {

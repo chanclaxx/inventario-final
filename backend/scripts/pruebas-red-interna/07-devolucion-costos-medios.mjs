@@ -65,7 +65,7 @@ await db.exec(`
 `);
 
 const red = { activa:true, bodega_id:1, confirmar_recepcion:true, confirmar_remesa:true,
-              ocultar_costos:true };
+              ocultar_costos:true, valores_usuarios: [2] }; /* sep-2026: el que ve valores está en la lista (ausente = solo admin) */
 const bodega = { user:{id:1,negocio_id:1,rol:'admin_negocio'}, sucursal_id:1, esBodega:true, red };
 const superv = { user:{id:2,negocio_id:1,rol:'supervisor'},    sucursal_id:2, esBodega:false, red };
 const vende  = { user:{id:3,negocio_id:1,rol:'vendedor'},      sucursal_id:2, esBodega:false, red };
@@ -151,7 +151,7 @@ await db.exec(`
 const paraSuperv = await service.getPanelLocal(superv);
 const paraVende  = await service.getPanelLocal(vende);
 
-ok('El supervisor SÍ ve el valor de la mercancía',
+ok('El supervisor en la lista SÍ ve el valor de la mercancía',
    paraSuperv.totales.en_consignacion_valor !== null);
 ok('★ El vendedor NO ve el valor de la mercancía',
    paraVende.totales.en_consignacion_valor === null);

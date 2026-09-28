@@ -1,3 +1,4 @@
+import { formatCOP }      from '../../utils/formatters';
 import { useState }                           from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, StickyNote, Truck, ChevronDown, ChevronUp } from 'lucide-react';
@@ -9,7 +10,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { Button }      from '../../components/ui/Button';
 import { useAuth }     from '../../context/useAuth';
 import { PanelProcedenciaImei } from '../../components/ui/PanelProcedencia';
-import { usePuedeVerCostos }    from '../../hooks/usePuedeVerCostos';
+import { usePuedeVerCostos, usePuedeVerCostoInventario } from '../../hooks/usePuedeVerCostos';
 import api             from '../../api/axios.config';
 
 function parsearLista(raw) {
@@ -24,6 +25,7 @@ function parsearLista(raw) {
 export function ModalEditarSerial({ serial, precioProducto, productoId, onClose }) {
   const { puedeEditarProductos, camposEdicionProductos } = useAuth();
   const puedeVerCostos = usePuedeVerCostos();
+  const puedeVerCostoInv = usePuedeVerCostoInventario();
   const campos = camposEdicionProductos();
   const tiene  = (c) => campos === null || campos.includes(c);
   const queryClient = useQueryClient();
@@ -152,6 +154,18 @@ export function ModalEditarSerial({ serial, precioProducto, productoId, onClose 
                 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500
                 transition-all"
             />
+          </div>
+        )}
+
+        {/* Sin permiso para editarlo, pero autorizado a verlo. En un equipo que
+            vino de la bodega el backend ya manda aquí el precio del despacho,
+            nunca lo que a la bodega le costó. */}
+        {!tiene('costo') && puedeVerCostoInv && serial.costo_compra != null && (
+          <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-xl">
+            <span className="text-sm text-gray-500">
+              {esDeBodega ? 'Costo (precio del despacho)' : 'Costo'}
+            </span>
+            <span className="text-sm font-medium text-gray-700">{formatCOP(serial.costo_compra)}</span>
           </div>
         )}
 

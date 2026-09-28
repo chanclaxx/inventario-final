@@ -10,14 +10,22 @@ const getProductos = async (req, res, next) => {
     const data = await service.getProductos(sucursalId, req.user.negocio_id, lineaId);
     // El costo y el proveedor viajaban aquí para cualquier rol: no se pintaban
     // en la tarjeta, pero estaban en la respuesta.
-    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
+    // En un local de la red, el costo de lo que llegó de la bodega es el precio
+    // del despacho: lo ve también quien el admin autorizó en Red interna.
+    //
+    // `findAll` responde `{ modo, items }`: el costo vive DENTRO de `items`. Sin
+    // `anidados` el recorte solo miraba el primer nivel y el costo de cada
+    // producto viajaba entero con el candado puesto.
+    res.json({ ok: true, data: await costos.recortarInventarioSiToca(req.user, data, {
+      sucursal: sucursalId, anidados: ['items'],
+    }) });
   } catch (err) { next(err); }
 };
 
 const getProductoById = async (req, res, next) => {
   try {
     const data = await service.getProductoById(req.user.negocio_id, req.params.id);
-    res.json({ ok: true, data: await costos.recortarSiToca(req.user, data) });
+    res.json({ ok: true, data: await costos.recortarInventarioSiToca(req.user, data, { sucursal: data?.sucursal_id }) });
   } catch (err) { next(err); }
 };
 
@@ -43,7 +51,13 @@ const crearProducto = async (req, res, next) => {
 const actualizarProducto = async (req, res, next) => {
   try {
     const anterior = await service.getProductoById(req.user.negocio_id, req.params.id);
-    const data     = await service.actualizarProducto(req.user.negocio_id, req.params.id, req.body);
+    // Quien no puede ver costos recibe costo y proveedor en null: lo que su
+    // pantalla devuelva en esos campos no es una decisión suya, y guardarlo
+    // borraría el dato. Se descartan y el repositorio no los toca.
+    const veCostos = await costos.puedeVerCostos(req.user);
+    const cuerpo   = { ...req.body };
+    if (!veCostos) { delete cuerpo.costo_unitario; delete cuerpo.proveedor_id; }
+    const data     = await service.actualizarProducto(req.user.negocio_id, req.params.id, cuerpo);
     const cambios  = {};
     if (req.body.precio_venta !== undefined &&
         Number(req.body.precio_venta) !== Number(anterior.precio_venta)) {
@@ -55,7 +69,7 @@ const actualizarProducto = async (req, res, next) => {
       producto:    data.nombre,
       ...cambios,
     });
-    res.json({ ok: true, data, message: 'Producto actualizado correctamente' });
+    res.json({ ok: true, data: veCostos ? data : costos.recortar(data), message: 'Producto actualizado correctamente' });
   } catch (err) { next(err); }
 };
 

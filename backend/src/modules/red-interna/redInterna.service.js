@@ -138,24 +138,26 @@ const _exigirBodega = (req) => {
 // en el frontend el dato viajaría igual y se vería en la consola del navegador.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// La regla propia de la red interna Y el candado global del negocio: las dos
-// tienen que dejar pasar. Nunca al reves — este helper solo puede QUITAR.
+// ¿Ve el PRECIO de cada línea de los despachos? El admin siempre; los demás,
+// solo si el admin los marcó en Ajustes → Red interna
+// (`red_interna_valores_usuarios`). Ausente = solo el admin (decisión del
+// negocio, Tesla, 28-sep-2026: «Bunny Mobile ve el precio del despacho, pero
+// solo ciertos usuarios»).
 //
-// La regla de la red mira `rol !== 'vendedor'`, asi que a un SUPERVISOR no le
-// escondia nada pasara lo que pasara. Con el bodeguero siendo supervisor, eso
-// dejaba abierta por aqui justo la puerta que `costos_solo_admin` cierra en el
-// resto del sistema: el valor interno de cada unidad de toda la red.
+// Antes eran dos reglas encadenadas —`rol !== 'vendedor'` (o el interruptor
+// `red_interna_ocultar_costos`) Y el candado `costos_solo_admin`—, así que la
+// única forma de mostrárselo a un supervisor del local era concederle el campo
+// «Costo»: eso le abría TODOS los costos del sistema, le dejaba editarlos y le
+// mandaba el `costo_compra` de la bodega en cada IMEI. El precio del despacho
+// es la cuenta del local, no un costo del negocio: va con su propia llave.
 //
-// Si el negocio no encendio el candado, `puedeVerCostos` devuelve true y esto se
-// comporta EXACTAMENTE como antes.
+// Lo que a la BODEGA le costó (`costo_origen`) sigue siendo solo del admin.
 const _puedeVerCostos = async (req) => {
-  const reglaDeLaRed = req.user?.rol !== 'vendedor' || req.red?.ocultar_costos === false;
-  if (!reglaDeLaRed) return false;
-  return costosUtil.puedeVerCostos(req.user);
+  if (req.user?.rol === 'admin_negocio') return true;
+  return (req.red?.valores_usuarios || []).includes(Number(req.user?.id));
 };
 
 // Quita las claves de valor de un objeto, dejando el resto intacto.
-const costosUtil = require('../../utils/costos.util');
 
 const _sinValores = (obj, claves) => {
   if (!obj) return obj;
@@ -4054,8 +4056,25 @@ const anotarConsignacionSeriales = async (seriales, { negocioId, sucursalId }) =
   });
 };
 
+// El `costo_compra` de un equipo consignado es lo que la BODEGA le pagó al
+// proveedor (`moverSerial` no lo reescribe, a propósito), y el listado de IMEI
+// y el escáner lo mandaban tal cual a cualquier usuario del local: con el
+// candado de costos apagado, en el JSON; con el candado puesto, a quien tuviera
+// el campo «Costo». Para quien no es admin, el costo de ese equipo en el local
+// es el precio del despacho (`costo_tarifa`), y el proveedor —el de la bodega—
+// no viaja. Las unidades propias del local (`origen_red: 'propio'`) no cambian.
+// Va DESPUÉS de `anotarConsignacionSeriales`: sin su marca no hace nada.
+const sinCostoDeBodega = (seriales, user) => {
+  if (user?.rol === 'admin_negocio' || !Array.isArray(seriales)) return seriales;
+  return seriales.map((s) => (s?.origen_red === 'bodega'
+    ? { ...s, costo_compra: s.costo_tarifa, proveedor_id: null,
+        ...('proveedor_nombre' in s ? { proveedor_nombre: null } : {}) }
+    : s));
+};
+
 module.exports = {
   anotarConsignacionSeriales,
+  sinCostoDeBodega,
   despachar, recibir, anularRemision,
   devolver, previsualizarDevolucion, confirmarDevolucion,
   enviarRemesa, confirmarRemesa, anularRemesa,

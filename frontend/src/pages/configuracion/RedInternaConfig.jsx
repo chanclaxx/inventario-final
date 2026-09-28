@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getSucursales } from '../../api/sucursales.api';
 import { MoraConfig } from './MoraConfig';
+import { UsuariosAutorizados } from './UsuariosAutorizados';
 import {
   ToggleLeft, ToggleRight, Warehouse, Info, AlertTriangle,
 } from 'lucide-react';
@@ -154,18 +155,23 @@ export function RedInternaConfig({ valores, set }) {
             />
           </div>
 
-          {/* `red_interna_ocultar_costos` existía en el backend desde julio
-              (ausente = ocultar) pero no tenía control en pantalla. Se muestra
-              al revés —«ve el valor»— porque así se entiende qué cambia. El
-              valor del envío es lo que el LOCAL le debe a la bodega, no lo que a
-              ella le costó: el costo de la bodega sigue oculto siempre. Y el
-              candado general `costos_solo_admin` sigue mandando por encima. */}
-          <div className="pl-4">
-            <Toggle
-              enabled={valores.red_interna_ocultar_costos === '0'}
-              onChange={(v) => set('red_interna_ocultar_costos', v ? '0' : '1')}
-              label="El vendedor del local ve el valor de cada producto del envío"
-              description="En la pestaña Envíos y en los PDF. Apagado, el vendedor ve los productos y la cuenta (cargo, abonos, saldo) pero no el valor de cada línea. Supervisores y administradores lo ven siempre. Lo que a la bodega le costó cada producto no se le muestra nunca al local."
+          {/* Quién ve el PRECIO de cada línea de los despachos. Reemplaza al
+              viejo interruptor «el vendedor del local ve el valor»
+              (`red_interna_ocultar_costos`), que solo alcanzaba a vendedores y
+              quedaba debajo del candado de costos: para mostrárselo a un
+              supervisor había que darle el campo «Costo», que le abría todos
+              los costos del sistema. Ahora es una lista, como la del PIN, y
+              ausente = solo los administradores. El precio del despacho es lo
+              que el local le debe a la bodega; lo que a ella le costó no lo ve
+              nadie del local. */}
+          <div className="pl-4 pt-2 border-t border-gray-100">
+            <UsuariosAutorizados
+              valores={valores}
+              set={set}
+              clave="red_interna_valores_usuarios"
+              titulo="Quién ve el precio de los despachos"
+              descripcion="Ve el valor de cada producto de los envíos (pantalla, ticket y PDF) y el costo del inventario de SU local, que es ese mismo precio. No ve lo que a la bodega le costó cada producto, ni puede editar costos. Los demás usuarios ven los productos y la cuenta (cargo, abonos, saldo), pero no el precio de cada línea."
+              vacio="No hay usuarios activos que no sean administradores."
             />
           </div>
 

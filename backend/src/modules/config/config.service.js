@@ -473,6 +473,13 @@ const saveConfig = async (negocioId, datos) => {
     datosProcesados.pin_usuarios_autorizados =
       await _validarUsuariosPin(negocioId, datosProcesados.pin_usuarios_autorizados);
   }
+  // Quién ve el precio de los despachos de la red interna: misma validación.
+  if (datosProcesados.red_interna_valores_usuarios !== undefined) {
+    datosProcesados.red_interna_valores_usuarios = await _validarUsuariosPin(
+      negocioId, datosProcesados.red_interna_valores_usuarios,
+      'La lista de usuarios que ven el precio de los despachos',
+    );
+  }
 
   // Hashear las claves privadas antes de persistir
   for (const clave of CLAVES_A_HASHEAR) {
@@ -568,15 +575,17 @@ const puedeUsarPin = async (negocioId, usuario) => {
   return _idsAutorizados(config.pin_usuarios_autorizados).includes(Number(usuario?.id));
 };
 
-const _validarUsuariosPin = async (negocioId, raw) => {
+const _validarUsuariosPin = async (
+  negocioId, raw, nombre = 'La lista de usuarios autorizados para el PIN',
+) => {
   let lista;
   try { lista = JSON.parse(String(raw)); } catch { lista = null; }
   if (!Array.isArray(lista)) {
-    throw { status: 400, message: 'La lista de usuarios autorizados para el PIN no es válida' };
+    throw { status: 400, message: `${nombre} no es válida` };
   }
   const ids = [...new Set(lista.map(Number))];
   if (ids.some((n) => !Number.isInteger(n) || n <= 0)) {
-    throw { status: 400, message: 'La lista de usuarios autorizados para el PIN no es válida' };
+    throw { status: 400, message: `${nombre} no es válida` };
   }
   if (!ids.length) return '[]';
 
@@ -585,7 +594,7 @@ const _validarUsuariosPin = async (negocioId, raw) => {
     [negocioId, ids],
   );
   if (rows.length !== ids.length) {
-    throw { status: 400, message: 'Uno de los usuarios autorizados para el PIN no pertenece a este negocio' };
+    throw { status: 400, message: `${nombre}: uno de los usuarios no pertenece a este negocio` };
   }
   return JSON.stringify(ids.sort((a, b) => a - b));
 };

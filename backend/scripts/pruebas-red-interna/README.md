@@ -919,3 +919,16 @@ se reimprimen desde la compra.
 | 9 | En una etiqueta chica el proveedor es lo último que cae |
 | 10 | La copia del runner y el `.sql` dicen lo mismo |
 | 11 | Las cinco pantallas usan la misma regla y el mismo modal, con la configuración guardada |
+
+### `66-valores-despacho.mjs` — 59 verificaciones
+
+Quién ve el PRECIO de cada línea de los despachos: la lista
+`red_interna_valores_usuarios` (ausente = solo admin), que reemplazó al
+interruptor `red_interna_ocultar_costos` y ya no depende de `costos_solo_admin`.
+La sección 1 es la que hay que mirar primero (sin lista, nadie del local ve el
+precio de la línea, con o sin candado, pero todos ven la cuenta). La 3 comprueba
+que el autorizado ve como costo de su inventario el precio del despacho; la 4,
+que el `costo_compra` de la BODEGA no llega a nadie del local ni por el listado
+de IMEI ni por el escáner; la 5, que la lista no abre la bodega ni otro local; y
+la 8 (★), dos fugas previas: el listado de productos por cantidad no se
+recortaba (`{ modo, items }`) y editar sin permiso habría borrado el costo.

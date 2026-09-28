@@ -26,7 +26,7 @@ import { useListasPrecios } from '../../hooks/useListasPrecios';
 import { ChipApartado } from './ChipApartado';
 import { ChipEnCamino } from './ChipEnCamino';
 import { useEnTransito } from '../../hooks/useEnTransito';
-import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
+import { usePuedeVerCostos, usePuedeVerCostoInventario } from '../../hooks/usePuedeVerCostos';
 import { ModalEtiquetas } from './ModalEtiquetas';
 
 function labelNodo(nodo) {
@@ -417,6 +417,10 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
   // «Costo» en Ajustes → Usuarios. Así la tarjeta, el modal de edición y la
   // respuesta del servidor dicen las tres lo mismo.
   const puedeVerCosto = usePuedeVerCostos();
+  // La tarjeta solo MUESTRA el costo; en un local de la red lo ve también
+  // quien el admin autorizó a ver el precio de los despachos (es ese precio).
+  // El formulario de edición sigue con la regla general.
+  const puedeVerCostoInv = usePuedeVerCostoInventario();
 
   const [atributoSel, setAtributoSel] = useState(null);
   const [modalNodo,   setModalNodo]   = useState(null);
@@ -670,7 +674,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 itemKey={`cant-${producto.id}-v-${v.id}`}
                 tieneHijos={false}
                 esAdmin={esAdmin}
-                puedeVerCosto={puedeVerCosto}
+                puedeVerCosto={puedeVerCostoInv}
                 precioPadre={atributoActualizado?.precio || producto.precio}
                 onDrillDown={() => {}}
                 onAgregar={() => handleAgregarVariante(v)}
@@ -920,7 +924,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 itemKey={`cant-${producto.id}-a-${atributo.id}`}
                 tieneHijos={tieneHijos}
                 esAdmin={esAdmin}
-                puedeVerCosto={puedeVerCosto}
+                puedeVerCosto={puedeVerCostoInv}
                 precioPadre={producto.precio}
                 pista={pistaHijos}
                 onDrillDown={() => entrarEnAtributo(atributo)}

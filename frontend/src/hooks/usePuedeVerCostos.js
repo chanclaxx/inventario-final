@@ -38,3 +38,39 @@ export function usePuedeVerCostos() {
 }
 
 export default usePuedeVerCostos;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ¿Ve el costo del INVENTARIO de su local? — espejo de
+// `costos.util.recortarInventarioSiToca`.
+//
+// Lo mismo que arriba, más una puerta: en un local de la red interna el costo
+// de lo que llegó de la bodega ES el precio del despacho, y el admin decide en
+// Ajustes → Red interna quién lo ve (`red_interna_valores_usuarios`). Solo para
+// el inventario de SU local: no abre compras, proveedores ni procedencia, que
+// siguen con `usePuedeVerCostos`.
+// ─────────────────────────────────────────────────────────────────────────────
+const _idsDe = (raw) => {
+  try {
+    const lista = JSON.parse(raw || '[]');
+    return Array.isArray(lista) ? lista.map(Number) : [];
+  } catch {
+    return [];
+  }
+};
+
+export function usePuedeVerCostoInventario() {
+  const general = usePuedeVerCostos();
+  const { usuario } = useAuth();
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => api.get('/config').then((r) => r.data.data),
+    staleTime: 60 * 1000,
+  });
+
+  if (general) return true;
+  if (config?.red_interna_activa !== '1') return false;
+  const bodegaId = Number(config?.red_interna_bodega_id);
+  const sucursalId = Number(usuario?.sucursal_id);
+  if (!sucursalId || sucursalId === bodegaId) return false;
+  return _idsDe(config?.red_interna_valores_usuarios).includes(Number(usuario?.id));
+}
