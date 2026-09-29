@@ -105,6 +105,11 @@ router.post(   '/retoma-directa',                          requireModulo('presta
 router.delete( '/retomas-directas/:retomaId',              requireModulo('prestamos'), ctrl.anularRetomaDirecta);
 router.post(   '/ajuste-deuda',                            requireModulo('prestamos'), ctrl.crearAjusteDeuda);
 
+// Reporte por empleado (ventas, créditos y préstamos entre fechas). ANTES de
+// '/:id/pdf': declarado después, Express lo resolvía con id="reporte-empleado".
+router.get('/reporte-empleado/empleados', requireModulo('prestamos'), ctrl.getEmpleadosReporte);
+router.get('/reporte-empleado/pdf',       requireModulo('prestamos'), ctrl.exportarPdfReporteEmpleado);
+
 router.get('/pdf/:tipo/:personaId',              requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
 router.get('/pdf/:tipo/:personaId/estado-cuenta', requireModulo('prestamos'), ctrl.exportarPdfEstadoCuenta);
 router.get('/:id/pdf',                           requireModulo('prestamos'), ctrl.exportarPdfPrestamoIndividual);

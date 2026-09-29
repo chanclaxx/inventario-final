@@ -603,6 +603,22 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > copiada tal cual, la 5 comprueba que el recorte va ENCIMA del alcance de
 > negocio y nunca en su lugar, y la 6 vigila el respaldo de despliegue).
 >
+> **Reporte por EMPLEADO** (`prestamos/reporteEmpleado.service.js` + `.pdf.js`,
+> botón «Reporte por empleado» en la cabecera de Préstamos, pedido del negocio
+> 29-sep-2026): al empleado le pagan por lo que mueve y el jefe liquida cada mes.
+> Un PDF entre fechas con TODO lo que hizo —ventas de contado, a crédito,
+> préstamos a clientes y a compañeros— y, dentro de cada tipo, por estado
+> (pagados, pendientes, devolución parcial, devueltos, cancelados), **una fila
+> por PRODUCTO** (una factura con dos equipos son dos filas). **Solo muestra: no
+> suma plata ni calcula comisiones** (decisión del usuario); el resumen cuenta
+> unidades. Quién lo hizo = `usuario_id` del documento (lo único que tienen a la
+> vez facturas y préstamos). Fecha = la de la operación; estado = el de HOY.
+> Fuera: la factura que genera un préstamo saldado (duplicaría el equipo) y los
+> ajustes de deuda (cédula `AJUSTE`). El vendedor solo saca el suyo (lo impone
+> el service); «Todos» = un empleado por hoja. Opción «Solo equipos con IMEI».
+> Rutas `/prestamos/reporte-empleado/*` ANTES de `/:id/pdf`.
+> Prueba: `68-reporte-empleado` (89; la 7 renderiza el PDF de verdad).
+>
 > **La BÚSQUEDA de Préstamos agrupa por persona y dice la situación**
 > (`GET /busqueda/prestamos`, `utils/busquedaPrestamos.js`, pedido del negocio
 > sep-2026): atajos de **situación** (`?situacion=vencido|por_vencer|al_dia|sin_plazo`)

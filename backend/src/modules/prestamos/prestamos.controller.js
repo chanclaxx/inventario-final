@@ -2,6 +2,9 @@ const service = require('./prestamos.service');
 const pdfService = require('./prestamos.pdf.service');
 const { pool }   = require('../../config/db');
 const audit      = require('../../utils/auditoria.util');
+const reporteEmpleado = require('./reporteEmpleado.service');
+const { generarPdfReporteEmpleado } = require('./reporteEmpleado.pdf');
+const { configDocumento } = require('../../utils/emisor.util');
 
 // Detalle estándar de auditoría para un préstamo ya creado/cargado
 const _detallePrestamo = (p, extra = {}) => ({
@@ -285,6 +288,51 @@ const exportarPdfEstadoCuenta = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+// ── Reporte por empleado ─────────────────────────────────────────────────────
+// Qué vendió, prestó y dio a crédito un empleado entre dos fechas, por tipo y
+// por estado. El vendedor solo saca el suyo (lo impone el service).
+
+const getEmpleadosReporte = async (req, res, next) => {
+  try {
+    const data = await reporteEmpleado.listarEmpleados({
+      negocioId: req.user.negocio_id, sucursalId: req.sucursal_id, usuario: req.user,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const exportarPdfReporteEmpleado = async (req, res, next) => {
+  try {
+    // Sin usuario_id (o 'todos') = todos los empleados de la sede.
+    const crudo = req.query.usuario_id;
+    let usuarioId = null;
+    if (crudo !== undefined && crudo !== '' && crudo !== 'todos') {
+      usuarioId = Number(crudo);
+      if (!Number.isInteger(usuarioId) || usuarioId < 1) {
+        return res.status(400).json({ ok: false, error: 'Empleado inválido' });
+      }
+    }
+
+    const reporte = await reporteEmpleado.obtenerReporte({
+      negocioId:   req.user.negocio_id,
+      sucursalId:  req.sucursal_id,
+      usuario:     req.user,
+      usuarioId,
+      desde:       req.query.desde,
+      hasta:       req.query.hasta,
+      soloEquipos: req.query.solo_equipos === '1' || req.query.solo_equipos === 'true',
+    });
+    // Documento de UNA sede: sale con los datos propios de esa sede.
+    const config = await configDocumento(req.user.negocio_id, req.sucursal_id);
+    const pdf = generarPdfReporteEmpleado({ reporte, config });
+
+    const filename = `reporte-empleado-${reporte.desde}-a-${reporte.hasta}.pdf`;
+    res.setHeader('Content-Type',        'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdf.pipe(res);
+  } catch (err) { next(err); }
 };
 
 const registrarSaldoAFavor = async (req, res, next) => {
@@ -747,6 +795,7 @@ module.exports = {
   fijarPlazo, fijarInteres, condonarMora, cobrarMora,
   devolverPrestamo, devolverParcial,
   exportarPdfPorPersona, exportarPdfPrestamoIndividual, exportarPdfEstadoCuenta,
+  getEmpleadosReporte, exportarPdfReporteEmpleado,
   getDocumentoPrestamo, exportarPdfAvisoMoraPrestamo, exportarPdfPazYSalvoPrestamo,
   registrarSaldoAFavor,
   intercambiarPrestamo,

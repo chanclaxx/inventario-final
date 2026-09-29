@@ -59,6 +59,19 @@ export const descargarPdfPrestamosActivos = (tipo, id) =>
 export const descargarPdfEstadoCuenta = (tipo, id) =>
   api.get(`/prestamos/pdf/${tipo}/${id}/estado-cuenta`, { responseType: 'blob' });
 
+// ── Reporte por empleado (ventas, créditos y préstamos entre fechas) ─────────
+// `puede_elegir` en falso = vendedor: el backend le da siempre el suyo.
+export const getEmpleadosReporte = () =>
+  api.get('/prestamos/reporte-empleado/empleados');
+// `usuario_id` 'todos' = un bloque por empleado de la sede. Tope largo: con
+// «todos» en un mes movido el PDF puede tardar más que los 30 s de siempre.
+export const descargarPdfReporteEmpleado = ({ usuario_id, desde, hasta, solo_equipos }) =>
+  api.get('/prestamos/reporte-empleado/pdf', {
+    params: { usuario_id, desde, hasta, solo_equipos: solo_equipos ? '1' : '0' },
+    responseType: 'blob',
+    timeout: 120000,
+  });
+
 // ── Documentos de la obligación (iguales a los de facturas a crédito) ────────
 export const getDocumentoPrestamo = (prestamoId) =>
   api.get(`/prestamos/${prestamoId}/documento`);

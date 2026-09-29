@@ -47,6 +47,7 @@ import {
   fijarPlazoPrestamo, cobrarMoraPrestamo, condonarMoraPrestamo, fijarInteresPrestamo,
 } from '../../api/prestamos.api';
 import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestamos';
+import { ModalReporteEmpleado }                  from './ModalReporteEmpleado';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
 import {
@@ -55,7 +56,7 @@ import {
 import {
   Handshake, CreditCard, Bike, Plus, CheckCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Users, User, AlertTriangle, FileDown, Loader2, Printer, Search, Wallet,
+  Users, User, AlertTriangle, FileDown, FileText, Loader2, Printer, Search, Wallet,
   ArrowLeftRight, Package, ShoppingBag, XCircle, SlidersHorizontal, UserPlus, Pencil, Settings, Layers,
   Clock,
 } from 'lucide-react';
@@ -3216,6 +3217,7 @@ export default function PrestamosPage() {
   const [modalHistorialSaldo, setModalHistorialSaldo] = useState(null); // { nombre, tipo, personaId }
   const [modalRetomaDirecta,  setModalRetomaDirecta]  = useState(null); // { persona: { tipo, id, nombre } }
   const [modalAjusteCuentas,  setModalAjusteCuentas]  = useState(null); // { nombre, tipo, personaId, sucursalId }
+  const [modalReporteEmpleado,    setModalReporteEmpleado]    = useState(false);
   const [modalCrearPrestatario,   setModalCrearPrestatario]   = useState(false);
   const [modalEditarPrestatario,  setModalEditarPrestatario]  = useState(null);
   const [modalEditarCliente,      setModalEditarCliente]      = useState(null);
@@ -3439,10 +3441,21 @@ export default function PrestamosPage() {
           <h1 className="text-xl font-bold text-gray-900">Préstamos</h1>
           <p className="text-sm text-gray-400 mt-0.5">Gestiona préstamos, créditos y domicilios</p>
         </div>
-        <BotonExportarCartera
-          hayPersonas={Object.keys(gruposCompaneros).length > 0 || Object.keys(gruposClientes).length > 0}
-          prestatarios={prestatariosData} />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" className="flex-shrink-0"
+            onClick={() => setModalReporteEmpleado(true)}>
+            <FileText size={14} />
+            Reporte por empleado
+          </Button>
+          <BotonExportarCartera
+            hayPersonas={Object.keys(gruposCompaneros).length > 0 || Object.keys(gruposClientes).length > 0}
+            prestatarios={prestatariosData} />
+        </div>
       </div>
+
+      {modalReporteEmpleado && (
+        <ModalReporteEmpleado onClose={() => setModalReporteEmpleado(false)} />
+      )}
 
       {/* ── Tabs principales ── */}
       <div className="overflow-x-auto">
