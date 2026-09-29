@@ -50,8 +50,18 @@ const registrarAbono = async (req, res, next) => {
 
 const saldarCredito = async (req, res, next) => {
   try {
-    await service.saldarCredito(req.user.negocio_id, Number(req.params.id));
-    res.json({ ok: true, message: 'Crédito saldado correctamente' });
+    const data = await service.saldarCredito(req.user.negocio_id, Number(req.params.id), {
+      usuario_id:  req.user.id,
+      metodo:      req.body?.metodo,
+      sucursal_id: req.sucursal_id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono a crédito', 'creditos', Number(req.params.id), {
+      sucursal_id: data.sucursal_id ?? null,
+      monto:       Number(data.valor_pagado ?? 0),
+      saldo_nuevo: Number(data.saldo ?? 0),
+      pago_total:  true,
+    });
+    res.json({ ok: true, data, message: 'Pago registrado: el crédito quedó saldado' });
   } catch (err) { next(err); }
 };
 

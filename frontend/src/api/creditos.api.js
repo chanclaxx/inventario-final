@@ -7,8 +7,9 @@ export const getCreditoById = (id) => api.get(`/creditos/${id}`);
 export const registrarAbonoCredito = (creditoId, datos) =>
   api.post(`/creditos/${creditoId}/abonos`, datos);
 
-export const saldarCredito = (creditoId) =>
-  api.patch(`/creditos/${creditoId}/saldar`);
+// «Pagar todo»: registra un abono por todo lo que falta (venta + cargos).
+export const saldarCredito = (creditoId, { metodo } = {}) =>
+  api.patch(`/creditos/${creditoId}/saldar`, { metodo });
 
 export const cancelarCredito = (creditoId) =>
   api.patch(`/creditos/${creditoId}/cancelar`);

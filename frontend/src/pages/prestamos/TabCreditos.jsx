@@ -332,48 +332,90 @@ function ModalAbonoCredito({ credito, onClose }) {
   );
 }
 
-// ─── Modal Saldar ─────────────────────────────────────────────────────────────
-
+// ─── Modal Pagar todo ─────────────────────────────────────────────────────────
+//
+// Antes era «Saldado» y cerraba el crédito SIN registrar ningún abono: la plata
+// no entraba a caja ni a reportes y el estado de cuenta quedaba en $0 abonado.
+// Ahora registra un abono por todo lo que falta, con su método de pago.
 function ModalSaldarCredito({ credito, onClose }) {
   const queryClient = useQueryClient();
-  const [error, setError] = useState('');
+  const [metodo, setMetodo] = useState('Efectivo');
+  const [error,  setError]  = useState('');
+  const metodosPago = useMetodosPago();
 
-  const cuotaInicial   = Number(credito.cuota_inicial || 0);
-  const totalAbonado   = Number(credito.total_abonado || 0);
-  const valorTotal     = Number(credito.valor_total);
-  const saldoPendiente = Number(credito.saldo_pendiente ?? (valorTotal - cuotaInicial - totalAbonado));
+  const cuotaInicial     = Number(credito.cuota_inicial || 0);
+  const totalAbonado     = Number(credito.total_abonado || 0);
+  const valorTotal       = Number(credito.valor_total);
+  const saldoPendiente   = Math.max(0, Number(credito.saldo_pendiente ?? (valorTotal - cuotaInicial - totalAbonado)));
+  const moraPendiente    = Number(credito.mora?.pendiente || 0);
+  const interesPendiente = Number(credito.interes?.pendiente || 0);
+  const totalAPagar      = saldoPendiente + moraPendiente + interesPendiente;
 
   const mutation = useMutation({
-    mutationFn: () => saldarCredito(credito.id),
+    mutationFn: () => saldarCredito(credito.id, { metodo }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['creditos'],             exact: false });
       queryClient.invalidateQueries({ queryKey: ['credito-detalle'],      exact: false });
       queryClient.invalidateQueries({ queryKey: ['estado-cuenta-credito'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['caja'],                  exact: false });
       onClose();
     },
-    onError: (err) => setError(err.response?.data?.error || 'Error al saldar crédito'),
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo registrar el pago'),
   });
 
   return (
-    <Modal open onClose={onClose} title="Saldar Crédito" size="sm">
+    <Modal open onClose={onClose} title="Pagar todo" size="sm">
       <div className="flex flex-col gap-4">
-        <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3 flex flex-col gap-1">
-          <p className="text-sm text-gray-700">
-            ¿Marcar como saldado el crédito de{' '}
-            <span className="font-semibold">{credito.nombre_cliente}</span>?
+        <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1">
+          <p className="text-xs text-gray-400">
+            Crédito — {credito.nombre_cliente} · Factura #{String(credito.factura_numero ?? credito.factura_id).padStart(6, '0')}
           </p>
-          {saldoPendiente > 0 && (
-            <p className="text-xs text-yellow-700 mt-1">
-              Saldo pendiente: <span className="font-bold">{formatCOP(saldoPendiente)}</span>
-              {' '}— se marcará como saldado sin registrar abono adicional.
-            </p>
+          <div className="flex justify-between mt-1">
+            <span className="text-xs text-gray-400">Saldo de la venta</span>
+            <span className="text-sm font-semibold text-gray-700">{formatCOP(saldoPendiente)}</span>
+          </div>
+          {interesPendiente > 0 && (
+            <div className="flex justify-between">
+              <span className="text-xs text-teal-700">+ interés por financiar</span>
+              <span className="text-sm font-semibold text-teal-700">{formatCOP(interesPendiente)}</span>
+            </div>
           )}
+          {moraPendiente > 0 && (
+            <div className="flex justify-between">
+              <span className="text-xs text-amber-600">+ mora</span>
+              <span className="text-sm font-semibold text-amber-600">{formatCOP(moraPendiente)}</span>
+            </div>
+          )}
+          <div className="flex justify-between border-t border-gray-200 mt-1.5 pt-1.5">
+            <span className="text-xs font-medium text-gray-600">Se registra un abono por</span>
+            <span className="text-base font-bold text-emerald-600">{formatCOP(totalAPagar)}</span>
+          </div>
         </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-gray-600">¿Cómo pagó?</span>
+          <div className="flex flex-wrap gap-2">
+            {metodosPago.map((m) => (
+              <button key={m.id} onClick={() => setMetodo(m.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
+                  ${metodo === m.id
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-[11px] text-gray-500">
+          El pago entra a la caja y a los reportes, y el crédito queda saldado.
+        </p>
+
         {error && <p className="text-sm text-red-500">{error}</p>}
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1" loading={mutation.isPending} onClick={() => mutation.mutate()}>
-            <CheckCircle size={15} /> Confirmar
+            <CheckCircle size={15} /> Registrar pago
           </Button>
         </div>
       </div>
@@ -723,7 +765,7 @@ function TarjetaCreditoDetalle({
               <Plus size={14} /> Abonar
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onSaldar(credito)}>
-              <CheckCircle size={14} /> Saldado
+              <CheckCircle size={14} /> Pagar todo
             </Button>
             {puedeCancelarFacturas() && (
               <button onClick={() => onDevolucion(credito)}

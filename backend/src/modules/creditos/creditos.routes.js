@@ -45,7 +45,10 @@ router.patch('/abonos-totales/:abonoTotalId/anular', requireModulo('prestamos'),
   validate, ctrl.anularAbonoTotal);
 
 router.post('/:id/abonos',   requireModulo('prestamos'), validarAbono, validate,    ctrl.registrarAbono);
-router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),      ctrl.saldarCredito);
+// «Pagar todo»: registra un abono por todo lo que falta. Ya no cierra sin abono.
+router.patch('/:id/saldar',  requireModulo('prestamos'), requireNivel('vendedor'),
+  body('metodo').optional().isString().withMessage('Método de pago inválido'),
+  validate, ctrl.saldarCredito);
 router.patch('/:id/cancelar',requireModulo('prestamos'), requireNivel('admin_negocio'), ctrl.cancelarCredito);
 
 // ── Mora ─────────────────────────────────────────────────────────────────────

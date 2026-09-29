@@ -237,17 +237,50 @@ const registrarAbono = async (negocioId, creditoId, {
   }
 };
 
-// ── Saldar manualmente (marcar como saldado sin abono) ───────────────────────
-const saldarCredito = async (negocioId, creditoId) => {
+// ── Pagar todo (el botón «Pagar todo» de la tarjeta) ────────────────────────
+//
+// Antes marcaba 'Saldado' con un UPDATE a secas: sin abono, sin mirar el saldo y
+// sin rastro. En la pantalla era el botón «Saldado» al lado de «Abonar», y la
+// gente lo usaba al recibir la plata — el crédito quedaba cerrado con $0
+// abonado, la plata no entraba a caja y la venta desaparecía de los reportes
+// (el de créditos saldados se fecha con el último abono). Tesla, sep-2026:
+// 13 créditos, $2.783.500.
+//
+// Ahora es un ABONO por todo lo que falta —capital, mora e interés— por el
+// camino normal (`registrarAbono`), así que pasa por las mismas barandas
+// (sucursal, doble clic) y se cierra por `cerrarSiPagadoEnTx`, que sigue siendo
+// el único que pone 'Saldado'. Perdonar un saldo no es esto: es condonar.
+const saldarCredito = async (negocioId, creditoId, {
+  usuario_id = null, metodo = 'Efectivo', sucursal_id = null,
+} = {}) => {
   const credito = await repo.findByIdYNegocio(creditoId, negocioId);
   if (!credito) throw { status: 404, message: 'Crédito no encontrado' };
-  if (credito.estado === 'Saldado') throw { status: 400, message: 'El crédito ya está saldado' };
+  exigirMismaSucursal(credito, sucursal_id, 'crédito');
+  if (credito.estado === 'Saldado')   throw { status: 400, message: 'El crédito ya está saldado' };
+  if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito está cancelado' };
 
+  const { saldo_capital, mora, interes } = await moraService.estadoDe('credito', creditoId, negocioId);
+  const capital = Math.max(0, Math.round(Number(saldo_capital) || 0));
+  const cargos  = Math.max(0, Math.round(Number(mora?.pendiente) || 0))
+                + Math.max(0, Math.round(Number(interes?.pendiente) || 0));
+  const total   = capital + cargos;
+
+  if (total > 0) {
+    const r = await registrarAbono(negocioId, creditoId, {
+      usuario_id, valor: total, metodo: metodo || 'Efectivo', sucursal_id,
+      // Cubre todo: primero los cargos (Art. 1653) y el resto la venta.
+      modo: 'mora_capital',
+    });
+    return { ...r, valor_pagado: total };
+  }
+
+  // Nada por cobrar y aun así 'Activo' (un estado viejo): solo se cierra.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await repo.updateEstado(client, creditoId, 'Saldado');
+    const cierre = await cerrarSiPagadoEnTx(client, creditoId, negocioId);
     await client.query('COMMIT');
+    return { saldado: cierre.saldado, valor_pagado: 0, saldo: 0, sucursal_id: credito.sucursal_id };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

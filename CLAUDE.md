@@ -108,6 +108,21 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Prueba: `46-editar-factura-credito` (85 verificaciones; la sección 10 es la de
 > los bloqueos, la 1 que el contado no cambió y la 11 renderiza el PDF de verdad).
 
+> **«Pagar todo» de un crédito REGISTRA el abono** (`creditos.service.saldarCredito`,
+> `PATCH /creditos/:id/saldar`, botón en `TabCreditos`): antes se llamaba
+> «Saldado» y hacía un `UPDATE estado='Saldado'` a secas —sin abono, sin mirar
+> saldo, sin rastro—. La gente lo usaba al recibir la plata: el crédito quedaba
+> cerrado con $0 abonado, la plata fuera de caja y la venta fuera de reportes
+> (`SQL_CREDITOS_SALDADOS` se fecha con el último abono). Tesla, 29-sep-2026: 13
+> créditos, $2.783.500, corregidos con
+> `scripts/corregir-creditos-saldados-sin-abono-tesla.js` (pagados en efectivo el
+> día de la venta, sin nota — decisión del usuario). Ahora abona TODO lo que
+> falta (capital + mora + interés, `modo: 'mora_capital'`) por `registrarAbono`
+> con el método elegido (ausente = Efectivo) y cierra por `cerrarSiPagadoEnTx`.
+> Perdonar un saldo NO es este botón: es condonar. Sin tocar, a propósito:
+> Caliwood (4), Nasa phone (1) y el negocio 4 siguen con saldados sin abono.
+> Prueba: sección 2 (y el final de la 5) de `29-invariante-extracto`.
+
 > **Precio mínimo de venta** (`utils/precioMinimo.util.js`, opt-in
 > `precio_minimo_activo`, **ausente = apagado**; Ajustes → Precios de venta):
 > ni la factura (crear y **editar**), ni el préstamo (crear y editar el valor), ni

@@ -245,15 +245,46 @@ console.log('\n═══ 1. Créditos — operaciones normales ═══');
   await invarianteCredito('tras volver a abonar', '111');
 }
 
-// ═══ 2. CRÉDITOS: saldar dejando remanente (el negocio perdona) ═════════════
-console.log('\n═══ 2. Créditos — saldar dejando plata sin cobrar ═══');
+// ═══ 2. CRÉDITOS: «Pagar todo» (antes «Saldado») ═══════════════════════════
+// El botón cerraba el crédito con un UPDATE a secas: $0 abonado, la plata fuera
+// de caja y de reportes (Tesla, sep-2026, 13 créditos). Ahora registra UN abono
+// por todo lo que falta y el crédito se cierra por el camino normal.
+console.log('\n═══ 2. Créditos — «Pagar todo» registra el abono ═══');
 {
   const c = await crearCredito(3, 500000, { dias: 6 });
   await creditos.registrarAbono(1, c.creditoId, { usuario_id: 1, valor: 100000, metodo: 'Efectivo', sucursal_id: 1 });
-  await invarianteCredito('antes de saldar', '111');
+  await invarianteCredito('antes de pagar todo', '111');
 
-  await creditos.saldarCredito(1, c.creditoId, { usuario_id: 1 });
-  await invarianteCredito('★ tras SALDAR con $400.000 sin pagar', '111');
+  const r = await creditos.saldarCredito(1, c.creditoId, { usuario_id: 1, metodo: 'Nequi', sucursal_id: 1 });
+  await invarianteCredito('★ tras PAGAR TODO con $400.000 pendientes', '111');
+
+  const cr = (await q(`SELECT estado, valor_total, total_abonado FROM creditos WHERE id=$1`, [c.creditoId]))[0];
+  const abonos = await q(`SELECT valor, metodo FROM abonos_credito WHERE credito_id=$1 AND NOT anulado ORDER BY id`, [c.creditoId]);
+  ok('★ el crédito quedó Saldado', cr.estado === 'Saldado', cr.estado);
+  ok('★ lo abonado es TODO el valor (no se cierra con plata sin registrar)',
+    Number(cr.total_abonado) === Number(cr.valor_total), `${money(cr.total_abonado)} de ${money(cr.valor_total)}`);
+  ok('★ se registró un abono por el saldo, con el método elegido',
+    abonos.length === 2 && Number(abonos[1].valor) === 400000 && abonos[1].metodo === 'Nequi',
+    abonos.map((a) => `${money(a.valor)} ${a.metodo}`).join(', '));
+  ok('la respuesta dice cuánto se pagó', Number(r.valor_pagado) === 400000, money(r.valor_pagado));
+
+  let rechazo = null;
+  try { await creditos.saldarCredito(1, c.creditoId, { usuario_id: 1, sucursal_id: 1 }); }
+  catch (e) { rechazo = e; }
+  ok('pagar todo sobre un crédito ya saldado se rechaza', rechazo?.status === 400, rechazo?.message);
+
+  const otra = await crearCredito(9, 300000, { dias: 2 });
+  let ajena = null;
+  try { await creditos.saldarCredito(1, otra.creditoId, { usuario_id: 1, sucursal_id: 2 }); }
+  catch (e) { ajena = e; }
+  const intacto = (await q(`SELECT estado, total_abonado FROM creditos WHERE id=$1`, [otra.creditoId]))[0];
+  ok('desde OTRA sucursal se rechaza y no toca nada',
+    ajena?.status === 403 && intacto.estado === 'Activo' && Number(intacto.total_abonado) === 0,
+    `${ajena?.status} ${intacto.estado} ${money(intacto.total_abonado)}`);
+  await creditos.saldarCredito(1, otra.creditoId, { usuario_id: 1, sucursal_id: 1 });
+  const sinMetodo = (await q(`SELECT metodo FROM abonos_credito WHERE credito_id=$1`, [otra.creditoId]))[0];
+  ok('sin método (un frontend viejo) se registra en Efectivo', sinMetodo?.metodo === 'Efectivo', sinMetodo?.metodo);
+  await invarianteCredito('★ tras pagar todo el segundo', '111');
 }
 
 // ═══ 3. CRÉDITOS: cancelar la factura ═══════════════════════════════════════
@@ -312,6 +343,24 @@ console.log('\n═══ 5. Créditos — cargos financieros (no son capital) �
 
   await creditos.registrarAbono(1, c.creditoId, { usuario_id: 1, valor: 700000, metodo: 'Efectivo', sucursal_id: 1 });
   await invarianteCredito('★ tras pagar TODO el capital', '111');
+
+  // «Pagar todo» con mora causada: cubre la mora Y la venta en un solo paso,
+  // y el crédito se cierra (antes lo cerraba sin cobrar ninguna de las dos).
+  const m = await crearCredito(10, 500000, { dias: 40 });
+  await creditos.fijarPlazo(1, m.creditoId, {
+    fecha_limite: new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10),
+    condicion_id: 'normal', rol: 'admin_negocio',
+  });
+  const rm = await creditos.saldarCredito(1, m.creditoId, { usuario_id: 1, metodo: 'Efectivo', sucursal_id: 1 });
+  const crm = (await q(`SELECT estado, valor_total, total_abonado FROM creditos WHERE id=$1`, [m.creditoId]))[0];
+  const moraCobrada = (await q(`
+    SELECT COALESCE(SUM(valor),0) AS v FROM movimientos_mora
+     WHERE credito_id=$1 AND tipo='Cobro' AND NOT anulado`, [m.creditoId]))[0];
+  ok('★ pagar todo con mora: Saldado, venta completa y mora cobrada',
+    crm.estado === 'Saldado' && Number(crm.total_abonado) === 500000 && Number(moraCobrada.v) > 0
+      && Number(rm.valor_pagado) === 500000 + Number(moraCobrada.v),
+    `${crm.estado} · abonado ${money(crm.total_abonado)} · mora ${money(moraCobrada.v)} · pagado ${money(rm.valor_pagado)}`);
+  await invarianteCredito('★ tras pagar todo un crédito con mora', '111');
 }
 
 // ═══ 6. CRÉDITOS: el error humano — anular lo que no era ════════════════════
