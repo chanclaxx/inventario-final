@@ -395,7 +395,7 @@ seccion(15, 'EXCEL: las columnas fijas son un contrato entre las dos puntas');
 
 const plantilla = require(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.plantilla.js'));
 check('las columnas fijas, en orden',
-  plantilla.COLUMNAS_FIJAS, ['ID', 'Producto', 'Variante', 'Nivel', 'Código', 'Precio actual']);
+  plantilla.COLUMNAS_FIJAS, ['ID', 'Línea', 'Producto', 'Variante', 'Nivel', 'Código', 'Precio actual']);
 // «Detalle» es como se llamaba «Variante» hasta sep-2026. El lector tiene que
 // seguir aceptándola: la gente guarda los archivos que bajó, y si su propia
 // columna saliera como «se ignora» el informe estaría acusando al usuario de un
@@ -407,7 +407,7 @@ checkTrue('el lector sigue aceptando el nombre viejo de la columna',
 // se descargaría bien y no se podría volver a subir.
 const excelSrc = readFileSync(path.resolve(RAIZ, 'src/modules/listas-precios/listasPrecios.excel.js'), 'utf8');
 checkTrue('el lector importa las columnas del generador',
-  excelSrc.includes("COLUMNAS_CONOCIDAS } = require('./listasPrecios.plantilla')"));
+  /COLUMNAS_CONOCIDAS[^}]*\} = require\('\.\/listasPrecios\.plantilla'\)/.test(excelSrc));
 checkTrue('…y lee la columna de variante con los dos nombres',
   /fila\.Variante \?\? fila\.Detalle/.test(excelSrc));
 

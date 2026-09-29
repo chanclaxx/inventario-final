@@ -71,8 +71,43 @@ const nombreHoja = (nombre, usados) => {
 // las dos —un archivo bajado antes tiene que poder subirse igual— y por eso
 // `COLUMNAS_CONOCIDAS` lleva las dos, o la vieja saldría como «columna que no
 // es ninguna de tus listas y se ignora».
-const COLUMNAS_FIJAS = ['ID', 'Producto', 'Variante', 'Nivel', 'Código', 'Precio actual'];
+//
+// «Línea» (sep-2026) es de REFERENCIA, como «Nivel» y «Código»: el importador
+// no la lee —a qué nodo va una fila lo decide el ID—, así que moverla de
+// línea en el Excel no mueve el producto de línea en el programa.
+const COLUMNAS_FIJAS = ['ID', 'Línea', 'Producto', 'Variante', 'Nivel', 'Código', 'Precio actual'];
 const COLUMNAS_CONOCIDAS = [...COLUMNAS_FIJAS, 'Detalle'];
+const COL = Object.fromEntries(COLUMNAS_FIJAS.map((n, i) => [n, i]));
+
+// ── Agrupado por LÍNEA (pedido del usuario, 29-sep-2026) ────────────────────
+// «Que se vea clasificado por las líneas del programa: el iPhone 11 dentro de
+// iPhones.» El repositorio ya entrega los nodos ordenados por línea; aquí cada
+// línea abre con una fila de ENCABEZADO y sus filas quedan agrupadas con el
+// esquema de Excel (el botón +/− a la izquierda), así que se puede plegar
+// «Accesorios» y trabajar solo en «iPhones».
+// Dos cosas que NO se usan, a propósito: los colores (el `xlsx` del backend es
+// la edición comunitaria y descarta los estilos al escribir: un encabezado que
+// solo se distinguiera por el relleno saldría como una fila más) y las celdas
+// combinadas (rompen el filtro y el ordenar de Excel). El encabezado se
+// reconoce por el texto: el nombre en MAYÚSCULAS y «Línea» en la columna Nivel.
+// El importador se lo salta por eso mismo —sin ID y con Nivel «Línea»—, así que
+// subir el archivo recién bajado sigue sin cambiar ni una fila.
+const NIVEL_LINEA = 'Línea';
+const SIN_LINEA   = 'Sin línea';
+
+const esRaiz = (nodo) => nodo.nivel === 'producto' || nodo.nivel === 'serial';
+
+/** Parte los nodos (ya ordenados por línea) en grupos contiguos. */
+function agruparPorLinea(nodos) {
+  const grupos = [];
+  for (const nodo of nodos) {
+    const clave = nodo.linea_id ?? null;
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.clave === clave) ultimo.nodos.push(nodo);
+    else grupos.push({ clave, nombre: nodo.linea || SIN_LINEA, nodos: [nodo] });
+  }
+  return grupos;
+}
 
 // Una talla se ve como lo que es: DEBAJO de su producto y sangrada. Con 2.000
 // filas, el archivo tiene que dejar ver de un vistazo dónde empieza y dónde
@@ -82,61 +117,85 @@ const SANGRIA = { producto: '', serial: '', atributo: '    ', variante: '       
 function hojaSucursal(nodos, listas) {
   const ws = {};
   const encabezados = [...COLUMNAS_FIJAS, ...listas.map((l) => l.nombre)];
+  const filasInfo = [{}];   // !rows: la cabecera va sin nivel de esquema
 
   encabezados.forEach((texto, c) => {
     const esLista = c >= COLUMNAS_FIJAS.length;
     put(ws, 0, c, 's', texto, sCabecera(esLista ? C.precioFondo : C.fijoFondo));
   });
 
-  nodos.forEach((nodo, i) => {
-    const r = i + 1;
-    const esProducto = nodo.nivel === 'producto' || nodo.nivel === 'serial';
-    // Las filas de talla van con fondo suave y el nombre del producto en gris:
-    // lo que hay que leer en ellas es la variante, no repetir el producto.
-    const fondo = esProducto ? C.blanco : C.grisSuave;
-    const estilo = esProducto
-      ? { ...sTexto(fondo), font: { sz: 10, bold: true, color: { rgb: '111827' } } }
-      : sTexto(fondo);
+  let r = 1;
+  for (const grupo of agruparPorLinea(nodos)) {
+    // ── Encabezado de la línea ───────────────────────────────────────────
+    const productos = grupo.nodos.filter(esRaiz).length;
+    const sLinea = { font: { bold: true, sz: 11, color: { rgb: C.blanco } },
+                     fill: { fgColor: { rgb: C.headerFondo } } };
+    put(ws, r, COL['Línea'], 's', grupo.nombre, sLinea);
+    put(ws, r, COL.Producto, 's', String(grupo.nombre).toUpperCase(), sLinea);
+    put(ws, r, COL.Variante, 's', `${productos} producto${productos === 1 ? '' : 's'}`, sLinea);
+    put(ws, r, COL.Nivel,    's', NIVEL_LINEA, sLinea);
+    filasInfo[r] = {};
+    r++;
 
-    put(ws, r, 0, 's', nodo.token,        sTexto(fondo));
-    put(ws, r, 1, 's', nodo.nombre ?? '', estilo);
-    // Un producto con tallas NO se tarifa solo con su fila: lo que se vende es
-    // la talla. Se dice aquí, en la fila, y no solo en las instrucciones.
-    const variante = nodo.detalle
-      ? `${SANGRIA[nodo.nivel] || ''}${nodo.detalle}`
-      : (nodo.tiene_hijos ? '(y todas sus variantes, abajo)' : '');
-    put(ws, r, 2, 's', variante, sTexto(fondo));
-    put(ws, r, 3, 's', nodo.nivel_etiqueta ?? '', sTexto(fondo));
-    put(ws, r, 4, 's', nodo.codigo ?? '', sTexto(fondo));
-    // El precio de siempre viaja como REFERENCIA, no se importa: es lo que se
-    // cobra cuando la lista elegida no menciona el producto, y verlo al lado
-    // es lo que deja decidir si hace falta tarifarlo.
-    const precio = Number(nodo.precio);
-    if (Number.isFinite(precio) && precio > 0) put(ws, r, 5, 'n', precio, sTexto(fondo));
-    else put(ws, r, 5, 's', '', sTexto(fondo));
+    for (const nodo of grupo.nodos) {
+      const esProducto = esRaiz(nodo);
+      // Las filas de talla van con fondo suave y el nombre del producto en gris:
+      // lo que hay que leer en ellas es la variante, no repetir el producto.
+      const fondo = esProducto ? C.blanco : C.grisSuave;
+      const estilo = esProducto
+        ? { ...sTexto(fondo), font: { sz: 10, bold: true, color: { rgb: '111827' } } }
+        : sTexto(fondo);
 
-    // Sin precio en esa lista NO se escribe la celda: una celda de texto vacío
-    // es, para Excel, una celda CON contenido — se cuenta al filtrar, estorba al
-    // arrastrar un precio hacia abajo y al pegar una columna entera. Vacía de
-    // verdad es lo que significa «esta fila hereda».
-    listas.forEach((l, k) => {
-      const v = Number(nodo.precios?.[l.id]);
-      if (Number.isFinite(v) && v > 0) put(ws, r, COLUMNAS_FIJAS.length + k, 'n', v);
-    });
-  });
+      put(ws, r, COL.ID,       's', nodo.token,        sTexto(fondo));
+      // La línea se repite en CADA fila: es lo que deja filtrar por línea con
+      // el filtro de Excel, y lo que sigue diciendo de dónde es la fila si
+      // alguien la copia a otra parte.
+      put(ws, r, COL['Línea'], 's', grupo.nombre,      sTexto(fondo));
+      put(ws, r, COL.Producto, 's', nodo.nombre ?? '', estilo);
+      // Un producto con tallas NO se tarifa solo con su fila: lo que se vende es
+      // la talla. Se dice aquí, en la fila, y no solo en las instrucciones.
+      const variante = nodo.detalle
+        ? `${SANGRIA[nodo.nivel] || ''}${nodo.detalle}`
+        : (nodo.tiene_hijos ? '(y todas sus variantes, abajo)' : '');
+      put(ws, r, COL.Variante,  's', variante, sTexto(fondo));
+      put(ws, r, COL.Nivel,     's', nodo.nivel_etiqueta ?? '', sTexto(fondo));
+      put(ws, r, COL['Código'], 's', nodo.codigo ?? '', sTexto(fondo));
+      // El precio de siempre viaja como REFERENCIA, no se importa: es lo que se
+      // cobra cuando la lista elegida no menciona el producto, y verlo al lado
+      // es lo que deja decidir si hace falta tarifarlo.
+      const precio = Number(nodo.precio);
+      if (Number.isFinite(precio) && precio > 0) put(ws, r, COL['Precio actual'], 'n', precio, sTexto(fondo));
+      else put(ws, r, COL['Precio actual'], 's', '', sTexto(fondo));
+
+      // Sin precio en esa lista NO se escribe la celda: una celda de texto vacío
+      // es, para Excel, una celda CON contenido — se cuenta al filtrar, estorba al
+      // arrastrar un precio hacia abajo y al pegar una columna entera. Vacía de
+      // verdad es lo que significa «esta fila hereda».
+      listas.forEach((l, k) => {
+        const v = Number(nodo.precios?.[l.id]);
+        if (Number.isFinite(v) && v > 0) put(ws, r, COLUMNAS_FIJAS.length + k, 'n', v);
+      });
+      filasInfo[r] = { level: 1 };
+      r++;
+    }
+  }
 
   const ref = XLSX.utils.encode_range(
-    { s: { r: 0, c: 0 }, e: { r: nodos.length, c: encabezados.length - 1 } });
+    { s: { r: 0, c: 0 }, e: { r: r - 1, c: encabezados.length - 1 } });
   ws['!ref']  = ref;
   ws['!cols'] = [
-    { wch: 10 }, { wch: 40 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+    { wch: 10 }, { wch: 18 }, { wch: 40 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
     ...listas.map(() => ({ wch: 16 })),
   ];
+  // El esquema de Excel: cada línea se pliega desde SU encabezado, que va
+  // arriba de sus filas (por defecto Excel pone el botón debajo del grupo).
+  ws['!rows']    = filasInfo;
+  ws['!outline'] = { above: true };
   // Congelar la cabecera: con 450 filas, perder de vista qué columna es cuál es
   // la forma más fácil de escribir el precio mayorista en la columna del final.
   ws['!freeze'] = { xSplit: 0, ySplit: 1 };
   // Y el filtro de Excel, que es como se tarifa de verdad: «todas las tallas de
-  // las correas», «solo lo que no tiene precio mayorista».
+  // las correas», «solo lo que no tiene precio mayorista», «solo los iPhones».
   ws['!autofilter'] = { ref };
   return ws;
 }
@@ -160,6 +219,10 @@ function hojaInstrucciones(listas, sucursales) {
   normal('');
   normal('· NO borres la columna ID: es lo que identifica cada producto sin equivocarse.');
   normal('  Si la borras, se busca por nombre y eso sí puede fallar con nombres parecidos.');
+  normal('· Los productos vienen AGRUPADOS POR LÍNEA, como en el programa: cada línea');
+  normal('  empieza con una fila en MAYÚSCULAS (Nivel "Línea") y con el botón − de la');
+  normal('  izquierda se pliega. Esas filas no llevan precio y no se importan. La columna');
+  normal('  "Línea" sirve para filtrar; cambiarla aquí NO cambia la línea del producto.');
   normal('· Cada producto trae DEBAJO sus tallas y colores, sangrados. La columna "Nivel"');
   normal('  dice qué es cada fila: Producto, Talla, Color… o Referencia (equipos con IMEI).');
   normal('· El precio que pongas en el PRODUCTO vale para todas sus tallas. Escribe en la');
@@ -168,7 +231,7 @@ function hojaInstrucciones(listas, sucursales) {
   normal('  producto y, si tampoco lo tiene, se vende a su precio de siempre (la columna');
   normal('  "Precio actual"). Nunca en $0.');
   normal('· Escribir 0 es lo mismo que dejarla vacía. Un producto a $0 siempre es un error.');
-  normal('· "Precio actual", "Código", "Nivel" y "Variante" son solo de referencia: aunque');
+  normal('· "Línea", "Precio actual", "Código", "Nivel" y "Variante" son de referencia: aunque');
   normal('  los cambies, no se importan.');
   normal('· Puedes usar el filtro de Excel de la fila 1 para trabajar por producto o por');
   normal('  talla sin perderte entre miles de filas.');
@@ -210,4 +273,4 @@ function generarPlantillaBuffer(datos, listas) {
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }
 
-module.exports = { generarPlantillaBuffer, COLUMNAS_FIJAS, COLUMNAS_CONOCIDAS };
+module.exports = { generarPlantillaBuffer, COLUMNAS_FIJAS, COLUMNAS_CONOCIDAS, NIVEL_LINEA };

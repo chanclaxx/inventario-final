@@ -20,6 +20,8 @@
 //      cambios» sobre un archivo que no editó.
 //   4. Un archivo VIEJO (con la columna «Detalle» y sin tallas) se sigue
 //      subiendo igual (sección 5).
+//   5. Sale CLASIFICADO POR LÍNEA (sección 7): cada línea abre con su
+//      encabezado, sus filas se pliegan, y el viaje de vuelta sigue exacto.
 //
 //   node scripts/pruebas-red-interna/58-plantilla-precios.mjs
 // Requiere PGlite (no va en package.json a propósito):
@@ -100,9 +102,14 @@ await db.exec(`
 
 const admin = { id: 1, negocio_id: 1, rol: 'admin_negocio', sucursal_id: 1 };
 
+// Desde sep-2026 cada línea abre con una fila de ENCABEZADO (sin ID, Nivel
+// «Línea»). Las secciones 1-6 miran los nodos, así que la quitan; la 7 es la
+// que mira la agrupación.
+const esEncabezado = (f) => !f.ID && f.Nivel === 'Línea';
 const hojaDe = (buffer, nombre = 'Principal') => {
   const wb = XLSX.read(buffer, { type: 'buffer' });
-  return { wb, filas: XLSX.utils.sheet_to_json(wb.Sheets[nombre], { defval: null }) };
+  const todas = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { defval: null });
+  return { wb, todas, filas: todas.filter((f) => !esEncabezado(f)) };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,6 +253,78 @@ seccion('5. Un archivo VIEJO se sigue pudiendo subir');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+seccion('7. Sale CLASIFICADO POR LÍNEA, como en el programa');
+{
+  // Pedido del usuario (29-sep-2026): «que se vea clasificado por las líneas:
+  // el iPhone 11 en la línea iPhones». La Correa y el Cable van a Accesorios,
+  // el iPhone a iPhones, y un producto nuevo se queda sin línea.
+  await db.exec(`
+    INSERT INTO lineas_producto (negocio_id, nombre) VALUES (1,'iPhones'), (1,'Accesorios');
+    UPDATE productos_cantidad SET linea_id = 2 WHERE id IN (1, 2);
+    UPDATE productos_serial   SET linea_id = 1 WHERE id = 1;
+    INSERT INTO productos_cantidad (nombre, stock, precio, sucursal_id)
+      VALUES ('Adaptador', 1, 9000, 1);
+  `);
+  const { buffer } = await svc.generarPlantilla(admin, {});
+  const { wb, todas } = hojaDe(buffer);
+
+  const secuencia = todas.map((f) => (esEncabezado(f) ? `[${f['Línea']}]` : f.ID));
+  ok('★ agrupado por línea, en orden alfabético y «Sin línea» al final',
+    JSON.stringify(secuencia) === JSON.stringify(
+      ['[Accesorios]', 'p2', 'p1', 'a2', 'v2', 'v1', 'a1', '[iPhones]', 's1', '[Sin línea]', 'p3']),
+    secuencia.join(' → '));
+
+  const cab = todas.filter(esEncabezado);
+  ok('el encabezado lleva el nombre en MAYÚSCULAS', cab[0].Producto === 'ACCESORIOS', cab[0].Producto);
+  ok('…y cuántos productos hay (no cuenta tallas ni colores)',
+    cab[0].Variante === '2 productos' && cab[1].Variante === '1 producto',
+    cab.map((c) => c.Variante).join(' / '));
+  ok('el encabezado no lleva precios',
+    cab.every((c) => c['Al por mayor'] === null && c['Cliente final'] === null));
+
+  const porId = Object.fromEntries(todas.filter((f) => f.ID).map((f) => [f.ID, f]));
+  ok('★ cada fila dice su línea (para el filtro de Excel)',
+    porId.p1['Línea'] === 'Accesorios' && porId.v1['Línea'] === 'Accesorios'
+      && porId.s1['Línea'] === 'iPhones' && porId.p3['Línea'] === 'Sin línea',
+    [porId.p1['Línea'], porId.v1['Línea'], porId.s1['Línea'], porId.p3['Línea']].join(' / '));
+
+  // El esquema de Excel (+/−) se escribe en el XML de verdad: los estilos no
+  // (el xlsx del backend es la edición comunitaria), así que la agrupación NO
+  // puede depender de ellos.
+  const wbXml = XLSX.read(buffer, { type: 'buffer', cellStyles: true });
+  // El arreglo viene DISPERSO (huecos donde no hay nivel): `map` se los salta.
+  const niveles = Array.from(wbXml.Sheets.Principal['!rows'] || [], (x) => x?.level || 0);
+  ok('★ las filas de cada línea quedan agrupadas (se pliegan con −)',
+    niveles[1] === 0 && niveles[2] === 1 && niveles[8] === 0 && niveles[9] === 1,
+    niveles.slice(0, 12).join(''));
+
+  // El viaje de vuelta sigue exacto CON los encabezados dentro.
+  const informe = await svc.analizarExcel(admin, buffer, []);
+  ok('★ subir lo recién bajado no cambia nada', informe.con_cambio === 0, `${informe.con_cambio}`);
+  ok('★ los encabezados no son conflictos ni filas', informe.conflictos.length === 0
+      && informe.total_filas === 8,
+    `${informe.total_filas} filas · ${JSON.stringify(informe.conflictos.slice(0, 2))}`);
+  ok('la columna «Línea» no sale como ignorada',
+    !informe.avisos.some((a) => a.tipo === 'COLUMNA_IGNORADA'), JSON.stringify(informe.avisos));
+
+  // Un encabezado al que alguien le escribe un precio sigue sin importarse, y
+  // una fila de PRODUCTO sin ID sigue cayendo en el respaldo por nombre.
+  const ws = wb.Sheets.Principal;
+  const cols = XLSX.utils.sheet_to_json(ws, { header: 1 })[0];
+  const cMayor = cols.indexOf('Al por mayor');
+  ws[XLSX.utils.encode_cell({ r: 1, c: cMayor })] = { t: 'n', v: 1 };
+  const fAdap = todas.findIndex((f) => f.ID === 'p3') + 1;
+  delete ws[XLSX.utils.encode_cell({ r: fAdap, c: cols.indexOf('ID') })];
+  ws[XLSX.utils.encode_cell({ r: fAdap, c: cMayor })] = { t: 'n', v: 8000 };
+  const editado = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const inf2 = await svc.analizarExcel(admin, editado, []);
+  ok('un precio escrito en el encabezado se ignora; el producto sin ID se casa por nombre',
+    inf2.con_cambio === 1 && inf2.avisos.some((a) => a.tipo === 'SIN_ID')
+      && inf2.conflictos.length === 0,
+    `${inf2.con_cambio} · ${JSON.stringify(inf2.conflictos)}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 seccion('6. El alcance por negocio y por sucursal no se afloja');
 {
   await db.exec(`
@@ -257,6 +336,15 @@ seccion('6. El alcance por negocio y por sucursal no se afloja');
   const nodos = await repo.leerNodosSucursal(1, 1, {});
   ok('no se cuela nada de otro negocio',
     nodos.every((n) => n.nombre !== 'Producto ajeno'), `${nodos.length} filas`);
+
+  // Una línea de OTRO negocio con el mismo id no le pone nombre a la nuestra.
+  await db.exec(`
+    INSERT INTO lineas_producto (negocio_id, nombre) VALUES (2,'Línea ajena');
+    UPDATE productos_cantidad SET linea_id = 3 WHERE id = 3;
+  `);
+  const conAjena = await repo.leerNodosSucursal(1, 1, {});
+  ok('una línea de otro negocio no se cuela en el nombre',
+    conAjena.find((n) => n.token === 'p3')?.linea == null);
   const ajenos = await repo.leerNodosSucursal(2, 1, {});
   ok('pedir la sucursal de otro negocio no devuelve nada', ajenos.length === 0);
 }

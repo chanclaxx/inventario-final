@@ -130,6 +130,16 @@ const leerPreciosProductoCantidad = async (productoId, negocioId) => {
  * export de inventario — ordenar alfabéticamente pondría las tallas como
  * L, M, S, XL.
  *
+ * ── Y todo va agrupado por LÍNEA ─────────────────────────────────────────────
+ * Pedido del usuario (29-sep-2026): el archivo tiene que verse clasificado por
+ * las líneas del programa —el «iPhone 11» dentro de «iPhones»—, porque así es
+ * como se piensan los precios («subamos los accesorios»). La línea es la del
+ * PRODUCTO (una talla o un color van con su producto) y los equipos con IMEI
+ * caen en la suya junto a los productos por cantidad de esa misma línea. Por
+ * nombre, como la lista de líneas de Ajustes; `linea_id` desempata dos líneas
+ * que se llamen igual para que cada grupo quede contiguo. Lo que no tiene
+ * línea (o la tenía y la borraron) va AL FINAL, en «Sin línea».
+ *
  * El `token` es lo que hace EXACTO el viaje de ida y vuelta: al reimportar no
  * hay que adivinar a qué fila corresponde cada línea del Excel. Si el usuario
  * lo borra o agrega una fila a mano, el importador cae al nombre — pero eso ya
@@ -149,9 +159,11 @@ const leerNodosSucursal = async (
         pc.nombre AS orden_nombre, pc.id AS orden_producto,
         0 AS orden_atr_num, ''::text AS orden_atr_txt,
         0 AS orden_nivel,
-        0 AS orden_var_num, ''::text AS orden_var_txt
+        0 AS orden_var_num, ''::text AS orden_var_txt,
+        lp.id AS linea_id, lp.nombre AS linea
       FROM productos_cantidad pc
       JOIN sucursales su ON su.id = pc.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id AND lp.negocio_id = $2
       WHERE pc.sucursal_id = $1 AND su.negocio_id = $2 AND pc.activo = true
 
       UNION ALL
@@ -165,10 +177,12 @@ const leerNodosSucursal = async (
         pc.nombre, pc.id,
         COALESCE(tc.orden, 9999), ap.valor,
         1,
-        0, ''
+        0, '',
+        lp.id, lp.nombre
       FROM atributos_producto ap
       JOIN productos_cantidad pc ON pc.id = ap.producto_id
       JOIN sucursales su ON su.id = ap.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id AND lp.negocio_id = $2
       LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
       WHERE ap.sucursal_id = $1 AND su.negocio_id = $2
         AND ap.activo = true AND pc.activo = true AND $3::boolean
@@ -185,11 +199,13 @@ const leerNodosSucursal = async (
         pc.nombre, pc.id,
         COALESCE(tca.orden, 9999), ap.valor,
         2,
-        COALESCE(tcv.orden, 9999), v.valor
+        COALESCE(tcv.orden, 9999), v.valor,
+        lp.id, lp.nombre
       FROM variantes_atributo v
       JOIN atributos_producto ap ON ap.id = v.atributo_id
       JOIN productos_cantidad pc ON pc.id = ap.producto_id
       JOIN sucursales su ON su.id = ap.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = pc.linea_id AND lp.negocio_id = $2
       LEFT JOIN tipos_caracteristica tca ON tca.id = ap.tipo_id
       LEFT JOIN tipos_caracteristica tcv ON tcv.id = v.tipo_id
       WHERE ap.sucursal_id = $1 AND su.negocio_id = $2
@@ -214,12 +230,15 @@ const leerNodosSucursal = async (
         ps.nombre, ps.id,
         0, '',
         0,
-        0, ''
+        0, '',
+        lp.id, lp.nombre
       FROM productos_serial ps
       JOIN sucursales su ON su.id = ps.sucursal_id
+      LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id AND lp.negocio_id = $2
       WHERE ps.sucursal_id = $1 AND su.negocio_id = $2 AND $4::boolean
     ) nodos
-    ORDER BY orden_nombre, orden_producto,
+    ORDER BY (linea_id IS NULL), LOWER(linea), linea_id,
+             orden_nombre, orden_producto,
              orden_atr_num, orden_atr_txt, orden_nivel, orden_var_num, orden_var_txt
   `, [sucursalId, negocioId, incluirVariantes, incluirSeriales]);
   return rows;

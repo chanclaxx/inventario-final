@@ -228,9 +228,21 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > filtrar y al arrastrar), y una **fila completamente vacía se salta** en vez de
 > caer en el respaldo por nombre y llenar el informe de «no hay ningún producto
 > llamado ""».
-> Prueba: `58-plantilla-precios` (38; genera el .xlsx DE VERDAD y le lee las
-> celdas — la sección 2 es la del orden, y la 4 la que de verdad protege: subir
-> el archivo recién bajado, sin tocar nada, no cambia NI UNA fila).
+> **Y va CLASIFICADO POR LÍNEA** (pedido del usuario, 29-sep-2026: «el iPhone
+> 11 dentro de iPhones»): el `ORDER BY` pone primero la línea (`lineas_producto`,
+> por nombre; la del PRODUCTO, así que las tallas van con él y las referencias
+> con IMEI caen en la suya; «Sin línea» al final), cada línea abre con una fila
+> de ENCABEZADO (nombre en MAYÚSCULAS, Nivel «Línea», sin ID ni precios) y sus
+> filas llevan `outlineLevel` 1 para plegarlas con el −. Nueva columna
+> **«Línea»**, de referencia: sirve para el filtro y NO se importa. El
+> importador se salta el encabezado por las DOS marcas (sin token y Nivel
+> «Línea»): una fila de producto sin ID sigue yendo al respaldo por nombre.
+> Sin colores a propósito: el `xlsx` del backend es la edición comunitaria y
+> descarta los estilos, así que la agrupación se reconoce por el texto.
+> Prueba: `58-plantilla-precios` (49; genera el .xlsx DE VERDAD y le lee las
+> celdas — la sección 2 es la del orden, la 4 la que de verdad protege: subir
+> el archivo recién bajado, sin tocar nada, no cambia NI UNA fila, y la 7 la
+> de las líneas, con el viaje de vuelta incluidos los encabezados).
 
 > **El PIN de administrador lo usan otros roles SOLO si el admin los autoriza**
 > (`config.service.verificarPinDeUsuario`, `middlewares/pinAdmin.middleware.js`,

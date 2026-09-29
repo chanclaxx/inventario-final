@@ -1,5 +1,5 @@
 const XLSX = require('xlsx');
-const { COLUMNAS_CONOCIDAS } = require('./listasPrecios.plantilla');
+const { COLUMNAS_CONOCIDAS, NIVEL_LINEA } = require('./listasPrecios.plantilla');
 const { MAX_PRECIO } = require('../../utils/listasPrecios.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,6 +168,12 @@ function resolverLibro(buffer, { listas, porSucursal }) {
       // «no hay ningún producto llamado ""», llenando el informe de conflictos
       // que no lo son.
       if (Object.values(fila).every((v) => v === null || String(v).trim() === '')) continue;
+
+      // El ENCABEZADO de una línea (desde sep-2026 la plantilla agrupa por
+      // línea) tampoco es un producto: no trae ID y su Nivel dice «Línea».
+      // Se exigen las dos cosas: una fila de producto a la que le borraron el
+      // ID sigue cayendo en el respaldo por nombre, como siempre.
+      if (!leerToken(fila.ID) && NORM(fila.Nivel) === NORM(NIVEL_LINEA)) continue;
 
       informe.total_filas++;
       // La columna se llama «Variante» desde sep-2026 y «Detalle» antes; las dos
