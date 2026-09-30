@@ -446,6 +446,83 @@ const _resolverNodoOrigen = async (client, { productoId, atributoId, varianteId,
 };
 
 /**
+ * ¿El producto tiene la misma FORMA en las dos sedes? Sin eso, lo que se mueve
+ * se pierde en silencio con el siguiente ajuste.
+ *
+ * El stock de un producto con tallas es un DERIVADO: `sincronizarStockProducto`
+ * lo recalcula como la suma de sus tallas activas (y la talla, como la suma de
+ * sus colores). Dos descuadres lo rompen, uno en cada dirección:
+ *   · llega SIN talla a un producto que en el destino SÍ tiene: la recepción
+ *     suma al producto, sus tallas siguen sumando lo de antes y el primer
+ *     ajuste de cualquier talla borra lo recibido. Tesla, 29-sep-2026: en la
+ *     importación del 6-sep a la bodega se le quitó la talla «SIN MARCA» de
+ *     `ML ORIGINALES APPLE LIGTHNING` y a los locales no; Bunny recibió 10, vio
+ *     la talla en 0, eliminó el producto y lo volvieron a despachar.
+ *   · llega CON talla a un producto que en el destino no tiene ninguna pero sí
+ *     stock: crear la primera talla deja al producto valiendo solo lo recibido
+ *     y lo que ya había desaparece. Igual un nivel más abajo (talla ↔ color).
+ * No se adivina a qué talla pertenecen esas unidades: se dice qué igualar. Un
+ * nodo vacío (stock 0) no tiene nada que perder, y crear tallas nuevas al lado
+ * de otras que ya existen tampoco rompe nada.
+ */
+const _exigirFormaCompatible = async (client, {
+  productoDestinoId, sucursalDestinoId, atributoValor, varianteValor,
+}) => {
+  const { rows: tallas } = await client.query(
+    `SELECT valor FROM atributos_producto
+     WHERE producto_id = $1 AND sucursal_id = $2 AND activo = true ORDER BY id`,
+    [productoDestinoId, sucursalDestinoId]
+  );
+
+  let problema = null;
+  if (!atributoValor) {
+    if (tallas.length) {
+      const lista = tallas.slice(0, 3).map((t) => t.valor).join(', ') + (tallas.length > 3 ? '…' : '');
+      problema = (sede, nombre) => `En ${sede}, "${nombre}" se maneja por variantes (${lista}) y lo que llega no `
+        + `trae variante. Si se recibe así, el siguiente ajuste de esas variantes lo borraría. Iguala el `
+        + `producto en las dos sedes (quítale las variantes en ${sede} o créalas donde sale) y vuelve a intentar.`;
+    }
+  } else if (!tallas.length) {
+    const { rows } = await client.query(`SELECT stock FROM productos_cantidad WHERE id = $1`, [productoDestinoId]);
+    const stock = Number(rows[0]?.stock) || 0;
+    if (stock > 0) {
+      problema = (sede, nombre) => `En ${sede}, "${nombre}" no tiene variantes y tiene ${stock} uds; lo que llega `
+        + `es la variante "${atributoValor}". Crearla dejaría el producto solo con lo recibido y esas ${stock} `
+        + `desaparecerían. Crea las variantes en ${sede} y reparte ese stock antes de recibir.`;
+    }
+  } else {
+    const { rows: at } = await client.query(
+      `SELECT ap.stock,
+              (SELECT count(*)::int FROM variantes_atributo v WHERE v.atributo_id = ap.id AND v.activo = true) AS n
+       FROM atributos_producto ap
+       WHERE ap.producto_id = $1 AND ap.sucursal_id = $2 AND LOWER(ap.valor) = LOWER($3) AND ap.activo = true
+       ORDER BY ap.id LIMIT 1`,
+      [productoDestinoId, sucursalDestinoId, atributoValor]
+    );
+    const a = at[0];
+    if (a && !varianteValor && a.n > 0) {
+      problema = (sede, nombre) => `En ${sede}, "${nombre} / ${atributoValor}" se divide en sub-variantes y lo `
+        + `que llega no dice cuál. Iguala el producto en las dos sedes y vuelve a intentar.`;
+    } else if (a && varianteValor && a.n === 0 && Number(a.stock) > 0) {
+      problema = (sede, nombre) => `En ${sede}, "${nombre} / ${atributoValor}" no tiene sub-variantes y tiene `
+        + `${a.stock} uds; lo que llega es "${varianteValor}". Créalas en ${sede} y reparte ese stock antes de recibir.`;
+    }
+  }
+  if (!problema) return;
+
+  const { rows: info } = await client.query(
+    `SELECT pc.nombre, su.nombre AS sede FROM productos_cantidad pc
+     JOIN sucursales su ON su.id = pc.sucursal_id WHERE pc.id = $1`,
+    [productoDestinoId]
+  );
+  throw {
+    status: 409,
+    code: 'VARIANTES_DISTINTAS',
+    message: problema(info[0]?.sede || 'el destino', info[0]?.nombre || 'el producto'),
+  };
+};
+
+/**
  * Encuentra —o crea— el mismo nodo bajo el producto del DESTINO. La identidad
  * entre sedes es el VALOR (el texto "38MM"), nunca el id: cada sucursal tiene
  * los suyos. Se crea con stock 0 y sin costo; el costo lo pone la recepción con
@@ -462,6 +539,9 @@ const _resolverNodoDestino = async (client, {
   productoDestinoId, sucursalDestinoId, atributoValor, varianteValor,
   atributoCodigo = null, varianteCodigo = null,
 }) => {
+  await _exigirFormaCompatible(client, {
+    productoDestinoId, sucursalDestinoId, atributoValor, varianteValor,
+  });
   if (!atributoValor) return { atributoId: null, varianteId: null };
 
   const { rows: ex } = await client.query(
@@ -703,12 +783,13 @@ const _destinoElegido = async (client, {
   const tabla = tipo === 'serial' ? 'productos_serial' : 'productos_cantidad';
 
   if (eleccionUsuario) {
+    const soloActivo = tipo === 'serial' ? '' : ' AND activo = true';
     const { rows } = await client.query(
-      `SELECT id FROM ${tabla} WHERE id = $1 AND sucursal_id = $2`,
+      `SELECT id FROM ${tabla} WHERE id = $1 AND sucursal_id = $2${soloActivo}`,
       [Number(eleccionUsuario), sucursalDestinoId]
     );
     if (!rows.length) {
-      throw { status: 400, message: 'La referencia de destino elegida no es de esa sucursal' };
+      throw { status: 400, message: 'La referencia de destino elegida no es de esa sucursal o fue eliminada' };
     }
     return rows[0].id;
   }
@@ -905,6 +986,15 @@ const despachar = async (req, {
           tipo: 'cantidad', productoOrigenId: nodo.productoId,
           sucursalDestinoId: destinoId, eleccionUsuario: l.producto_destino_id,
         });
+        // Lo mismo que revisará la recepción, dicho ANTES de que salga el
+        // camión: quien puede igualar el catálogo es la bodega, y un envío que
+        // el local no puede recibir se queda congelando esa mercancía.
+        if (destinoCantidad) {
+          await _exigirFormaCompatible(client, {
+            productoDestinoId: destinoCantidad, sucursalDestinoId: destinoId,
+            atributoValor: nodo.atributoValor, varianteValor: nodo.varianteValor,
+          });
+        }
 
         const valorCantidad = _valorLinea(nodo.costo, l.valor_interno);
         if (reglaPrecio) {

@@ -16,7 +16,7 @@ export const TIPO_PRODUCTO_CANTIDAD = 'cantidad';
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 const _mutationFnPorTipo = (tipo, id, forzar = false) => {
   if (tipo === TIPO_PRODUCTO_SERIAL)   return eliminarProductoSerial(id, forzar);
-  if (tipo === TIPO_PRODUCTO_CANTIDAD) return eliminarProductoCantidad(id);
+  if (tipo === TIPO_PRODUCTO_CANTIDAD) return eliminarProductoCantidad(id, forzar);
   throw new Error(`Tipo de producto desconocido: ${tipo}`);
 };
 
@@ -77,8 +77,11 @@ export function ModalEliminarProducto({ producto, tipo, onClose, onSuccess }) {
     try {
       const res = await verificarPin(pin.trim());
       if (!res.data.valido) { setError('PIN incorrecto'); return; }
-      // Primera llamada sin forzar — el backend dirá si hay seriales comprometidos
-      mutation.mutate(false);
+      // Serial: primera llamada sin forzar — el backend dirá si hay seriales
+      // comprometidos. Cantidad: la advertencia de stock ya está a la vista
+      // arriba del PIN, así que confirmar ES aceptarla (sin `forzar`, el
+      // backend rechaza eliminar un producto con unidades).
+      mutation.mutate(tieneStock);
     } catch (err) {
       setError(err.response?.data?.error || 'Error al verificar el PIN. Intenta de nuevo.');
     } finally {
@@ -121,7 +124,7 @@ export function ModalEliminarProducto({ producto, tipo, onClose, onSuccess }) {
                 <span className="font-semibold">
                   {stockActual} unidad{stockActual !== 1 ? 'es' : ''}
                 </span>{' '}
-                en stock. Al eliminarlo se perderá todo el inventario asociado.
+                en stock. Al eliminarlo se descartan del inventario (queda el registro en el historial).
               </p>
             </div>
           )}

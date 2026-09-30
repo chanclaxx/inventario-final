@@ -138,6 +138,76 @@ const resolverCantidad = async (client, { productoOrigenId, sucursalDestinoId })
 };
 
 /**
+ * El local ELIMINÓ antes este mismo producto: se REACTIVA en vez de crearlo.
+ *
+ * Eliminar es baja lógica (`activo = false`) y la fila conserva su nombre, pero
+ * `productos_cantidad_nombre_sucursal_id_key` es `(nombre, sucursal_id)` SIN
+ * filtro de `activo`: el INSERT de abajo chocaba con la fila eliminada y la
+ * recepción moría con «Ya existe un registro con ese valor único», sin decir
+ * qué producto (Tesla → Bunny Mobile, envío #75, 29-sep-2026). El código no
+ * choca porque su índice sí es parcial (`AND activo`).
+ *
+ * Es el mismo producto lógico (mismo nombre exacto en la misma sede), así que
+ * reactivarlo no inventa nada y conserva su historia. Lo que tuviera de stock al
+ * eliminarse se DESCARTA con su renglón en el historial: eliminar lo sacó del
+ * inventario, y revivir esas unidades sumaría mercancía que nadie ha contado.
+ * Desde que eliminar exige stock 0 (`productosCantidad.service.eliminarProducto`)
+ * eso solo le pasa a lo eliminado antes de ese arreglo.
+ *
+ * El código: si otro producto activo de la sede ya usa el suyo, se suelta (si
+ * no, el índice parcial rechazaría la reactivación); si queda sin código, hereda
+ * el del origen cuando está libre — la misma regla de la creación.
+ */
+const _reactivarEliminado = async (client, { origen, sucursalDestinoId }) => {
+  const { rows } = await client.query(
+    `SELECT id, nombre, codigo, stock, costo_unitario FROM productos_cantidad
+     WHERE sucursal_id = $1 AND nombre = $2 AND activo = false
+     ORDER BY id LIMIT 1
+     FOR UPDATE`,
+    [sucursalDestinoId, origen.nombre]
+  );
+  if (!rows.length) return null;
+  const p = rows[0];
+
+  const ocupado = async (codigo) => {
+    const { rows: r } = await client.query(
+      `SELECT 1 FROM productos_cantidad
+       WHERE sucursal_id = $1 AND activo = true AND id <> $2
+         AND UPPER(TRIM(codigo)) = UPPER(TRIM($3)) LIMIT 1`,
+      [sucursalDestinoId, p.id, codigo]
+    );
+    return r.length > 0;
+  };
+  let codigo = p.codigo || null;
+  if (codigo && await ocupado(codigo)) codigo = null;
+  if (!codigo && origen.codigo && !(await ocupado(origen.codigo))) codigo = origen.codigo;
+
+  const stockPrevio = Number(p.stock) || 0;
+  if (stockPrevio !== 0) {
+    await client.query(
+      `UPDATE variantes_atributo SET stock = 0
+       WHERE atributo_id IN (SELECT id FROM atributos_producto WHERE producto_id = $1)`,
+      [p.id]
+    );
+    await client.query(`UPDATE atributos_producto SET stock = 0 WHERE producto_id = $1`, [p.id]);
+    await client.query(
+      `INSERT INTO historial_stock_cantidad
+         (producto_id, sucursal_id, cantidad, costo_unitario, tipo, notas)
+       VALUES ($1, $2, $3, $4, 'ajuste', $5)`,
+      [p.id, sucursalDestinoId, -stockPrevio, p.costo_unitario,
+       `Se reactivó al recibir de la red interna: se descartan ${stockPrevio} uds que tenía al eliminarse`]
+    );
+  }
+
+  const { rows: act } = await client.query(
+    `UPDATE productos_cantidad SET activo = true, stock = 0, codigo = $2
+     WHERE id = $1 RETURNING id, nombre, codigo`,
+    [p.id, codigo]
+  );
+  return { ...act[0], reactivado: true };
+};
+
+/**
  * Crea la referencia en el destino heredando el código del negocio.
  *
  * El código se hereda con la MISMA regla que ya usa
@@ -148,6 +218,9 @@ const resolverCantidad = async (client, { productoOrigenId, sucursalDestinoId })
  * Sin esto, el producto despachado nace mudo para el lector.
  */
 const crearReferenciaCantidad = async (client, { origen, sucursalDestinoId, negocioId }) => {
+  const reactivado = await _reactivarEliminado(client, { origen, sucursalDestinoId });
+  if (reactivado) return reactivado;
+
   let codigo = origen.codigo || null;
 
   if (!codigo) {
@@ -266,14 +339,19 @@ const resolver = (client, { tipo, productoOrigenId, sucursalDestinoId }) =>
  * `lineas_remision.producto_destino_id`). Se valida que siga existiendo en la
  * sucursal correcta antes de usarla: si alguien la borró entre el despacho y la
  * recepción, se vuelve a resolver en vez de fallar.
+ *
+ * En cantidad el preferido además tiene que estar ACTIVO: uno eliminado después
+ * del despacho recibiría el stock sin que nadie lo viera en el inventario. Cae
+ * a la resolución normal, que lo reactiva si es el mismo producto.
  */
 const obtenerODcrear = async (client, {
   tipo, productoOrigenId, sucursalDestinoId, negocioId, preferido = null,
 }) => {
   if (preferido) {
     const tabla = tipo === 'serial' ? 'productos_serial' : 'productos_cantidad';
+    const soloActivo = tipo === 'serial' ? '' : ' AND activo = true';
     const { rows } = await client.query(
-      `SELECT id FROM ${tabla} WHERE id = $1 AND sucursal_id = $2`,
+      `SELECT id FROM ${tabla} WHERE id = $1 AND sucursal_id = $2${soloActivo}`,
       [preferido, sucursalDestinoId]
     );
     if (rows.length) return { producto_id: rows[0].id, creado: false, nivel: 'preferido' };

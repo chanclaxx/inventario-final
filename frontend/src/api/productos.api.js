@@ -30,5 +30,5 @@ export const getProductosCantidad       = (lineaId)      => api.get('/productos-
 export const crearProductoCantidad      = (data)         => api.post('/productos-cantidad', data);
 export const actualizarProductoCantidad = (id, data)     => api.put(`/productos-cantidad/${id}`, data);
 export const ajustarStock               = (id, cantidad) => api.patch(`/productos-cantidad/${id}/stock`, { cantidad });
-export const eliminarProductoCantidad   = (id)           => api.delete(`/productos-cantidad/${id}`);
+export const eliminarProductoCantidad   = (id, forzar = false) => api.delete(`/productos-cantidad/${id}`, { data: { forzar } });
 export const ajustarStockCantidad       = (productoId, data) => api.patch(`/productos-cantidad/${productoId}/stock`, data);

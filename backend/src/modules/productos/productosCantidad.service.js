@@ -336,10 +336,54 @@ const ajustarStock = async (
   return actualizado;
 };
 
-const eliminarProducto = async (negocioId, id) => {
+// Eliminar es baja lógica, y hasta sep-2026 dejaba el STOCK dentro de la fila
+// inactiva: unidades que ya no aparecían en ninguna pantalla pero seguían
+// escritas. Tesla borró en Bunny Mobile un producto con las 10 unidades que el
+// local acababa de recibir (y pagar) de la bodega: desaparecieron de su
+// inventario sin un solo renglón de historial.
+// Ahora, igual que con los seriales, con stock hace falta `forzar` (el modal ya
+// advierte que el inventario se pierde), y al forzar el stock se descarta con su
+// renglón en el historial: queda dicho cuántas unidades salieron y cuándo, y una
+// reactivación posterior (la red interna reactiva en vez de chocar con el
+// nombre) no revive unidades que nadie contó.
+const eliminarProducto = async (negocioId, id, { forzar = false } = {}) => {
   const producto = await repo.findByIdYNegocio(id, negocioId);
   if (!producto) throw { status: 404, message: 'Producto no encontrado' };
-  await repo.eliminar(id);
+
+  const stock = Number(producto.stock) || 0;
+  if (stock === 0) { await repo.eliminar(id); return; }
+  if (!forzar) {
+    throw {
+      status: 409, code: 'PRODUCTO_CON_STOCK',
+      message: `"${producto.nombre}" tiene ${stock} unidad${stock === 1 ? '' : 'es'} en stock. `
+        + 'Confirma que quieres eliminarlo con su inventario, o ajústalo a 0 primero.',
+    };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE variantes_atributo SET stock = 0
+       WHERE atributo_id IN (SELECT id FROM atributos_producto WHERE producto_id = $1)`,
+      [id]
+    );
+    await client.query(`UPDATE atributos_producto SET stock = 0 WHERE producto_id = $1`, [id]);
+    await client.query(`UPDATE productos_cantidad SET stock = 0, activo = false WHERE id = $1`, [id]);
+    await client.query(
+      `INSERT INTO historial_stock_cantidad
+         (producto_id, sucursal_id, cantidad, costo_unitario, tipo, notas)
+       VALUES ($1, $2, $3, $4, 'ajuste', $5)`,
+      [id, producto.sucursal_id, -stock, producto.costo_unitario,
+       `Producto eliminado con ${stock} uds en stock`]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const getHistorialStock = (negocioId, q) =>

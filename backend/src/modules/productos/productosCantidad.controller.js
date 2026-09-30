@@ -102,10 +102,12 @@ const ajustarStock = async (req, res, next) => {
 const eliminarProducto = async (req, res, next) => {
   try {
     const prev = await service.getProductoById(req.user.negocio_id, req.params.id).catch(() => null);
-    await service.eliminarProducto(req.user.negocio_id, req.params.id);
+    const forzar = req.body?.forzar === true || req.body?.forzar === 'true';
+    await service.eliminarProducto(req.user.negocio_id, req.params.id, { forzar });
     audit.registrar(req.user.negocio_id, req.user.id, 'Producto cantidad eliminado', 'productos_cantidad', Number(req.params.id), {
       sucursal_id: prev?.sucursal_id ?? null,
       producto:    prev?.nombre      ?? null,
+      stock:       Number(prev?.stock) || 0,
     });
     res.json({ ok: true, message: 'Producto eliminado correctamente' });
   } catch (err) { next(err); }
