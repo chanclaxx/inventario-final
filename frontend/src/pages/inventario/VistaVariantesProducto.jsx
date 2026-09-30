@@ -14,6 +14,7 @@ import { ajustarStockCantidad } from '../../api/productos.api';
 import { ModalPinEliminacion } from './ModalPinEliminacion';
 import { Button }     from '../../components/ui/Button';
 import { Input }      from '../../components/ui/Input';
+import { ErrorArbolVariantes } from './ErrorArbolVariantes';
 import { Spinner }    from '../../components/ui/Spinner';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { Modal }      from '../../components/ui/Modal';
@@ -428,11 +429,15 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
   const [busqueda,    setBusqueda]    = useState('');
   const q = busqueda.trim().toLowerCase();
 
-  const { data: arbol = [], isLoading } = useQuery({
+  const {
+    data: arbol = [], isLoading, isError, error: errorArbol, refetch: recargarArbol, isFetching,
+  } = useQuery({
     queryKey: ['arbol-producto', producto.id, sucursalId],
     queryFn:  () => getArbol(producto.id, sucursalId).then((r) => r.data.data),
     staleTime: 0,
   });
+  // Falló la carga y no hay nada en caché: NO es «sin variantes» (ver ErrorArbolVariantes).
+  const arbolNoCargo = isError && arbol.length === 0;
 
   const { data: tiposData } = useQuery({
     queryKey: ['tipos-caracteristica'],
@@ -831,6 +836,8 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
       {/* Cards atributos */}
       {isLoading ? (
         <Spinner className="py-20" />
+      ) : arbolNoCargo ? (
+        <ErrorArbolVariantes error={errorArbol} onReintentar={() => recargarArbol()} reintentando={isFetching} />
       ) : arbol.length === 0 ? (
         <div className="flex flex-col items-center gap-4 py-10">
           <p className="text-sm text-gray-400 text-center">

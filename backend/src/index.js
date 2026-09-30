@@ -73,14 +73,8 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
 // ── Rate limiting global ──────────────────────────────
-app.use('/api/', rateLimit({
-  windowMs:        60 * 1000,
-  max:             60,
-  standardHeaders: true,
-  legacyHeaders:   false,
-  message:         { ok: false, error: 'Demasiadas solicitudes. Intenta más tarde.' },
-  skip:            (req) => req.path === '/health',
-}));
+// Por usuario con sesión, por IP sin ella (ver rateLimit.middleware.js).
+app.use('/api/', require('./middlewares/rateLimit.middleware').limiteGlobal);
 
 // ── Ruta de salud ─────────────────────────────────────
 // El instante en que arranco ESTE proceso. Sirve para responder de un vistazo

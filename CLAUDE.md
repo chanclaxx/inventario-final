@@ -123,6 +123,26 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Caliwood (4), Nasa phone (1) y el negocio 4 siguen con saldados sin abono.
 > Prueba: sección 2 (y el final de la 5) de `29-invariante-extracto`.
 
+> **Vender o prestar un producto con variantes exige decir CUÁL**
+> (`utils/varianteRequerida.util.js`, 400 `VARIANTE_REQUERIDA`, en
+> `facturas.crearFactura` y `prestamos._procesarItemPrestamo`). Tesla, 24–26
+> sep-2026: facturas #172/#199 y préstamos #262–#265 salieron del PRODUCTO sin
+> talla — bajó el total y ninguna talla, y la siguiente sincronización revivió
+> lo vendido (VX0197: 2 uds fantasma). Talla con colores sin color es lo mismo
+> un nivel abajo (la venta no descontaba nada). **Solo con
+> `variantes_activo = '1'` y si ese nodo tiene hijos activos**: los negocios sin
+> tallas, y los que apaguen la feature, venden igual que antes (una consulta
+> corta por línea, nunca un error). Solo mira lo que SALE: cancelar o devolver
+> una línea vieja sin talla sigue funcionando. La causa en pantalla:
+> `VistaVariantesProducto` pintaba un árbol que NO CARGÓ como «no tiene
+> atributos», con el botón del producto entero; ahora `ErrorArbolVariantes`
+> (solo reintentar). Y el árbol no cargaba por el límite global de 60 req/min
+> **por IP**, compartido por todo un local: ahora es por USUARIO con sesión
+> (240/min, `middlewares/rateLimit.middleware.js`, token VERIFICADO) y por IP
+> sin ella (60). Los números descuadrados de Tesla se dejaron como estaban
+> (decisión del usuario). Prueba: `71-venta-sin-talla` (36; la sección 1 es la
+> de los negocios sin tallas).
+
 > **Precio mínimo de venta** (`utils/precioMinimo.util.js`, opt-in
 > `precio_minimo_activo`, **ausente = apagado**; Ajustes → Precios de venta):
 > ni la factura (crear y **editar**), ni el préstamo (crear y editar el valor), ni

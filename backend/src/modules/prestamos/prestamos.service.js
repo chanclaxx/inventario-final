@@ -6,6 +6,7 @@ const { repartirAbono } = require('../../utils/mora.util');
 const { bloquearOperacion } = require('../../utils/idempotencia.util');
 const { ingresarSerialRetomado, revertirIngresoSerial, rastroParaRetoma } = require('../../utils/retomaSerial.util');
 const precioMinimo = require('../../utils/precioMinimo.util');
+const { exigirVarianteSiTiene } = require('../../utils/varianteRequerida.util');
 
 // Precio mínimo (feature opt-in `precio_minimo_activo`). Un préstamo es una
 // venta con pago diferido: la misma regla que la factura. OJO: `valor_prestamo`
@@ -92,6 +93,12 @@ const _procesarItemPrestamo = async (client, {
       throw { status: 400, message: `El equipo ${imei} ya tiene un préstamo activo. Devuélvelo antes de crear uno nuevo.` };
     }
   } else if (producto_id) {
+    // Con variantes, prestar el nivel de arriba descuadra el árbol en silencio
+    // (préstamos #262–#265 de Bunny, 26-sep-2026). Ver varianteRequerida.util.
+    await exigirVarianteSiTiene(client, {
+      productoId: producto_id, atributoId: atributo_id, varianteId: variante_id,
+      sucursalId: sucursal_id, nombre: nombre_producto,
+    }, 'prestar');
     if (variante_id) {
       const { rows: varRows } = await client.query(
         `SELECT v.stock FROM variantes_atributo v

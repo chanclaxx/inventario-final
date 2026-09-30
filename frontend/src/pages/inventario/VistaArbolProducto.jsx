@@ -11,6 +11,7 @@ import {
 import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
+import { ErrorArbolVariantes } from './ErrorArbolVariantes';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatCOP } from '../../utils/formatters';
 import useCarritoStore from '../../store/carritoStore';
@@ -412,11 +413,15 @@ export function VistaArbolProducto({ producto, sucursalId, esAdmin, onClose }) {
   const [modalAtributo, setModalAtributo] = useState(false);
   const [errorM,        setErrorM]        = useState('');
 
-  const { data: arbol = [], isLoading } = useQuery({
+  const {
+    data: arbol = [], isLoading, isError, error: errorArbol, refetch: recargarArbol, isFetching,
+  } = useQuery({
     queryKey: ['arbol-producto', producto.id, sucursalId],
     queryFn:  () => getArbol(producto.id, sucursalId).then((r) => r.data.data),
     staleTime: 0,
   });
+  // Falló la carga y no hay nada en caché: NO es «sin variantes» (ver ErrorArbolVariantes).
+  const arbolNoCargo = isError && arbol.length === 0;
 
   const { data: tiposData } = useQuery({
     queryKey: ['tipos-caracteristica'],
@@ -494,6 +499,8 @@ export function VistaArbolProducto({ producto, sucursalId, esAdmin, onClose }) {
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
           {isLoading ? (
             <Spinner className="py-16" />
+          ) : arbolNoCargo ? (
+            <ErrorArbolVariantes error={errorArbol} onReintentar={() => recargarArbol()} reintentando={isFetching} />
           ) : !tieneAtributos ? (
             /* Sin atributos: botón directo + opción de crear primero */
             <div className="flex flex-col gap-4">

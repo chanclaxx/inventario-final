@@ -10,6 +10,7 @@ const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { ingresarSerialRetomado, revertirIngresoSerial, rastroParaRetoma } = require('../../utils/retomaSerial.util');
 const precioMinimo = require('../../utils/precioMinimo.util');
 const obsequios    = require('../../utils/obsequios.util');
+const { exigirVarianteSiTiene } = require('../../utils/varianteRequerida.util');
 const { hayObsequios } = require('../../config/columnas');
 
 // Piso de una línea de factura (feature opt-in `precio_minimo_activo`). La línea
@@ -359,6 +360,13 @@ const crearFactura = async ({
           [serialRows[0].id]
         );
       } else if (linea.producto_id) {
+        // Con variantes, vender el nivel de arriba descuadra el árbol en
+        // silencio (facturas #172 y #199 de Tesla, sep-2026). Ver
+        // varianteRequerida.util. Obsequios incluidos: también salen del stock.
+        await exigirVarianteSiTiene(client, {
+          productoId: linea.producto_id, atributoId: linea.atributo_id, varianteId: linea.variante_id,
+          sucursalId: sucursal_id, nombre: linea.nombre_producto,
+        }, 'vender');
         if (linea.variante_id) {
           // Nivel variante (árbol nivel 2)
           const { rows: varRows } = await client.query(
