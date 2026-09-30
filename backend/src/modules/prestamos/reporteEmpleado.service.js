@@ -182,7 +182,8 @@ const armarReporte = ({ lineas = [], prestamos = [], empleados = [] }) => {
     if (!porEmpleado.has(clave)) {
       porEmpleado.set(clave, {
         usuario_id: id ?? null,
-        nombre: nombre || (id ? `Usuario #${id}` : 'Sin usuario registrado'),
+        // Hay nombres guardados con espacios de más («LAURA »).
+        nombre: String(nombre || '').trim() || (id ? `Usuario #${id}` : 'Sin usuario registrado'),
         tipos: Object.fromEntries(TIPOS.map((t) => [t.id, []])),
       });
     }
@@ -299,23 +300,147 @@ const _prestamos = async ({ sucursalId, desde, hasta, usuarioId, soloEquipos }) 
 };
 
 /**
+ * Cuántas FILAS del reporte tiene cada usuario en cada sede del negocio, con
+ * los MISMOS filtros de `_lineasFactura` y `_prestamos` (la sección 9 de la
+ * prueba compara estos números contra el reporte real: si se separan, la
+ * pantalla prometería filas que el PDF no trae).
+ *
+ * Existe porque un PDF vacío no dice por qué está vacío. En Cellsite
+ * (sep-2026) el modal arrancaba en el propio admin —que no vende— y los admins
+ * salen en la lista de TODAS las sedes aunque solo trabajen en una: LAURA
+ * tenía 1.070 préstamos en Centro y, vista desde Principal, un PDF en blanco.
+ *
+ * Devuelve Map<usuario_id|null, Map<sucursal_id, { filas, con_imei }>>.
+ */
+const _conteos = async ({ negocioId, desde, hasta }) => {
+  const [fac, pre] = await Promise.all([
+    pool.query(`
+      SELECT f.usuario_id, f.sucursal_id, COUNT(*)::int AS filas,
+             COUNT(*) FILTER (WHERE NULLIF(BTRIM(l.imei), '') IS NOT NULL)::int AS con_imei
+        FROM facturas f
+        JOIN lineas_factura l ON l.factura_id = f.id
+        JOIN sucursales     s ON s.id = f.sucursal_id
+       WHERE s.negocio_id = $1
+         AND f.fecha >= $2::date
+         AND f.fecha <  $3::date + 1
+         AND COALESCE(f.notas, '') NOT LIKE $4
+       GROUP BY 1, 2
+    `, [negocioId, desde, hasta, MARCA_FACTURA_DE_PRESTAMO]),
+    pool.query(`
+      SELECT p.usuario_id, p.sucursal_id, COUNT(*)::int AS filas,
+             COUNT(*) FILTER (WHERE NULLIF(BTRIM(p.imei), '') IS NOT NULL)::int AS con_imei
+        FROM prestamos  p
+        JOIN sucursales s ON s.id = p.sucursal_id
+       WHERE s.negocio_id = $1
+         AND p.fecha >= $2::date
+         AND p.fecha <  $3::date + 1
+         AND COALESCE(p.cedula, '') <> 'AJUSTE'
+       GROUP BY 1, 2
+    `, [negocioId, desde, hasta]),
+  ]);
+
+  const mapa = new Map();
+  for (const r of [...fac.rows, ...pre.rows]) {
+    const u = r.usuario_id ?? null;
+    if (!mapa.has(u)) mapa.set(u, new Map());
+    const porSede = mapa.get(u);
+    const actual = porSede.get(r.sucursal_id) || { filas: 0, con_imei: 0 };
+    porSede.set(r.sucursal_id, { filas: actual.filas + r.filas, con_imei: actual.con_imei + r.con_imei });
+  }
+  return mapa;
+};
+
+const _cuenta = (c, soloEquipos) => (c ? (soloEquipos ? c.con_imei : c.filas) : 0);
+
+/**
+ * Lo que un usuario tiene en las OTRAS sedes (solo lo que no es cero), para
+ * decir «tiene N en Centro» en vez de entregar un PDF en blanco.
+ */
+const _enOtrasSedes = (conteos, usuarioId, sucursalId, soloEquipos, sedes) =>
+  [...(conteos.get(usuarioId) || new Map()).entries()]
+    .filter(([sid]) => sid !== sucursalId)
+    .map(([sid, c]) => ({ sucursal_id: sid, nombre: sedes.get(sid) || `Sucursal #${sid}`, movimientos: _cuenta(c, soloEquipos) }))
+    .filter((s) => s.movimientos > 0)
+    .sort((a, b) => b.movimientos - a.movimientos);
+
+const _sedesDelNegocio = async (negocioId) => {
+  const { rows } = await pool.query(
+    'SELECT id, nombre FROM sucursales WHERE negocio_id = $1 AND activa = true ORDER BY id', [negocioId]);
+  return rows;
+};
+
+/**
  * Quién puede salir en el selector. Un VENDEDOR solo se ve a sí mismo: el
  * reporte es su liquidación, no la de sus compañeros. Supervisor y admin eligen
  * entre los usuarios de la sede (los inactivos también: a quien se fue hay que
- * liquidarle el último mes).
+ * liquidarle el último mes) y quien tenga movimientos en ella aunque hoy esté
+ * asignado a otra.
+ *
+ * Con `desde`/`hasta` válidos cada empleado trae cuántas filas tendría su PDF
+ * (`movimientos`), cuántas se quedan fuera por «Solo equipos» (`sin_imei`) y,
+ * solo para el admin —el único que puede cambiar de sede—, cuántas tiene en
+ * las otras (`otras_sedes`). Sin fechas responde como siempre.
  */
-const listarEmpleados = async ({ negocioId, sucursalId, usuario }) => {
+const listarEmpleados = async ({ negocioId, sucursalId, usuario, desde, hasta, soloEquipos }) => {
+  const conFechas = FECHA_RE.test(String(desde || '')) && FECHA_RE.test(String(hasta || '')) && desde <= hasta;
+  const esAdmin = usuario.rol === 'admin_negocio';
+
+  let empleados;
   if (usuario.rol === 'vendedor') {
-    return { puede_elegir: false, yo: usuario.id, empleados: [{ id: usuario.id, nombre: usuario.nombre, rol: usuario.rol, activo: true }] };
+    empleados = [{ id: usuario.id, nombre: usuario.nombre, rol: usuario.rol, activo: true }];
+  } else {
+    const { rows } = await pool.query(`
+      SELECT u.id, u.nombre, u.rol, u.activo
+        FROM usuarios u
+       WHERE u.negocio_id = $1
+         AND (u.sucursal_id = $2 OR u.rol = 'admin_negocio')
+       ORDER BY u.activo DESC, u.nombre
+    `, [negocioId, sucursalId]);
+    empleados = rows;
   }
-  const { rows } = await pool.query(`
-    SELECT u.id, u.nombre, u.rol, u.activo
-      FROM usuarios u
-     WHERE u.negocio_id = $1
-       AND (u.sucursal_id = $2 OR u.rol = 'admin_negocio')
-     ORDER BY u.activo DESC, u.nombre
-  `, [negocioId, sucursalId]);
-  return { puede_elegir: true, yo: usuario.id, empleados: rows };
+
+  const base = { puede_elegir: usuario.rol !== 'vendedor', yo: usuario.id, empleados };
+  if (!conFechas) return base;
+
+  const [conteos, sedesLista] = await Promise.all([_conteos({ negocioId, desde, hasta }), _sedesDelNegocio(negocioId)]);
+  const sedes = new Map(sedesLista.map((s) => [s.id, s.nombre]));
+
+  // Quien movió algo en esta sede sale aunque hoy esté asignado a otra: si no,
+  // sus documentos solo aparecerían dentro de «Todos».
+  if (base.puede_elegir) {
+    const faltan = [...conteos.entries()]
+      .filter(([u, porSede]) => u != null && _cuenta(porSede.get(sucursalId), false) > 0
+        && !empleados.some((e) => e.id === u))
+      .map(([u]) => u);
+    if (faltan.length) {
+      const { rows } = await pool.query(
+        'SELECT id, nombre, rol, activo FROM usuarios WHERE negocio_id = $1 AND id = ANY($2::int[])', [negocioId, faltan]);
+      empleados = [...empleados, ...rows];
+    }
+  }
+
+  const anotados = empleados.map((e) => {
+    const aqui = (conteos.get(e.id) || new Map()).get(sucursalId);
+    return {
+      ...e,
+      nombre: String(e.nombre || '').trim(),
+      movimientos: _cuenta(aqui, soloEquipos),
+      sin_imei: soloEquipos && aqui ? aqui.filas - aqui.con_imei : 0,
+      otras_sedes: esAdmin ? _enOtrasSedes(conteos, e.id, sucursalId, soloEquipos, sedes) : [],
+    };
+  });
+
+  const total_sede = [...conteos.values()].reduce((s, porSede) => s + _cuenta(porSede.get(sucursalId), soloEquipos), 0);
+
+  return {
+    ...base,
+    empleados: anotados,
+    sucursal_id: sucursalId,
+    sucursal_nombre: sedes.get(sucursalId) || '',
+    total_sede,
+    // El admin puede sacar el reporte de cualquier sede sin salir del modal.
+    sedes: esAdmin ? sedesLista : [],
+  };
 };
 
 const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -358,6 +483,19 @@ const obtenerReporte = async ({ negocioId, sucursalId, usuario, usuarioId, desde
 
   const { rows: suc } = await pool.query(
     'SELECT nombre FROM sucursales WHERE id = $1 AND negocio_id = $2', [sucursalId, negocioId]);
+
+  // Un empleado sin nada en ESTA sede: el PDF dice dónde sí tiene, en vez de
+  // salir en blanco sin explicación. Solo cuesta la consulta cuando hace falta.
+  const vacios = empleados.filter((e) => e.total_filas === 0 && e.usuario_id != null);
+  if (vacios.length) {
+    const [conteos, sedesLista] = await Promise.all([_conteos({ negocioId, desde, hasta }), _sedesDelNegocio(negocioId)]);
+    const sedes = new Map(sedesLista.map((s) => [s.id, s.nombre]));
+    for (const e of vacios) {
+      e.otras_sedes = _enOtrasSedes(conteos, e.usuario_id, sucursalId, soloEquipos, sedes);
+      const aqui = (conteos.get(e.usuario_id) || new Map()).get(sucursalId);
+      e.sin_imei = soloEquipos && aqui ? aqui.filas - aqui.con_imei : 0;
+    }
+  }
 
   return {
     desde, hasta,

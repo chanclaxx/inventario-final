@@ -296,8 +296,11 @@ const exportarPdfEstadoCuenta = async (req, res, next) => {
 
 const getEmpleadosReporte = async (req, res, next) => {
   try {
+    // Con el rango, cada empleado trae cuántas filas tendría su PDF.
     const data = await reporteEmpleado.listarEmpleados({
       negocioId: req.user.negocio_id, sucursalId: req.sucursal_id, usuario: req.user,
+      desde: req.query.desde, hasta: req.query.hasta,
+      soloEquipos: req.query.solo_equipos === '1' || req.query.solo_equipos === 'true',
     });
     res.json({ ok: true, data });
   } catch (err) { next(err); }

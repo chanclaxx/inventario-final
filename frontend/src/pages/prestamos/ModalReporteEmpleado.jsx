@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileDown, Smartphone, UserRound } from 'lucide-react';
+import { AlertTriangle, FileDown, Smartphone, Store, UserRound } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -52,29 +52,57 @@ function guardar(blob, nombre) {
   URL.revokeObjectURL(url);
 }
 
+const numero = (n) => Number(n || 0).toLocaleString('es-CO');
+const registros = (n) => (n > 0 ? `${numero(n)} registro${n !== 1 ? 's' : ''}` : 'sin movimientos');
+
 export function ModalReporteEmpleado({ onClose }) {
   const hoy = fechaHoyBogota();
   const [rango,       setRango]       = useState(() => rangoMes(hoy));
   const [seleccion,   setSeleccion]   = useState(null);
   const [soloEquipos, setSoloEquipos] = useState(true);
+  // null = la sede activa arriba. El admin puede elegir otra aquí mismo.
+  const [sede,        setSede]        = useState(null);
   const [generando,   setGenerando]   = useState(false);
   const [error,       setError]       = useState('');
 
+  const rangoMalo = !rango.desde || !rango.hasta || rango.desde > rango.hasta;
+
+  // La lista trae cuántas filas tendría el PDF de cada empleado en el rango:
+  // sin eso, elegir a alguien sin movimientos en esta sede (el propio admin,
+  // o un admin que trabaja en otra) entregaba un PDF en blanco sin explicación.
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['prestamos', 'reporte-empleado', 'empleados'],
-    queryFn:  () => getEmpleadosReporte().then((r) => r.data.data),
+    queryKey: ['prestamos', 'reporte-empleado', 'empleados', rango.desde, rango.hasta, soloEquipos, sede],
+    queryFn:  () => getEmpleadosReporte({
+      desde: rango.desde, hasta: rango.hasta, solo_equipos: soloEquipos, sucursal_id: sede,
+    }).then((r) => r.data.data),
+    enabled: !rangoMalo,
+    placeholderData: (prev) => prev,
   });
 
-  const empleados   = data?.empleados ?? [];
+  const hayConteos  = (data?.empleados ?? []).some((e) => typeof e.movimientos === 'number');
+  // Los que tienen algo que mostrar, primero.
+  const empleados   = [...(data?.empleados ?? [])]
+    .sort((a, b) => Number(b.movimientos > 0) - Number(a.movimientos > 0));
   const puedeElegir = !!data?.puede_elegir;
-  // Sin elección todavía: uno mismo si está en la lista; si no, todos.
-  const porDefecto  = empleados.some((e) => e.id === data?.yo) ? String(data.yo) : 'todos';
-  const elegido     = puedeElegir ? (seleccion ?? porDefecto) : String(data?.yo ?? '');
+  const sedes       = data?.sedes ?? [];
+  const sedeActual  = sede ?? data?.sucursal_id ?? null;
+  const nombreSede  = data?.sucursal_nombre || 'esta sucursal';
+
+  // Sin elección todavía: uno mismo si tiene movimientos; si no, todos.
+  const yo          = empleados.find((e) => e.id === data?.yo);
+  const porDefecto  = yo && (!hayConteos || yo.movimientos > 0) ? String(yo.id) : 'todos';
+  // Al cambiar de sede el elegido puede no estar en la lista nueva.
+  const sigueEnLista = seleccion === 'todos' || empleados.some((e) => String(e.id) === seleccion);
+  const elegido     = puedeElegir
+    ? (seleccion && sigueEnLista ? seleccion : porDefecto)
+    : String(data?.yo ?? '');
+  const empleado    = empleados.find((e) => String(e.id) === elegido);
+  const cuantos     = elegido === 'todos' ? data?.total_sede : empleado?.movimientos;
+  const vacio       = hayConteos && cuantos === 0;
 
   const mesActual = rangoMes(hoy);
   const mesPasado = rangoMes(hoy, -1);
   const esRango   = (r) => r.desde === rango.desde && r.hasta === rango.hasta;
-  const rangoMalo = !rango.desde || !rango.hasta || rango.desde > rango.hasta;
 
   const nombreArchivo = () => {
     const quien = elegido === 'todos'
@@ -91,6 +119,7 @@ export function ModalReporteEmpleado({ onClose }) {
     try {
       const res = await descargarPdfReporteEmpleado({
         usuario_id: elegido, desde: rango.desde, hasta: rango.hasta, solo_equipos: soloEquipos,
+        sucursal_id: sede,
       });
       guardar(res.data, nombreArchivo());
       onClose();
@@ -111,6 +140,20 @@ export function ModalReporteEmpleado({ onClose }) {
           no calcula comisiones.</span>
         </p>
 
+        {/* Sucursal (solo el admin, y solo si hay más de una) */}
+        {sedes.length > 1 && (
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+              <Store size={14} className="text-gray-400" /> Sucursal
+            </label>
+            <select value={sedeActual ?? ''} onChange={(e) => setSede(Number(e.target.value))}
+              className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white">
+              {sedes.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+            </select>
+          </div>
+        )}
+
         {/* Empleado */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">Empleado</label>
@@ -124,10 +167,13 @@ export function ModalReporteEmpleado({ onClose }) {
             <select value={elegido} onChange={(e) => setSeleccion(e.target.value)}
               className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white">
-              <option value="todos">Todos los empleados (uno por hoja)</option>
+              <option value="todos">
+                Todos los empleados (uno por hoja){hayConteos ? ` — ${registros(data.total_sede)}` : ''}
+              </option>
               {empleados.map((e) => (
                 <option key={e.id} value={String(e.id)}>
                   {e.nombre}{e.activo === false ? ' (inactivo)' : ''}
+                  {hayConteos ? ` — ${registros(e.movimientos)}` : ''}
                 </option>
               ))}
             </select>
@@ -135,7 +181,13 @@ export function ModalReporteEmpleado({ onClose }) {
             <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-100 rounded-xl text-sm text-gray-800">
               <UserRound size={15} className="text-gray-400" />
               {empleados[0]?.nombre || 'Tú'}
+              {hayConteos && <span className="ml-auto text-xs text-gray-500">{registros(empleados[0]?.movimientos)}</span>}
             </div>
+          )}
+          {hayConteos && cuantos > 0 && (
+            <p className="text-xs text-gray-500">
+              El PDF trae {registros(cuantos)} de {nombreSede}.
+            </p>
           )}
         </div>
 
@@ -178,6 +230,39 @@ export function ModalReporteEmpleado({ onClose }) {
             </span>
           </span>
         </label>
+
+        {/* Por qué saldría vacío, y cómo llegar a lo que sí hay */}
+        {vacio && !rangoMalo && (
+          <div className="flex flex-col gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200">
+            <p className="flex items-start gap-2 text-xs text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                <span className="font-semibold">
+                  {elegido === 'todos'
+                    ? `No hay ventas ni préstamos en ${nombreSede} en este período.`
+                    : `${empleado?.nombre || 'Este empleado'} no tiene ventas ni préstamos en ${nombreSede} en este período.`}
+                </span>{' '}
+                El reporte cuenta lo que cada empleado registró con su propio usuario.
+              </span>
+            </p>
+            {soloEquipos && empleado?.sin_imei > 0 && (
+              <button type="button" onClick={() => setSoloEquipos(false)}
+                className="self-start px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-xs font-medium text-amber-800 hover:bg-amber-100">
+                Tiene {numero(empleado.sin_imei)} sin IMEI — incluir todos los productos
+              </button>
+            )}
+            {(empleado?.otras_sedes ?? []).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {empleado.otras_sedes.map((s) => (
+                  <button key={s.sucursal_id} type="button" onClick={() => setSede(s.sucursal_id)}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-xs font-medium text-amber-800 hover:bg-amber-100">
+                    Ver en {s.nombre} · {registros(s.movimientos)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <p className="text-xs text-red-500 text-center">{error}</p>}
 

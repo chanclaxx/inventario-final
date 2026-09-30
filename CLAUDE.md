@@ -652,7 +652,18 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > ajustes de deuda (cédula `AJUSTE`). El vendedor solo saca el suyo (lo impone
 > el service); «Todos» = un empleado por hoja. Opción «Solo equipos con IMEI».
 > Rutas `/prestamos/reporte-empleado/*` ANTES de `/:id/pdf`.
-> Prueba: `68-reporte-empleado` (89; la 7 renderiza el PDF de verdad).
+> **El PDF vacío no era un bug de datos** (Cellsite, 29-sep-2026: «no me sale
+> nada de productos»): el reporte es de UNA sede y el modal arrancaba en el
+> propio admin —que no vende—, y los admins salen en la lista de todas las
+> sedes (LAURA: 1.070 préstamos en Centro, PDF en blanco desde Principal).
+> Ahora `/empleados?desde&hasta&solo_equipos` trae por empleado `movimientos`
+> (= filas de su PDF, con los MISMOS filtros: `_conteos`), `sin_imei` y, al
+> admin, `otras_sedes` y `sedes`; sin fechas responde como antes. El modal
+> muestra los números, no arranca en uno mismo si tiene 0, deja al admin
+> elegir sede (manda `sucursal_id` explícito) y avisa antes de descargar; el
+> PDF de un empleado sin filas dice por qué y dónde sí tiene.
+> Prueba: `68-reporte-empleado` (112; la 7 renderiza el PDF de verdad y la 9
+> compara el número de la lista contra las filas del PDF).
 >
 > **La BÚSQUEDA de Préstamos agrupa por persona y dice la situación**
 > (`GET /busqueda/prestamos`, `utils/busquedaPrestamos.js`, pedido del negocio

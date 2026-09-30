@@ -61,13 +61,24 @@ export const descargarPdfEstadoCuenta = (tipo, id) =>
 
 // ── Reporte por empleado (ventas, créditos y préstamos entre fechas) ─────────
 // `puede_elegir` en falso = vendedor: el backend le da siempre el suyo.
-export const getEmpleadosReporte = () =>
-  api.get('/prestamos/reporte-empleado/empleados');
+// Con el rango, cada empleado trae cuántas filas tendría su PDF. `sucursal_id`
+// solo va si el admin eligió otra sede en el modal (el interceptor no pisa uno
+// explícito).
+export const getEmpleadosReporte = ({ desde, hasta, solo_equipos, sucursal_id } = {}) =>
+  api.get('/prestamos/reporte-empleado/empleados', {
+    params: {
+      desde, hasta, solo_equipos: solo_equipos ? '1' : '0',
+      ...(sucursal_id ? { sucursal_id } : {}),
+    },
+  });
 // `usuario_id` 'todos' = un bloque por empleado de la sede. Tope largo: con
 // «todos» en un mes movido el PDF puede tardar más que los 30 s de siempre.
-export const descargarPdfReporteEmpleado = ({ usuario_id, desde, hasta, solo_equipos }) =>
+export const descargarPdfReporteEmpleado = ({ usuario_id, desde, hasta, solo_equipos, sucursal_id }) =>
   api.get('/prestamos/reporte-empleado/pdf', {
-    params: { usuario_id, desde, hasta, solo_equipos: solo_equipos ? '1' : '0' },
+    params: {
+      usuario_id, desde, hasta, solo_equipos: solo_equipos ? '1' : '0',
+      ...(sucursal_id ? { sucursal_id } : {}),
+    },
     responseType: 'blob',
     timeout: 120000,
   });

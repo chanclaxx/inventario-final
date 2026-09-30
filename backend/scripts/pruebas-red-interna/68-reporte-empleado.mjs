@@ -18,6 +18,8 @@
 //   · Sección 7 — el PDF de verdad: textos, ningún salto decidido por PDFKit,
 //                 nada en la franja del pie, todo en WinAnsi, 300 filas.
 //   · Sección 8 — la pantalla pide lo que el backend entiende (estática).
+//   · Sección 9 — la lista del modal dice cuántas filas trae cada PDF (y son
+//                 las mismas del PDF), y el PDF vacío dice por qué (Cellsite).
 //
 // Requiere PGlite (no va en package.json a propósito):
 //   npm install --no-save @electric-sql/pglite
@@ -376,6 +378,90 @@ ok('las rutas van ANTES de /:id/pdf',
   && rutas.indexOf("router.get('/reporte-empleado/pdf'") < rutas.indexOf("router.get('/:id/pdf'"));
 ok('la página muestra el botón', pagina.includes('ModalReporteEmpleado') && pagina.includes('Reporte por empleado'));
 ok('el modal lee el error del blob en vez de un genérico', modal.includes('.text()'));
+
+// ═══ 9 ══════════════════════════════════════════════════════════════════════
+// Cellsite (29-sep-2026): «no me sale nada de productos». El modal arrancaba
+// en el propio admin —que no vende— y los admins salen en la lista de TODAS
+// las sedes: LAURA tenía 1.070 préstamos en Centro y desde Principal su PDF
+// salía en blanco. Ahora la lista dice cuántas filas tendría cada PDF.
+seccion('9 · La lista dice cuántas filas trae cada PDF');
+await db.exec(`
+  INSERT INTO usuarios (id, nombre, rol, negocio_id, sucursal_id, activo) VALUES
+    (6, 'Beto ', 'vendedor', 1, 1, TRUE);
+  SELECT setval('facturas_id_seq', (SELECT MAX(id) FROM facturas));
+  INSERT INTO facturas (id, numero, sucursal_id, usuario_id, nombre_cliente, cedula, estado, fecha) VALUES
+    (50, 150, 1, 4, 'Cliente de Sofía', '7', 'Activa', '2026-09-14 10:00');
+  INSERT INTO lineas_factura (factura_id, nombre_producto, imei, cantidad, precio, cantidad_devuelta) VALUES
+    (50, 'Honor X8', '5050', 1, 900000, 0);
+  SELECT setval('prestamos_id_seq', (SELECT MAX(id) FROM prestamos));
+  INSERT INTO prestamos (sucursal_id, usuario_id, numero, prestatario, cedula, imei, nombre_producto,
+                         cantidad_prestada, valor_prestamo, total_abonado, estado, prestatario_id, fecha)
+  VALUES (1, 6, 9001, 'Tienda Sur', 'COMPANERO', '6060', 'Moto G', 1, 500000, 0, 'Activo', 1, '2026-09-16 10:00');
+`);
+
+const sinFechas = await svc.listarEmpleados({ negocioId: 1, sucursalId: 1, usuario: ADMIN });
+ok('sin fechas responde como siempre (un frontend viejo no cambia)',
+  sinFechas.empleados.every((e) => e.movimientos === undefined) && sinFechas.sedes === undefined);
+
+for (const solo of [false, true]) {
+  const lista = await svc.listarEmpleados({ negocioId: 1, sucursalId: 1, usuario: ADMIN, ...SEP, soloEquipos: solo });
+  const real = await reporte({ usuarioId: null, soloEquipos: solo });
+  const filasDe = new Map(real.empleados.map((e) => [e.usuario_id, e.total_filas]));
+  const descuadres = lista.empleados.filter((e) => e.movimientos !== (filasDe.get(e.id) || 0))
+    .map((e) => `${e.nombre}: lista ${e.movimientos} / PDF ${filasDe.get(e.id) || 0}`);
+  ok(`cada empleado: el número de la lista = las filas de su PDF (solo equipos: ${solo})`,
+    descuadres.length === 0, descuadres.join('; '));
+  ok(`«Todos»: total_sede = filas del PDF (solo equipos: ${solo})`,
+    lista.total_sede === real.empleados.reduce((s, e) => s + e.total_filas, 0),
+    `${lista.total_sede}`);
+}
+
+const l9 = await svc.listarEmpleados({ negocioId: 1, sucursalId: 1, usuario: ADMIN, ...SEP, soloEquipos: true });
+const de9 = (id) => l9.empleados.find((e) => e.id === id);
+ok('el admin sin ventas propias sale con 0 (el modal ya no arranca en él)', de9(3)?.movimientos === 0);
+ok('quien movió algo en la sede sale aunque hoy esté asignado a otra', de9(4)?.movimientos === 1, JSON.stringify(de9(4)));
+ok('Ana: dice cuántas se quedan fuera por «Solo equipos»',
+  de9(1)?.sin_imei === (await reporte({ soloEquipos: false })).empleados[0].total_filas
+    - (await reporte({ soloEquipos: true })).empleados[0].total_filas && de9(1).sin_imei > 0,
+  String(de9(1)?.sin_imei));
+ok('al admin le dice lo que el empleado tiene en OTRA sede',
+  JSON.stringify(de9(1)?.otras_sedes) === JSON.stringify([{ sucursal_id: 2, nombre: 'Norte', movimientos: 1 }]),
+  JSON.stringify(de9(1)?.otras_sedes));
+ok('el admin recibe las sedes para elegir en el modal', l9.sedes.map((s) => s.id).join() === '1,2');
+ok('los nombres salen sin espacios de más («Beto »)', de9(6)?.nombre === 'Beto');
+ok('ni un empleado de otro negocio', !l9.empleados.some((e) => e.id === 9));
+
+const SUP = { id: 2, nombre: 'Luis Pérez', rol: 'supervisor' };
+const lsup = await svc.listarEmpleados({ negocioId: 1, sucursalId: 1, usuario: SUP, ...SEP, soloEquipos: true });
+ok('un supervisor no ve otras sedes ni puede cambiar de sede',
+  lsup.sedes.length === 0 && lsup.empleados.every((e) => e.otras_sedes.length === 0));
+const lven = await svc.listarEmpleados({ negocioId: 1, sucursalId: 1, usuario: ANA, ...SEP, soloEquipos: false });
+ok('el vendedor sigue viéndose solo a sí mismo, con su número',
+  lven.empleados.length === 1 && lven.empleados[0].id === 1 && lven.empleados[0].movimientos > 0 && !lven.puede_elegir);
+
+// El PDF de alguien sin nada en la sede dice por qué y dónde sí tiene.
+const rLuisNorte = await svc.obtenerReporte({ negocioId: 1, sucursalId: 2, usuario: ADMIN, usuarioId: 2, ...SEP, soloEquipos: false });
+ok('el reporte vacío trae dónde sí tiene movimientos',
+  rLuisNorte.empleados[0].otras_sedes?.[0]?.nombre === 'Centro' && rLuisNorte.empleados[0].otras_sedes[0].movimientos > 0);
+const pdfVacio = await renderizar(rLuisNorte);
+const txtVacio = pdfVacio.trazos.map((t) => t.t).join(' ');
+if (process.env.GUARDAR_PDF) writeFileSync(path.join(process.env.GUARDAR_PDF, 'reporte-vacio.pdf'), pdfVacio.buf);
+ok('el PDF vacío explica por qué (empleado y sede)',
+  txtVacio.includes('No hay ventas, créditos ni préstamos registrados por Luis Pérez') && txtVacio.includes('Norte'));
+ok('y dice en qué sede sí tiene', txtVacio.includes('Sí tiene movimientos en: Centro'));
+ok('el aviso no provoca saltos de PDFKit ni sale de WinAnsi',
+  saltosPdfkit === 0 && [...txtVacio].every((c) => WINANSI.has(c.codePointAt(0))));
+const conDatos = await renderizar(await reporte());
+ok('un PDF con filas NO lleva el aviso', !conDatos.trazos.some((t) => t.t.includes('No hay ventas, créditos')));
+
+const modal9 = leer(FRONT, 'pages/prestamos/ModalReporteEmpleado.jsx');
+const api9 = leer(FRONT, 'api/prestamos.api.js');
+ok('la pantalla pide la lista CON el rango y la sede',
+  /getEmpleadosReporte\(\{\s*desde: rango\.desde, hasta: rango\.hasta, solo_equipos: soloEquipos, sucursal_id: sede/.test(modal9)
+  && api9.includes("'/prestamos/reporte-empleado/empleados', {"));
+ok('el PDF sale de la MISMA sede que se contó', /sucursal_id: sede,\s*\}\);/.test(modal9));
+ok('no arranca en uno mismo si no tiene movimientos', modal9.includes('yo.movimientos > 0'));
+ok('avisa antes de descargar y ofrece la salida', modal9.includes('otras_sedes') && modal9.includes('setSoloEquipos(false)'));
 
 console.log(`\n${pasados} verificaciones pasaron · ${fallos.length} fallaron`);
 if (fallos.length) { console.log(fallos.map((f) => `  ✗ ${f}`).join('\n')); process.exit(1); }

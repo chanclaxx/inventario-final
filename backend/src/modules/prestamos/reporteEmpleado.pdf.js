@@ -161,6 +161,40 @@ const fichaEmpleado = (doc, y, { empleado, reporte, generado }) => {
   return y + h + 16;
 };
 
+/**
+ * Un empleado sin una sola fila. Sin esto el PDF salía con cuatro secciones
+ * vacías y nadie sabía si el empleado no hizo nada o si se pidió mal: el
+ * reporte cuenta lo registrado con SU sesión y en UNA sede, y eso lo dice.
+ */
+const avisoSinMovimientos = (doc, y, { empleado, reporte }) => {
+  const sede = reporte.sucursal_nombre ? `la sucursal ${reporte.sucursal_nombre}` : 'esta sucursal';
+  const lineas = [
+    `No hay ventas, créditos ni préstamos registrados por ${empleado.nombre} en ${sede} del ${fechaCorta(reporte.desde)} al ${fechaCorta(reporte.hasta)}.`,
+    'El reporte cuenta lo que el empleado registró con su propio usuario, en la sucursal del reporte.',
+  ];
+  const otras = (empleado.otras_sedes || []).map((s) => `${s.nombre} (${s.movimientos.toLocaleString('es-CO')})`);
+  if (otras.length) lineas.push(`Sí tiene movimientos en: ${otras.join(', ')}.`);
+  if (empleado.sin_imei > 0) {
+    lineas.push(`Tiene ${empleado.sin_imei.toLocaleString('es-CO')} producto(s) sin IMEI que se quedaron fuera por «Solo equipos con IMEI».`);
+  }
+
+  const w = CONTENT_W - 28;
+  const altos = lineas.map((t, i) =>
+    medirTexto(doc, t, w, { lineas: 4, font: i === 0 ? FONT.bold : FONT.normal, size: i === 0 ? 9 : 8 }).alto);
+  const h = 20 + altos.reduce((s, a) => s + a + 4, 0);
+  y = asegurarEspacio(doc, y, h + 16);
+  rectFillStroke(doc, MARGIN, y, CONTENT_W, h, C.naranjaFondo, C.naranjaBorde, 8);
+  let yl = y + 11;
+  lineas.forEach((t, i) => {
+    textoAcotado(doc, t, MARGIN + 14, yl, w, {
+      lineas: 4, font: i === 0 ? FONT.bold : FONT.normal, size: i === 0 ? 9 : 8,
+      color: i === 0 ? C.naranja : C.grisOscuro,
+    });
+    yl += altos[i] + 4;
+  });
+  return y + h + 16;
+};
+
 /** Unidades por tipo y estado. Sirve para ubicarse, no para liquidar. */
 const resumen = (doc, y, empleado) => {
   const colTipo = 150;
@@ -321,6 +355,7 @@ const generarPdfReporteEmpleado = ({ reporte, config = {} }) => {
       hojaNuevaEmpleado = false;
     }
     let y = portada(empleado);
+    if (empleado.total_filas === 0) y = avisoSinMovimientos(doc, y, { empleado, reporte });
     y = resumen(doc, y, empleado);
     for (const seccion of empleado.secciones) y = bloqueTipo(doc, y, seccion);
 
