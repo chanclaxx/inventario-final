@@ -1,13 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // REPORTE POR SEDE (oct-2026)
 //
-// La sede entera en el período: equipos (con IMEI) y accesorios, cuántos
-// siguen pendientes y cuántos ya se pagaron, lo pagado y lo que se debe; por
-// tipo, mes a mes y por empleado. Sale de las MISMAS consultas que el reporte
+// La sede entera en el período: qué se vendió de CADA LÍNEA de producto
+// (iPhone, Samsung, Accesorios…), cuántas unidades siguen pendientes y cuántas
+// ya se pagaron, lo pagado y lo que se debe; por línea, tipo, mes a mes y por
+// empleado. Sale de las MISMAS consultas que el reporte
 // por empleado, y esta prueba arranca del MISMO escenario (el de la 68) para
 // poder exigir que los dos digan lo mismo.
 //
-//   · Sección 1 — equipo o accesorio.
+//   · Sección 1 — la línea de cada producto y el reparto de la plata.
 //   · Sección 2 — ★ las unidades de la sede = la suma de las del reporte por
 //                 empleado, tipo por tipo y estado por estado.
 //   · Sección 3 — la plata: contado por línea, crédito por CRÉDITO (dos líneas,
@@ -20,6 +21,8 @@
 //   · Sección 7 — el PDF de verdad: cifras, ningún salto de PDFKit, WinAnsi,
 //                 el pie libre, «todas» una sede por hoja, 250 deudas.
 //   · Sección 8 — la pantalla pide lo que el backend entiende (estática).
+//   · Sección 9 — ★ por línea: por IMEI, por producto y por nombre; la plata
+//                 de un crédito de dos líneas se reparte y la suma da exacto.
 //
 // Requiere PGlite (no va en package.json a propósito):
 //   npm install --no-save @electric-sql/pglite
@@ -180,16 +183,45 @@ await db.exec(`
     (4, 121, NULL, 1, 1000000, 100000, 0, 'Activo');
 `);
 
+// Líneas del inventario. Cada camino de la resolución tiene su caso: el
+// Xiaomi 13 se encuentra por su IMEI aunque su referencia se llame distinto,
+// el vidrio por su producto, y el resto por el nombre. Lo que no tiene
+// producto en el inventario (Poco X6, Honor 90…) cae en «Sin línea».
+await db.exec(`
+  INSERT INTO lineas_producto (id, negocio_id, nombre) VALUES
+    (1, 1, 'iPhone'), (2, 1, 'Samsung'), (3, 1, 'Accesorios'), (4, 1, 'Motorola'), (5, 1, 'Xiaomi');
+  INSERT INTO productos_serial (id, nombre, sucursal_id, linea_id) VALUES
+    (1, 'iPhone 13 128GB', 1, 1), (2, 'iPhone 14', 1, 1), (3, 'Moto G54', 1, 4),
+    (4, 'Referencia Xiaomi', 1, 5), (5, 'iPhone 12', 1, 1), (6, 'Galaxy S23', 1, 2), (7, 'Samsung A54', 1, 2);
+  INSERT INTO seriales (producto_id, imei, vendido) VALUES (2, '444', TRUE), (3, '2121', TRUE), (4, '555', TRUE);
+  INSERT INTO productos_cantidad (id, nombre, sucursal_id, linea_id) VALUES
+    (1, 'Vidrio templado', 1, 3), (2, 'Funda Moto', 1, 3), (3, 'Forro', 1, 3), (4, 'Cargador 20W', 1, 3);
+  UPDATE lineas_factura SET producto_id = 1 WHERE nombre_producto = 'Vidrio templado';
+`);
+
 const rSede = (extra = {}) => sedeSvc.obtenerReporteSede({
   negocioId: 1, sucursalId: 1, usuario: ADMIN, ...SEP, ...extra,
 });
 const tipo = (s, id) => s.tipos.find((t) => t.id === id);
 
 // ═══ 1 ══════════════════════════════════════════════════════════════════════
-seccion('1 · Equipo o accesorio');
-ok('con IMEI = equipo', sedeSvc.categoriaDe('3567') === 'equipo');
-ok('sin IMEI = accesorio', sedeSvc.categoriaDe(null) === 'accesorio' && sedeSvc.categoriaDe('  ') === 'accesorio');
+seccion('1 · La línea y el reparto');
+ok('sin línea = «Sin línea»', sedeSvc.lineaDe(null) === 'Sin línea' && sedeSvc.lineaDe('  ') === 'Sin línea');
+ok('con línea, la línea', sedeSvc.lineaDe(' iPhone ') === 'iPhone');
 ok('el mes se nombra en español', sedeSvc.etiquetaMes('2026-09') === 'Septiembre 2026');
+const rep1 = sedeSvc.repartirPorLinea({
+  valor: 1000, pagado: 333.33, debe: 666.67, cerrado_sin_pago: 0,
+  partes: [{ linea: 'A', peso: 1 }, { linea: 'B', peso: 1 }, { linea: 'C', peso: 1 }],
+});
+ok('★ el reparto suma EXACTO lo del documento (el último se lleva el redondeo)',
+  ['valor', 'pagado', 'debe'].every((k) => Math.abs(rep1.reduce((a, x) => a + x[k], 0) - ({ valor: 1000, pagado: 333.33, debe: 666.67 })[k]) < 1e-9),
+  JSON.stringify(rep1.map((x) => x.valor)));
+const rep2 = sedeSvc.repartirPorLinea({ valor: 900, pagado: 0, debe: 900, cerrado_sin_pago: 0,
+  partes: [{ linea: 'A', peso: 0 }, { linea: 'B', peso: 0 }] });
+ok('sin peso (todo devuelto u obsequio) se reparte por igual', rep2[0].valor === 450 && rep2[1].valor === 450);
+const rep3 = sedeSvc.repartirPorLinea({ valor: 100, pagado: 0, debe: 100, cerrado_sin_pago: 0,
+  partes: [{ linea: 'A', peso: 30 }, { linea: 'A', peso: 50 }, { linea: 'B', peso: 20 }] });
+ok('dos productos de la misma línea se juntan', rep3.length === 2 && rep3[0].valor === 80 && rep3[1].valor === 20);
 
 // ═══ 2 ══════════════════════════════════════════════════════════════════════
 seccion('2 · Las unidades son las del reporte por empleado');
@@ -200,13 +232,11 @@ for (const t of svc.TIPOS) {
   for (const g of svc.GRUPOS) {
     const delEmpleado = emp2.empleados.reduce((acc, e) =>
       acc + (sec(e, t.id).grupos.find((x) => x.id === g.id)?.filas.reduce((a, f) => a + f.cantidad, 0) || 0), 0);
-    const deSede = tipo(s2, t.id).unidades.equipo[g.id] + tipo(s2, t.id).unidades.accesorio[g.id];
+    const deSede = tipo(s2, t.id).unidades[g.id];
     if (delEmpleado || deSede) ok(`★ ${t.titulo} · ${g.titulo}: sede ${deSede} = suma de empleados ${delEmpleado}`, deSede === delEmpleado);
   }
 }
-ok('el iPhone 13 es equipo y el vidrio (×2) accesorio',
-  tipo(s2, 'contado').unidades.equipo.pagado >= 1 && tipo(s2, 'contado').unidades.accesorio.pagado === 2);
-ok('el forro prestado (×5) es accesorio pendiente', tipo(s2, 'prestamo_companero').unidades.accesorio.pendiente === 5);
+ok('préstamos a compañeros pendientes: el forro (×5) y el A15', tipo(s2, 'prestamo_companero').unidades.pendiente === 6);
 ok('fuera: la factura del préstamo saldado y el ajuste de deuda',
   tipo(s2, 'contado').documentos === 7 && tipo(s2, 'prestamo_cliente').documentos === 2);
 ok('fuera: la otra sede y lo de fuera del rango (F-107, F-108, F-112)',
@@ -305,13 +335,19 @@ const p1 = await renderSede(r2);
 if (process.env.GUARDAR_PDF) writeFileSync(path.join(process.env.GUARDAR_PDF, 'reporte-sede.pdf'), p1.buf);
 const t1 = p1.trazos.map((t) => t.t).join(' ');
 ok('es un PDF', p1.buf.subarray(0, 5).toString() === '%PDF-');
-for (const t of ['REPORTE POR SEDE', 'Centro', 'UNIDADES POR TIPO Y ESTADO', 'PLATA POR TIPO', 'MES A MES',
-  'POR EMPLEADO', 'Por cobrar · Ventas a crédito', 'Celulares y equipos'.toUpperCase(), 'TOTAL DEBIDO']) {
+for (const t of ['REPORTE POR SEDE', 'Centro', 'POR TIPO DE OPERACIÓN', 'MES A MES',
+  'POR EMPLEADO', 'Por cobrar · Ventas a crédito', 'POR LÍNEA · QUÉ SE VENDIÓ DE CADA UNA',
+  'CADA LÍNEA POR TIPO Y ESTADO', 'VALOR TOTAL DEL PERÍODO', 'TOTAL DEBIDO', 'iPhone', 'Motorola', 'Sin línea']) {
   ok(`trae «${t}»`, t1.toUpperCase().includes(t.toUpperCase()));
 }
 ok('★ dice el total debido de verdad', t1.includes(base.formatCOP(s2.total.debe)), base.formatCOP(s2.total.debe));
 ok('★ y lo pagado', t1.includes(base.formatCOP(s2.total.pagado)));
 ok('★ explica lo cerrado sin pago registrado', t1.includes('sin el abono registrado'));
+ok('★ el valor total del período sale en la portada', t1.includes(base.formatCOP(s2.total.valor)));
+ok('★ la lista de lo que se debe cierra con su total',
+  p1.trazos.some((t) => t.t.startsWith('Total · ') && t.t.includes('documento')));
+const lIphone = s2.lineas.find((l) => l.nombre === 'iPhone');
+ok('★ cada línea con su valor total en el PDF', t1.includes(base.formatCOP(lIphone.valor)), base.formatCOP(lIphone.valor));
 ok('ningún salto lo decidió PDFKit', saltosPdfkit === 0, `saltos=${saltosPdfkit}`);
 const fuera1 = [...new Set([...t1].filter((ch) => !WINANSI.has(ch.codePointAt(0))))];
 ok('todo carácter impreso está en WinAnsi', fuera1.length === 0, fuera1.join(''));
@@ -360,6 +396,45 @@ ok('★ el vendedor no ve la pestaña de sede', modal8.includes("usuario.rol !==
 ok('el modal muestra las cifras antes de descargar', modal8.includes('getResumenReporteSede(filtros)'));
 ok('el admin puede pedir todas las sedes', modal8.includes('value="todas"'));
 ok('el botón de la cabecera nombra los dos reportes', pag8.includes("'Reporte por empleado / sede'"));
+ok('la vista previa del modal nombra las líneas', modal8.includes('data?.lineas') && !modal8.includes("'equipo'"));
+
+// ═══ 9 ══════════════════════════════════════════════════════════════════════
+seccion('9 · Por línea: qué se vendió de cada una');
+const s9 = (await rSede()).sedes[0];
+const L = (n) => s9.lineas.find((l) => l.nombre === n);
+ok('★ la suma de las líneas = el total (valor, pagado, debe y cerrado sin pago)',
+  ['valor', 'pagado', 'debe', 'cerrado_sin_pago'].every((k) => Math.abs(s9.lineas.reduce((a, l) => a + l[k], 0) - s9.total[k]) < 0.01));
+ok('★ y las unidades también, estado por estado',
+  svc.GRUPOS.every((g) => s9.lineas.reduce((a, l) => a + l.unidades[g.id], 0) === s9.total.unidades[g.id]));
+ok('★ por IMEI: el Xiaomi 13 cae en Xiaomi aunque su referencia se llame distinto', L('Xiaomi')?.unidades.pagado === 1);
+ok('por IMEI: el iPhone 14 (crédito) cae en iPhone', L('iPhone')?.tipos.some((t) => t.id === 'credito'));
+const accContado = L('Accesorios')?.tipos.find((t) => t.id === 'contado')?.unidades;
+ok('por producto el vidrio (×2) y por nombre el cargador (3, uno devuelto) caen en Accesorios',
+  accContado?.pagado === 2 && accContado?.devuelto_parcial === 3, JSON.stringify(accContado));
+ok('por nombre: el iPhone 13 y el iPhone 12 prestado caen en iPhone',
+  L('iPhone')?.tipos.find((t) => t.id === 'contado')?.unidades.pagado === 1
+  && L('iPhone')?.tipos.find((t) => t.id === 'prestamo_cliente')?.unidades.pendiente === 1);
+ok('por nombre: el forro prestado (×5) cae en Accesorios',
+  L('Accesorios')?.tipos.find((t) => t.id === 'prestamo_companero')?.unidades.pendiente === 5);
+ok('★ lo que no está en el inventario va a «Sin línea», al final',
+  s9.lineas[s9.lineas.length - 1].nombre === 'Sin línea' && L('Sin línea').unidades.total > 0);
+ok('ordenadas de la que más vendió a la que menos',
+  s9.lineas.filter((l) => l.nombre !== 'Sin línea').every((l, i, a) => i === 0 || a[i - 1].valor >= l.valor));
+// El crédito de dos líneas (Moto G54 800.000 + Funda 200.000; valor 1.000.000,
+// cuota 100.000, sin abonos): 80 % a Motorola y 20 % a Accesorios.
+const credMoto = L('Motorola')?.tipos.find((t) => t.id === 'credito');
+const credAcc  = L('Accesorios')?.tipos.find((t) => t.id === 'credito');
+ok('★ el crédito de dos líneas se reparte 80/20 según el valor de cada producto',
+  credMoto?.valor === 800000 && credMoto?.pagado === 80000 && credMoto?.debe === 720000
+  && credAcc?.valor === 200000 && credAcc?.pagado === 20000 && credAcc?.debe === 180000,
+  JSON.stringify({ m: credMoto && [credMoto.valor, credMoto.pagado, credMoto.debe], a: credAcc && [credAcc.valor, credAcc.pagado, credAcc.debe] }));
+ok('★ cada línea = la suma de sus tipos',
+  s9.lineas.every((l) => ['valor', 'pagado', 'debe'].every((k) => Math.abs(l.tipos.reduce((a, t) => a + t[k], 0) - l[k]) < 0.01)));
+const rT9 = await rSede({ sucursalId: null });
+ok('«todas»: las líneas del consolidado suman el consolidado',
+  Math.abs(rT9.lineas_consolidadas.reduce((a, l) => a + l.valor, 0) - rT9.consolidado.valor) < 0.01);
+const cRes = await llamar(ctrl.getResumenReporteSede, { ...SEP }, { ...ADMIN, negocio_id: 1 });
+ok('el resumen del modal trae las líneas, sin su desglose', cRes.lineas.length === s9.lineas.length && cRes.lineas.every((l) => l.tipos === undefined));
 
 console.log(`\n${pasados} verificaciones pasaron · ${fallos.length} fallaron`);
 if (fallos.length) { console.log(fallos.map((f) => `  ✗ ${f}`).join('\n')); process.exit(1); }

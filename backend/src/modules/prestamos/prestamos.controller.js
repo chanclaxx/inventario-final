@@ -366,6 +366,9 @@ const getResumenReporteSede = async (req, res, next) => {
       data: {
         desde: r.desde, hasta: r.hasta, todas: r.todas,
         consolidado: r.consolidado,
+        // Las líneas sin su desglose por tipo: el modal solo muestra cuánto de cada una.
+        lineas: (r.lineas_consolidadas ?? r.sedes[0]?.lineas ?? [])
+          .map((l) => ({ nombre: l.nombre, unidades: l.unidades, valor: l.valor, pagado: l.pagado, debe: l.debe })),
         sedes: r.sedes.map((s) => ({ sucursal_id: s.sucursal_id, nombre: s.nombre, total: s.total, vacio: s.vacio })),
       },
     });

@@ -6,11 +6,12 @@
 // empleado).
 //
 // Estructura, por sede:
-//   encabezado → ficha de la sede → seis cifras (equipos, accesorios, valor,
-//   pendientes, pagado, debido) → unidades por tipo, categoría y estado →
-//   plata por tipo → mes a mes → por empleado → lo que se debe, documento por
-//   documento (opcional).
-// Con «todas las sedes», primero un consolidado con una fila por sede y luego
+//   encabezado → ficha de la sede → seis cifras (unidades, líneas, valor,
+//   activos, pagado, debido) → POR LÍNEA (qué se vendió de cada una, con su
+//   valor) → cada línea por tipo y estado → por tipo → mes a mes → por
+//   empleado → lo que se debe, documento por documento (opcional), con su
+//   total.
+// Con «todas las sedes», primero un consolidado (por sede y por línea) y luego
 // cada sede en su propia hoja.
 //
 // Todo pasa por las primitivas de `pdf.base` (tablaPaginada, textoAcotado,
@@ -24,7 +25,7 @@ const {
   encabezadoContinuo, medirTexto, textoAcotado, tablaPaginada,
 } = require('../../utils/pdf.base');
 const { GRUPOS } = require('./reporteEmpleado.service');
-const { CATEGORIAS, vigentes } = require('./reporteSede.service');
+const { vigentes } = require('./reporteSede.service');
 
 const CONT_H = 34;
 const CAB_H  = 20;
@@ -43,10 +44,8 @@ const ahoraBogota = () => new Date().toLocaleString('es-CO', {
 });
 const n = (v) => (Number(v) ? Number(v).toLocaleString('es-CO') : '–');
 const plata = (v) => (Number(v) ? formatCOP(v) : '–');
-// En las tarjetas un cero se escribe: «0 equipos» es una respuesta.
+// En las tarjetas un cero se escribe: «0 unidades» es una respuesta.
 const cuenta = (v) => Number(v || 0).toLocaleString('es-CO');
-const pendientes = (t) => CATEGORIAS.reduce((s, c) => s + t.unidades[c.id].pendiente, 0);
-const pagados    = (t) => CATEGORIAS.reduce((s, c) => s + t.unidades[c.id].pagado, 0);
 
 // ─── Tabla genérica de cifras ───────────────────────────────────────────────
 //
@@ -86,23 +85,33 @@ const tablaCifras = (doc, y, { titulo, columnas, filas, nota = null }) => {
         });
       });
     },
-    filas: filas.map((f) => ({
-      alto: FILA_H,
-      fondo: f.fondo,
-      dibujar: (d, yf) => {
-        let x0 = xs[0] + PAD;
-        if (f.punto) { d.circle(x0 + 3, yf + FILA_H / 2, 2.6).fill(f.punto); x0 += 10; }
-        f.celdas.forEach((texto, i) => {
-          const x = i === 0 ? x0 : xs[i] + PAD;
-          const w = i === 0 ? ws[0] - (x0 - xs[0]) - PAD : ws[i] - PAD * 2;
-          textoAcotado(d, String(texto ?? ''), x, yf + 5, w, {
-            size: 7, align: i === 0 ? 'left' : (columnas[i].align || 'right'),
-            font: f.negrita || i === 0 ? FONT.bold : FONT.normal,
-            color: f.colores?.[i] || (texto === '–' ? C.grisBorde : C.negro),
+    filas: filas.map((f) => {
+      // El nombre (línea, empleado, sede) baja a un segundo renglón si no cabe:
+      // cortado con «…», dos líneas distintas («PROTECTORES PANTALLA» y
+      // «PROTECTORES CAMARA») se veían iguales.
+      const x0 = xs[0] + PAD + (f.punto ? 10 : 0);
+      const w0 = ws[0] - (x0 - xs[0]) - PAD;
+      const font0 = f.negrita || !f.normal0 ? FONT.bold : FONT.normal;
+      const m0 = medirTexto(doc, String(f.celdas[0] ?? ''), w0, { lineas: 2, font: font0, size: 7 });
+      const alto = Math.max(FILA_H, m0.alto + 9);
+      return {
+        alto,
+        fondo: f.fondo,
+        dibujar: (d, yf) => {
+          if (f.punto) d.circle(xs[0] + PAD + 3, yf + 8.5, 2.6).fill(f.punto);
+          f.celdas.forEach((texto, i) => {
+            const x = i === 0 ? x0 : xs[i] + PAD;
+            const w = i === 0 ? w0 : ws[i] - PAD * 2;
+            textoAcotado(d, i === 0 ? m0.texto : String(texto ?? ''), x, yf + 5, w, {
+              lineas: i === 0 ? 2 : 1,
+              size: 7, align: i === 0 ? 'left' : (columnas[i].align || 'right'),
+              font: i === 0 ? font0 : (f.negrita ? FONT.bold : FONT.normal),
+              color: f.colores?.[i] || (texto === '–' ? C.grisBorde : C.negro),
+            });
           });
-        });
-      },
-    })),
+        },
+      };
+    }),
     espacioDespues: nota ? 6 : 18,
   });
 
@@ -115,21 +124,22 @@ const tablaCifras = (doc, y, { titulo, columnas, filas, nota = null }) => {
   return y;
 };
 
+const FILA_TOTAL = { negrita: true, fondo: C.grisFondo };
+
 // Las columnas que comparten el mes a mes, los empleados y el consolidado.
 const COLS_COMPACTAS = (primera) => [
   { titulo: primera },
-  { titulo: 'Equipos', w: 44 },
-  { titulo: 'Accesorios', w: 48 },
-  { titulo: 'Pendientes (uds)', w: 50 },
-  { titulo: 'Pagados (uds)', w: 46 },
-  { titulo: 'Valor', w: 68 },
-  { titulo: 'Pagado', w: 68 },
-  { titulo: 'Debe', w: 64 },
+  { titulo: 'Unidades', w: 50 },
+  { titulo: 'Pendientes (uds)', w: 52 },
+  { titulo: 'Pagados (uds)', w: 48 },
+  { titulo: 'Valor total', w: 74 },
+  { titulo: 'Pagado', w: 72 },
+  { titulo: 'Debe', w: 68 },
 ];
 const filaCompacta = (nombre, t, extra = {}) => ({
-  celdas: [nombre, n(vigentes(t, 'equipo')), n(vigentes(t, 'accesorio')), n(pendientes(t)), n(pagados(t)),
+  celdas: [nombre, n(vigentes(t)), n(t.unidades.pendiente), n(t.unidades.pagado),
     plata(t.valor), plata(t.pagado), plata(t.debe)],
-  colores: { 3: pendientes(t) ? C.naranja : null, 7: t.debe ? C.rojo : null },
+  colores: { 2: t.unidades.pendiente ? C.naranja : null, 5: t.pagado ? C.verde : null, 6: t.debe ? C.rojo : null },
   ...extra,
 });
 
@@ -151,16 +161,17 @@ const fichaSede = (doc, y, { nombre, periodo, generado, detalle }) => {
   return y + h + 14;
 };
 
-/** Seis cifras para leer el mes de un vistazo. */
-const cifras = (doc, y, t) => {
+/** Seis cifras para leer el período de un vistazo. */
+const cifras = (doc, y, t, lineas = []) => {
+  const conMovimiento = lineas.filter((l) => vigentes(l) > 0 || l.valor > 0);
+  const top = conMovimiento[0];
   const tiles = [
-    { t: 'Celulares y equipos', v: cuenta(vigentes(t, 'equipo')),
-      d: `${cuenta(t.unidades.equipo.pendiente)} pendientes · ${cuenta(t.unidades.equipo.pagado)} pagados`, c: C.azul },
-    { t: 'Accesorios y otros', v: cuenta(vigentes(t, 'accesorio')),
-      d: `${cuenta(t.unidades.accesorio.pendiente)} pendientes · ${cuenta(t.unidades.accesorio.pagado)} pagados`, c: C.morado },
-    { t: 'Valor del período', v: formatCOP(t.valor), d: `${cuenta(t.documentos)} documentos`, c: C.negro },
-    { t: 'Activos (por cobrar)', v: cuenta(t.activos),
-      d: 'créditos y préstamos con saldo', c: C.naranja },
+    { t: 'Unidades vendidas y prestadas', v: cuenta(vigentes(t)),
+      d: `${cuenta(t.unidades.pendiente)} pendientes · ${cuenta(t.unidades.pagado)} pagadas`, c: C.azul },
+    { t: 'Líneas con movimiento', v: cuenta(conMovimiento.length),
+      d: top ? `La que más vendió: ${top.nombre}` : 'sin movimiento', c: C.morado },
+    { t: 'Valor total del período', v: formatCOP(t.valor), d: `${cuenta(t.documentos)} documentos`, c: C.negro },
+    { t: 'Activos (por cobrar)', v: cuenta(t.activos), d: 'créditos y préstamos con saldo', c: C.naranja },
     { t: 'Total pagado', v: formatCOP(t.pagado), d: `${cuenta(t.saldados)} documentos pagados`, c: C.verde },
     { t: 'Total debido', v: formatCOP(t.debe), d: 'capital, sin mora ni interés', c: C.rojo },
   ];
@@ -181,71 +192,101 @@ const cifras = (doc, y, t) => {
   return y + h * 2 + gap + 18;
 };
 
-const tablaUnidades = (doc, y, sede) => {
-  const columnas = [
-    { titulo: 'Tipo' }, { titulo: 'Categoría', w: 58, align: 'left' },
-    ...GRUPOS.map((g) => ({ titulo: g.corto || g.titulo, w: 48 })),
-    { titulo: 'Total', w: 38 },
-  ];
-  const filas = [];
-  for (const tipo of sede.tipos) {
-    CATEGORIAS.forEach((c, i) => {
-      const u = tipo.unidades[c.id];
-      filas.push({
-        punto: i === 0 ? COLOR_TIPO[tipo.color] : null,
-        celdas: [i === 0 ? tipo.titulo : '', c.corto, ...GRUPOS.map((g) => n(u[g.id])), n(u.total)],
-        colores: { 3: u.pendiente ? C.naranja : null, 2: u.pagado ? C.verde : null },
-      });
-    });
-  }
-  CATEGORIAS.forEach((c, i) => {
-    const u = sede.total.unidades[c.id];
-    filas.push({
-      negrita: true, fondo: C.grisFondo,
-      celdas: [i === 0 ? 'Total' : '', c.corto, ...GRUPOS.map((g) => n(u[g.id])), n(u.total)],
-    });
-  });
+/** Lo que pidió el negocio: qué se vendió de CADA línea, y cuánto vale. */
+const COLS_LINEA = [
+  { titulo: 'Línea' },
+  { titulo: 'Unidades', w: 46 },
+  { titulo: 'Pendientes', w: 48 },
+  { titulo: 'Pagados', w: 44 },
+  { titulo: 'Devueltos', w: 44 },
+  { titulo: 'Valor total', w: 74 },
+  { titulo: 'Pagado', w: 70 },
+  { titulo: 'Debe', w: 66 },
+];
+const filaLinea = (nombre, t, extra = {}) => ({
+  celdas: [nombre, n(vigentes(t)), n(t.unidades.pendiente), n(t.unidades.pagado), n(t.unidades.devuelto),
+    plata(t.valor), plata(t.pagado), plata(t.debe)],
+  colores: { 2: t.unidades.pendiente ? C.naranja : null, 6: t.pagado ? C.verde : null, 7: t.debe ? C.rojo : null },
+  ...extra,
+});
+
+const tablaLineas = (doc, y, lineas, total, { titulo = 'Por línea · qué se vendió de cada una' } = {}) => {
+  if (!lineas.length) return y;
+  const filas = lineas.map((l) => filaLinea(l.nombre, l));
+  filas.push(filaLinea('Total', total, FILA_TOTAL));
   return tablaCifras(doc, y, {
-    titulo: 'Unidades por tipo y estado',
-    columnas, filas,
-    nota: 'Equipos = productos con IMEI (celulares, tablets, relojes…). Cada unidad está en el estado que tiene HOY. '
-      + 'Pagados incluye lo vendido de contado.',
+    titulo, columnas: COLS_LINEA, filas,
+    nota: 'Unidades = lo vendido y prestado que sigue vigente (sin cancelados ni devueltos). La línea es la del '
+      + 'inventario; un crédito con productos de varias líneas reparte su plata según el valor de cada producto.',
   });
 };
 
-const tablaPlata = (doc, y, sede) => {
+/** Cada línea abierta por tipo de operación y estado. */
+const tablaLineaTipo = (doc, y, sede) => {
   const columnas = [
-    { titulo: 'Tipo' }, { titulo: 'Docs.', w: 44 }, { titulo: 'Activos', w: 42 }, { titulo: 'Saldados', w: 44 },
-    { titulo: 'Valor', w: 72 }, { titulo: 'Pagado', w: 72 }, { titulo: 'Debe', w: 68 },
+    { titulo: 'Línea' },
+    { titulo: 'Tipo', w: 98, align: 'left' },
+    ...GRUPOS.map((g) => ({ titulo: g.corto || g.titulo, w: 46 })),
+    { titulo: 'Valor total', w: 70 },
+  ];
+  const filas = [];
+  for (const l of sede.lineas) {
+    l.tipos.forEach((t, i) => {
+      filas.push({
+        punto: COLOR_TIPO[t.color],
+        normal0: i > 0,
+        celdas: [i === 0 ? l.nombre : '', t.titulo, ...GRUPOS.map((g) => n(t.unidades[g.id])), plata(t.valor)],
+        colores: { 3: t.unidades.pendiente ? C.naranja : null, 2: t.unidades.pagado ? C.verde : null },
+      });
+    });
+  }
+  if (!filas.length) return y;
+  // El punto de color va con el TIPO: en la primera columna marcaría la línea.
+  for (const f of filas) { f.colores[1] = f.punto; delete f.punto; }
+  filas.push({
+    ...FILA_TOTAL,
+    celdas: ['Total', '', ...GRUPOS.map((g) => n(sede.total.unidades[g.id])), plata(sede.total.valor)],
+  });
+  return tablaCifras(doc, y, {
+    titulo: 'Cada línea por tipo y estado (unidades)', columnas, filas,
+    nota: 'Cada unidad está en el estado que tiene HOY. Pagados incluye lo vendido de contado.',
+  });
+};
+
+const tablaTipos = (doc, y, sede) => {
+  const columnas = [
+    { titulo: 'Tipo' }, { titulo: 'Unidades', w: 44 }, { titulo: 'Docs.', w: 38 }, { titulo: 'Activos', w: 40 },
+    { titulo: 'Saldados', w: 42 }, { titulo: 'Valor total', w: 70 }, { titulo: 'Pagado', w: 68 }, { titulo: 'Debe', w: 64 },
   ];
   const fila = (titulo, t, extra = {}) => ({
-    celdas: [titulo, n(t.documentos), n(t.activos), n(t.saldados), plata(t.valor), plata(t.pagado), plata(t.debe)],
-    colores: { 2: t.activos ? C.naranja : null, 6: t.debe ? C.rojo : null, 5: t.pagado ? C.verde : null },
+    celdas: [titulo, n(vigentes(t)), n(t.documentos), n(t.activos), n(t.saldados), plata(t.valor), plata(t.pagado), plata(t.debe)],
+    colores: { 3: t.activos ? C.naranja : null, 6: t.pagado ? C.verde : null, 7: t.debe ? C.rojo : null },
     ...extra,
   });
   const filas = sede.tipos.map((t) => fila(t.titulo, t, { punto: COLOR_TIPO[t.color] }));
-  filas.push(fila('Total', sede.total, { negrita: true, fondo: C.grisFondo }));
+  filas.push(fila('Total', sede.total, FILA_TOTAL));
 
-  const notas = ['Valor = lo que vale hoy cada documento (la devolución ya lo rebajó). Pagado = contado + cuotas iniciales + abonos. '
-    + 'Debe = saldo de capital de lo activo; la mora y el interés van aparte. Lo cancelado y lo devuelto no suma plata.'];
+  const notas = ['Valor total = lo que vale hoy cada documento (la devolución ya lo rebajó). Pagado = contado + cuotas '
+    + 'iniciales + abonos. Debe = saldo de capital de lo activo; la mora y el interés van aparte. Lo cancelado y lo '
+    + 'devuelto no suma plata.'];
   if (sede.total.cerrado_sin_pago > 0) {
     notas.push(`Hay ${formatCOP(sede.total.cerrado_sin_pago)} en documentos cerrados como saldados sin el abono registrado: `
-      + 'por eso Valor no es igual a Pagado + Debe.');
+      + 'por eso Valor total no es igual a Pagado + Debe.');
   }
-  return tablaCifras(doc, y, { titulo: 'Plata por tipo', columnas, filas, nota: notas.join(' ') });
+  return tablaCifras(doc, y, { titulo: 'Por tipo de operación', columnas, filas, nota: notas.join(' ') });
 };
 
 const tablaMeses = (doc, y, sede) => {
   if (!sede.meses.length) return y;
   const filas = sede.meses.map((m) => filaCompacta(m.etiqueta, m));
-  if (sede.meses.length > 1) filas.push(filaCompacta('Total', sede.total, { negrita: true, fondo: C.grisFondo }));
+  filas.push(filaCompacta('Total', sede.total, FILA_TOTAL));
   return tablaCifras(doc, y, { titulo: 'Mes a mes', columnas: COLS_COMPACTAS('Mes'), filas });
 };
 
 const tablaEmpleados = (doc, y, sede) => {
   if (!sede.empleados.length) return y;
   const filas = sede.empleados.map((e) => filaCompacta(e.nombre, e));
-  if (sede.empleados.length > 1) filas.push(filaCompacta('Total', sede.total, { negrita: true, fondo: C.grisFondo }));
+  filas.push(filaCompacta('Total', sede.total, FILA_TOTAL));
   return tablaCifras(doc, y, {
     titulo: 'Por empleado (quien registró la operación)', columnas: COLS_COMPACTAS('Empleado'), filas,
   });
@@ -299,17 +340,32 @@ const filaPend = (doc, f) => {
   };
 };
 
+/** Cierre de la lista: el valor total, lo pagado y lo que se debe de esos documentos. */
+const filaTotalPend = (g) => ({
+  alto: 20,
+  fondo: C.grisFondo,
+  dibujar: (d, y) => {
+    const yt = y + 6.5;
+    textoAcotado(d, `Total · ${cuenta(g.documentos.length)} documento${g.documentos.length !== 1 ? 's' : ''}`,
+      pX.fecha + PAD, yt, pX.valor - pX.fecha - PAD * 2, { font: FONT.bold, size: 7.2 });
+    textoAcotado(d, plata(g.valor), pX.valor + PAD, yt, pW('valor'), { font: FONT.bold, size: 6.8, align: 'right' });
+    textoAcotado(d, plata(g.pagado), pX.pagado + PAD, yt, pW('pagado'), { font: FONT.bold, size: 6.8, align: 'right', color: C.verde });
+    textoAcotado(d, plata(g.debe), pX.debe + PAD, yt, pW('debe'), { font: FONT.bold, size: 6.8, align: 'right', color: C.rojo });
+  },
+});
+
 const listaPendientes = (doc, y, sede) => {
   if (!sede.pendientes || !sede.pendientes.length) return y;
   for (const g of sede.pendientes) {
-    const filas = g.documentos.map((f) => filaPend(doc, f));
+    const filas = [...g.documentos.map((f) => filaPend(doc, f)), filaTotalPend(g)];
     y = asegurarEspacio(doc, y, 30 + CAB_H + (filas[0]?.alto || 0));
     const color = COLOR_TIPO[g.color] || C.azul;
     rectFill(doc, MARGIN, y, CONTENT_W, 22, C.grisFondo, 6);
     doc.rect(MARGIN, y, 4, 22).fill(color);
-    textoAcotado(doc, `Por cobrar · ${g.titulo}`, MARGIN + 12, y + 7, CONTENT_W * 0.6, { font: FONT.bold, size: 9, color });
-    textoAcotado(doc, `${n(g.documentos.length)} documento${g.documentos.length !== 1 ? 's' : ''} · debe ${formatCOP(g.debe)}`,
-      MARGIN + CONTENT_W * 0.45, y + 8, CONTENT_W * 0.55 - 10, { size: 7.5, align: 'right', color: C.grisOscuro });
+    textoAcotado(doc, `Por cobrar · ${g.titulo}`, MARGIN + 12, y + 7, CONTENT_W * 0.5, { font: FONT.bold, size: 9, color });
+    textoAcotado(doc, `${cuenta(g.documentos.length)} documento${g.documentos.length !== 1 ? 's' : ''} · `
+      + `valor ${formatCOP(g.valor)} · debe ${formatCOP(g.debe)}`,
+    MARGIN + CONTENT_W * 0.38, y + 8, CONTENT_W * 0.62 - 10, { size: 7.5, align: 'right', color: C.grisOscuro });
     y += 30;
     y = tablaPaginada(doc, y, { cabeceraAlto: CAB_H, dibujarCabecera: cabeceraPend, filas, espacioDespues: 16 });
   }
@@ -357,12 +413,14 @@ const generarPdfReporteSede = ({ reporte, config = {} }) => {
   if (reporte.todas && reporte.consolidado) {
     hoja(i++, 'Todas las sedes');
     let y = portada('Todas las sedes');
-    y = cifras(doc, y, reporte.consolidado);
+    y = cifras(doc, y, reporte.consolidado, reporte.lineas_consolidadas || []);
+    y = tablaLineas(doc, y, reporte.lineas_consolidadas || [], reporte.consolidado,
+      { titulo: 'Por línea · todas las sedes' });
     const filas = reporte.sedes.map((s) => filaCompacta(s.nombre, s.total));
-    filas.push(filaCompacta('Total', reporte.consolidado, { negrita: true, fondo: C.grisFondo }));
+    filas.push(filaCompacta('Total', reporte.consolidado, FILA_TOTAL));
     tablaCifras(doc, y, {
       titulo: 'Por sede', columnas: COLS_COMPACTAS('Sede'), filas,
-      nota: 'Cada sede sigue en su propia hoja, con el detalle por tipo, mes y empleado.',
+      nota: 'Cada sede sigue en su propia hoja, con el detalle por línea, tipo, mes y empleado.',
     });
   }
 
@@ -374,9 +432,10 @@ const generarPdfReporteSede = ({ reporte, config = {} }) => {
         MARGIN, y + 20, CONTENT_W, { font: FONT.bold, size: 10.5, align: 'center', color: C.gris });
       continue;
     }
-    y = cifras(doc, y, sede.total);
-    y = tablaUnidades(doc, y, sede);
-    y = tablaPlata(doc, y, sede);
+    y = cifras(doc, y, sede.total, sede.lineas);
+    y = tablaLineas(doc, y, sede.lineas, sede.total);
+    y = tablaLineaTipo(doc, y, sede);
+    y = tablaTipos(doc, y, sede);
     y = tablaMeses(doc, y, sede);
     y = tablaEmpleados(doc, y, sede);
     y = listaPendientes(doc, y, sede);

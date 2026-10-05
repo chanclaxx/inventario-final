@@ -284,16 +284,19 @@ function PanelReporteEmpleado({ onClose }) {
 
 // ─── Reporte por SEDE ───────────────────────────────────────────────────────
 //
-// La sede entera en el período: cuántos equipos (con IMEI) y accesorios, cuántos
-// siguen pendientes y cuántos ya se pagaron, lo pagado y lo que se debe, por
-// tipo, mes a mes y por empleado. Sale de las MISMAS consultas que el reporte por
+// La sede entera en el período: qué se vendió y prestó de CADA LÍNEA de
+// producto (iPhone, Samsung, Accesorios…), cuántas unidades siguen pendientes y
+// cuántas ya se pagaron, lo pagado y lo que se debe, por línea, tipo, mes a mes
+// y por empleado. Sale de las MISMAS consultas que el reporte por
 // empleado. Aquí sí hay plata (pedido del negocio, oct-2026). Las cifras se ven
 // ANTES de descargar: son las mismas que trae el PDF.
 
-const unidadesVigentes = (t, cat) => {
-  const u = t?.unidades?.[cat];
+const unidadesVigentes = (t) => {
+  const u = t?.unidades;
   return u ? u.pagado + u.pendiente + u.devuelto_parcial : 0;
 };
+// Cuántas líneas se nombran en la vista previa; el PDF las trae todas.
+const LINEAS_EN_PREVIA = 6;
 
 function CifraSede({ titulo, valor, detalle, tono = 'text-gray-900' }) {
   return (
@@ -332,6 +335,7 @@ function PanelReporteSede({ onClose }) {
   });
 
   const total  = data ? (data.consolidado ?? data.sedes?.[0]?.total) : null;
+  const lineas = (data?.lineas ?? []).filter((l) => unidadesVigentes(l) > 0 || Number(l.valor) > 0);
   const vacio  = data && (data.sedes || []).every((s) => s.vacio);
   const nombre = todas ? 'Todas las sedes' : (data?.sedes?.[0]?.nombre || '');
 
@@ -359,9 +363,9 @@ function PanelReporteSede({ onClose }) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs text-gray-500 leading-relaxed">
-        La sucursal completa: cuántos <span className="font-medium text-gray-600">celulares y equipos</span> y
-        cuántos <span className="font-medium text-gray-600">accesorios</span> se vendieron y prestaron, cuántos
-        siguen pendientes y cuántos ya se pagaron, lo pagado y lo que se debe — por tipo, mes a mes y por empleado.
+        La sucursal completa: qué se vendió y prestó de <span className="font-medium text-gray-600">cada
+        línea</span> (iPhone, Samsung, Accesorios…), cuántas unidades siguen pendientes y cuántas ya se pagaron,
+        el valor total, lo pagado y lo que se debe — por línea, tipo, mes a mes y por empleado.
       </p>
 
       {/* Sucursal */}
@@ -425,19 +429,40 @@ function PanelReporteSede({ onClose }) {
             No hay ventas, créditos ni préstamos en {nombre || 'esta sucursal'} en este período.
           </div>
         ) : total && (
-          <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2 transition-opacity ${isFetching ? 'opacity-60' : ''}`}>
-            <CifraSede titulo="Celulares y equipos" valor={numero(unidadesVigentes(total, 'equipo'))}
-              detalle={`${numero(total.unidades.equipo.pendiente)} pendientes · ${numero(total.unidades.equipo.pagado)} pagados`}
-              tono="text-blue-600" />
-            <CifraSede titulo="Accesorios" valor={numero(unidadesVigentes(total, 'accesorio'))}
-              detalle={`${numero(total.unidades.accesorio.pendiente)} pendientes · ${numero(total.unidades.accesorio.pagado)} pagados`}
-              tono="text-violet-600" />
-            <CifraSede titulo="Activos por cobrar" valor={numero(total.activos)}
-              detalle={`${numero(total.saldados)} documentos pagados`} tono="text-amber-600" />
-            <CifraSede titulo="Valor del período" valor={formatCOP(total.valor)}
-              detalle={`${numero(total.documentos)} documentos`} />
-            <CifraSede titulo="Total pagado" valor={formatCOP(total.pagado)} tono="text-green-600" />
-            <CifraSede titulo="Total debido" valor={formatCOP(total.debe)} detalle="capital, sin mora" tono="text-red-600" />
+          <div className={`flex flex-col gap-2 transition-opacity ${isFetching ? 'opacity-60' : ''}`}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <CifraSede titulo="Unidades" valor={numero(unidadesVigentes(total))}
+                detalle={`${numero(total.unidades.pendiente)} pendientes · ${numero(total.unidades.pagado)} pagadas`}
+                tono="text-blue-600" />
+              <CifraSede titulo="Activos por cobrar" valor={numero(total.activos)}
+                detalle={`${numero(total.saldados)} documentos pagados`} tono="text-amber-600" />
+              <CifraSede titulo="Valor total" valor={formatCOP(total.valor)}
+                detalle={`${numero(total.documentos)} documentos`} />
+              <CifraSede titulo="Total pagado" valor={formatCOP(total.pagado)} tono="text-green-600" />
+              <CifraSede titulo="Total debido" valor={formatCOP(total.debe)} detalle="capital, sin mora" tono="text-red-600" />
+              <CifraSede titulo="Líneas" valor={numero(lineas.length)}
+                detalle={lineas[0] ? `La que más vendió: ${lineas[0].nombre}` : 'sin movimiento'} tono="text-violet-600" />
+            </div>
+            {lineas.length > 0 && (
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                {lineas.slice(0, LINEAS_EN_PREVIA).map((l) => (
+                  <div key={l.nombre} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs
+                    border-b border-gray-100 last:border-b-0">
+                    <span className="font-medium text-gray-800 truncate">{l.nombre}</span>
+                    <span className="flex items-center gap-3 flex-shrink-0 tabular-nums">
+                      <span className="text-gray-500">{numero(unidadesVigentes(l))} uds</span>
+                      <span className="font-semibold text-gray-900">{formatCOP(l.valor)}</span>
+                      {Number(l.debe) > 0 && <span className="text-red-600">debe {formatCOP(l.debe)}</span>}
+                    </span>
+                  </div>
+                ))}
+                {lineas.length > LINEAS_EN_PREVIA && (
+                  <p className="px-3 py-1.5 text-[11px] text-gray-400 bg-gray-50">
+                    y {lineas.length - LINEAS_EN_PREVIA} línea{lineas.length - LINEAS_EN_PREVIA !== 1 ? 's' : ''} más en el PDF
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )
       )}

@@ -228,6 +228,34 @@ const armarReporte = ({ lineas = [], prestamos = [], empleados = [] }) => {
 };
 
 // ─── Consultas ──────────────────────────────────────────────────────────────
+// La LÍNEA de producto (iPhone, Samsung, Accesorios…) de lo vendido o prestado.
+// Primero por la unidad misma —el IMEI en la sede del documento, o el producto
+// por cantidad—; si ya no existe, por el NOMBRE en esa sede. Subconsultas con
+// LIMIT 1 y no JOIN: un IMEI vive en varias filas de `seriales` y un JOIN
+// repetiría la línea (es el mismo criterio de `reportes.SQL_LINEA_NOMBRE`).
+// La usa el reporte por sede para decir qué se vendió de cada línea.
+const SQL_LINEA = (a, suc) => `
+  COALESCE(
+    CASE WHEN NULLIF(BTRIM(${a}.imei), '') IS NOT NULL THEN (
+      SELECT lp.nombre
+        FROM seriales s_l
+        JOIN productos_serial ps_l ON ps_l.id = s_l.producto_id AND ps_l.sucursal_id = ${suc}
+        JOIN lineas_producto  lp   ON lp.id   = ps_l.linea_id
+       WHERE s_l.imei = ${a}.imei
+       ORDER BY s_l.id DESC
+       LIMIT 1
+    ) ELSE (
+      SELECT lp.nombre
+        FROM productos_cantidad pc_l
+        JOIN lineas_producto lp ON lp.id = pc_l.linea_id
+       WHERE pc_l.id = ${a}.producto_id
+       LIMIT 1
+    ) END,
+    (SELECT lp.nombre FROM productos_serial ps_n JOIN lineas_producto lp ON lp.id = ps_n.linea_id
+      WHERE ps_n.nombre = ${a}.nombre_producto AND ps_n.sucursal_id = ${suc} LIMIT 1),
+    (SELECT lp.nombre FROM productos_cantidad pc_n JOIN lineas_producto lp ON lp.id = pc_n.linea_id
+      WHERE pc_n.nombre = ${a}.nombre_producto AND pc_n.sucursal_id = ${suc} LIMIT 1)
+  )`;
 
 const _lineasFactura = async ({ sucursalId, desde, hasta, usuarioId, soloEquipos }) => {
   const { rows } = await pool.query(`
@@ -243,6 +271,7 @@ const _lineasFactura = async ({ sucursalId, desde, hasta, usuarioId, soloEquipos
       -- Por to_jsonb y no por nombre: sin la migración de obsequios la columna
       -- no existe y nombrarla tumbaría el reporte entero.
       (to_jsonb(l) ->> 'obsequio') AS obsequio,
+      ${SQL_LINEA('l', 'f.sucursal_id')} AS linea_nombre,
       cr.id AS credito_id, cr.estado AS credito_estado,
       cr.valor_total, cr.cuota_inicial, cr.total_abonado, cr.ultimo_abono_txt
     FROM facturas f
@@ -282,6 +311,7 @@ const _prestamos = async ({ sucursalId, desde, hasta, usuarioId, soloEquipos }) 
       p.nombre_producto, p.imei, p.cantidad_prestada, p.valor_prestamo, p.total_abonado,
       (to_jsonb(p) ->> 'atributo_label') AS atributo_label,
       (to_jsonb(p) ->> 'variante_label') AS variante_label,
+      ${SQL_LINEA('p', 'p.sucursal_id')} AS linea_nombre,
       (SELECT TO_CHAR(MAX(ab.fecha), 'DD/MM/YYYY')
          FROM abonos_prestamo ab
         WHERE ab.prestamo_id = p.id AND NOT ab.anulado) AS ultimo_abono_txt
