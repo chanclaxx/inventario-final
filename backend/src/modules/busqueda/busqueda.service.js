@@ -309,10 +309,32 @@ const buscarCompras = async (q, modo, negocioId, sucursalId, rol, proveedorIds =
 // Los filtros de CARGO («con mora», «con interés») se aplican DESPUÉS de
 // calcular: lo pendiente se deriva y no hay columna que filtrar. El SQL ya
 // descartó lo que seguro no podía tenerlo.
+//
+// SEDE: la de la cabecera, también para el admin. Antes el admin buscaba en
+// TODO el negocio y la sede seleccionada no hacía nada (reportado oct-2026);
+// `req.sucursal_id` ya trae la que eligió (o la primera activa). `suc`
+// explícito sigue mandando para quien lo pida.
+//
+// CRÉDITOS: las facturas a crédito salen con los mismos filtros, en su propia
+// lista (`creditos`), con la mora y el interés del mismo motor. `tipo`:
+// 'companero' no trae créditos (no existen), 'credito' trae SOLO créditos.
+const _conCargos = (filas, cargo) => filas
+  .map((d) => ({
+    ...d,
+    dias_vencidos:    Number(d.dias_vencidos || 0),
+    dias_para_vencer: d.dias_para_vencer == null ? null : Number(d.dias_para_vencer),
+    mora_pendiente:    Number(d.mora?.pendiente || 0),
+    interes_pendiente: Number(d.interes?.pendiente || 0),
+  }))
+  .filter((d) => (cargo === 'mora'    ? d.mora_pendiente    > 0 : true))
+  .filter((d) => (cargo === 'interes' ? d.interes_pendiente > 0 : true));
+
 const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
   const admin = _esAdmin(rol);
   const { suc, ...filtrosSinSuc } = filtros;
-  const filtroSucursal = admin ? (suc ? Number(suc) : null) : sucursalId;
+  const filtroSucursal = admin ? (Number(suc) || sucursalId || null) : sucursalId;
+  const soloCreditos = filtrosSinSuc.tipo === 'credito';
+  const sinCreditos  = filtrosSinSuc.tipo === 'companero';
 
   // «Por vencer» usa la ventana del aviso de cobros, configurable en Ajustes.
   const { diasAvisoPrevio, hoyBogota } = require('../notificaciones/notificaciones.alertas');
@@ -320,24 +342,25 @@ const buscarPrestamos = async (filtros, negocioId, sucursalId, rol) => {
   const diasAviso = await diasAvisoPrevio(negocioId);
   const contexto  = { hoy: hoyBogota(), diasAviso };
 
-  const [filas, abonosTotales] = await Promise.all([
-    repo.buscarPrestamos(filtrosSinSuc, negocioId, filtroSucursal, contexto),
-    repo.buscarAbonosTotales(filtrosSinSuc, negocioId, filtroSucursal),
+  const [filas, abonosTotales, filasCredito] = await Promise.all([
+    soloCreditos ? [] : repo.buscarPrestamos(filtrosSinSuc, negocioId, filtroSucursal, contexto),
+    soloCreditos ? [] : repo.buscarAbonosTotales(filtrosSinSuc, negocioId, filtroSucursal),
+    sinCreditos  ? [] : repo.buscarCreditos(filtrosSinSuc, negocioId, filtroSucursal, contexto),
   ]);
 
-  const anotados = await moraService.anotarLista(filas, 'prestamo');
-  const prestamos = anotados
-    .map((p) => ({
-      ...p,
-      dias_vencidos:    Number(p.dias_vencidos || 0),
-      dias_para_vencer: p.dias_para_vencer == null ? null : Number(p.dias_para_vencer),
-      mora_pendiente:    Number(p.mora?.pendiente || 0),
-      interes_pendiente: Number(p.interes?.pendiente || 0),
-    }))
-    .filter((p) => (filtrosSinSuc.cargo === 'mora'    ? p.mora_pendiente    > 0 : true))
-    .filter((p) => (filtrosSinSuc.cargo === 'interes' ? p.interes_pendiente > 0 : true));
+  const [anotados, creditosAnotados] = await Promise.all([
+    moraService.anotarLista(filas, 'prestamo'),
+    moraService.anotarLista(filasCredito, 'credito'),
+  ]);
 
-  return { prestamos, abonosTotales, dias_aviso: diasAviso };
+  return {
+    prestamos: _conCargos(anotados || [], filtrosSinSuc.cargo),
+    // `es_credito` es la marca que la pantalla usa para agrupar y pintar.
+    creditos:  _conCargos(creditosAnotados || [], filtrosSinSuc.cargo).map((c) => ({ ...c, es_credito: true })),
+    abonosTotales,
+    dias_aviso: diasAviso,
+    sucursal_id: filtroSucursal,
+  };
 };
 
 const getHistorialCantidad = async (productoId, negocioId) =>

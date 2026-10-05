@@ -689,10 +689,27 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > urgente» se esconden (el orden por defecto pasa a «Mayor deuda»); sin interés,
 > «Con interés». Las tarjetas de resumen no dependen de eso: salen solo si hay
 > algo que contar, así que un negocio que apagó la mora con préstamos que aún
-> tienen fecha sigue viéndolos. Sin selector de sucursal: el admin busca en
-> todas, los demás en la suya (lo impone el backend).
-> Prueba: `53-busqueda-prestamos` (53; la sección 1 compara el filtro «Vencidos»
-> contra la alerta real y la 7 importa la lógica de agrupación del frontend).
+> tienen fecha sigue viéndolos.
+> **La SEDE es la de la cabecera, también para el admin** (oct-2026, «salen los
+> préstamos de todas las sedes»): el admin buscaba en todo el negocio aunque
+> tuviera una sede elegida. Ahora usa `req.sucursal_id` (`?suc` explícito sigue
+> mandando) y la sede va en la `queryKey`, o cambiarla mostraría lo de la
+> anterior. Los demás, en la suya, como siempre.
+> **Y salen las FACTURAS A CRÉDITO** (`repo.buscarCreditos`, lista `creditos`
+> con `es_credito`): la búsqueda solo leía `prestamos`. Mismos filtros y la MISMA
+> regla de situación (`SQL_SITUACION`/`FILTRO_SITUACION`/`PRECONDICION_CARGO`
+> reciben el alias), mora e interés por `anotarLista(…, 'credito')`. Busca por
+> nombre, cédula, celular, número de factura y producto/IMEI de las líneas
+> (EXISTS: un JOIN repetiría el crédito por línea). `tipo=credito` = solo
+> créditos; `companero` no trae ninguno; el estado es literal (Devuelto no
+> existe en créditos, Cancelado no existe en préstamos). En pantalla
+> (`TarjetaResultadoCredito`) se agrupan con la clave de la pestaña Créditos
+> (`credito_<cédula o nombre>`) y «Abrir crédito» lleva a esa ficha; el Excel de
+> la búsqueda sigue siendo solo de préstamos.
+> Prueba: `53-busqueda-prestamos` (98; la sección 1 compara el filtro «Vencidos»
+> contra la alerta real, la 7 importa la lógica de agrupación del frontend y la 9
+> la sede y los créditos — activos de una sede == los de la pestaña Créditos,
+> ids y total a pagar).
 
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
 > y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede

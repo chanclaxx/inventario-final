@@ -22,13 +22,22 @@ const _activo = (p) => p.estado === 'Activo';
  * nombre normalizado y no tiene ficha que abrir.
  */
 export const claveBusquedaPersona = (p) => {
+  // Una factura a crédito se agrupa con la clave de la pestaña Créditos
+  // (`cedula || nombre_cliente`, ver TabCreditos): así «Abrir su cuenta
+  // completa» abre SU ficha de créditos. Va aparte de sus préstamos porque son
+  // dos fichas distintas.
+  if (p.es_credito)     return `credito_${p.cedula || p.nombre_cliente || p.id}`;
   if (p.prestatario_id) return `prestatario_${p.prestatario_id}`;
   if (p.cliente_id)     return `cliente_${p.cliente_id}`;
   return `libre_${_norm(p.prestatario) || p.id}`;
 };
 
-export const nombrePrestamo = (p) =>
-  p.prestatario_nombre || p.cliente_nombre || p.prestatario || 'Sin nombre';
+export const nombrePrestamo = (p) => (p.es_credito
+  ? (p.nombre_cliente || p.cliente_nombre || 'Sin nombre')
+  : (p.prestatario_nombre || p.cliente_nombre || p.prestatario || 'Sin nombre'));
+
+/** Préstamos y créditos comparten ids: la clave de React necesita el tipo. */
+export const claveDocumento = (p) => `${p.es_credito ? 'c' : 'p'}-${p.id}`;
 
 /** Agrupa los préstamos encontrados por persona, con sus totales y alertas. */
 export const agruparPorPersona = (prestamos = []) => {
@@ -38,10 +47,11 @@ export const agruparPorPersona = (prestamos = []) => {
     if (!mapa.has(clave)) {
       mapa.set(clave, {
         clave,
-        tipo:   p.prestatario_id ? 'companero' : p.cliente_id ? 'cliente' : 'libre',
+        tipo:   p.es_credito ? 'credito'
+          : p.prestatario_id ? 'companero' : p.cliente_id ? 'cliente' : 'libre',
         nombre: nombrePrestamo(p),
         cedula: p.cliente_cedula || p.cedula || null,
-        telefono: p.telefono || null,
+        telefono: p.telefono || p.celular || null,
         prestamos: [],
         n_activos: 0, n_cerrados: 0,
         saldo: 0, mora: 0, interes: 0, total_a_pagar: 0,

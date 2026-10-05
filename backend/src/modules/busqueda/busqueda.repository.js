@@ -544,12 +544,15 @@ const buscarComprasPorTexto = async (q, negocioId, sucursalId, proveedorIds = nu
 //
 // El estado se compara con IS DISTINCT FROM: un estado NULL es cerrado, igual
 // que en el resumen de personas.
-const SQL_SITUACION = (hoy, dias) => `
+//
+// `a` es el alias de la tabla: la MISMA regla sirve para préstamos (`p`) y para
+// créditos (`c`), que también salen en la búsqueda. Dos copias se separarían.
+const SQL_SITUACION = (hoy, dias, a = 'p') => `
   CASE
-    WHEN p.estado IS DISTINCT FROM 'Activo'            THEN 'cerrado'
-    WHEN p.fecha_limite IS NULL                         THEN 'sin_plazo'
-    WHEN p.fecha_limite <  ${hoy}::date                 THEN 'vencido'
-    WHEN p.fecha_limite <= ${hoy}::date + ${dias}::int  THEN 'por_vencer'
+    WHEN ${a}.estado IS DISTINCT FROM 'Activo'            THEN 'cerrado'
+    WHEN ${a}.fecha_limite IS NULL                         THEN 'sin_plazo'
+    WHEN ${a}.fecha_limite <  ${hoy}::date                 THEN 'vencido'
+    WHEN ${a}.fecha_limite <= ${hoy}::date + ${dias}::int  THEN 'por_vencer'
     ELSE 'al_dia'
   END`;
 
@@ -557,11 +560,11 @@ const SQL_SITUACION = (hoy, dias) => `
 // SQL_SITUACION escritos como condición, para que filtrar por «vencido» y leer
 // la situación de la fila nunca discrepen.
 const FILTRO_SITUACION = {
-  vencido:    (h)    => `p.estado = 'Activo' AND p.fecha_limite < ${h}::date`,
-  por_vencer: (h, d) => `p.estado = 'Activo' AND p.fecha_limite >= ${h}::date
-                          AND p.fecha_limite <= ${h}::date + ${d}::int`,
-  al_dia:     (h, d) => `p.estado = 'Activo' AND p.fecha_limite > ${h}::date + ${d}::int`,
-  sin_plazo:  ()     => `p.estado = 'Activo' AND p.fecha_limite IS NULL`,
+  vencido:    (h, d, a = 'p') => `${a}.estado = 'Activo' AND ${a}.fecha_limite < ${h}::date`,
+  por_vencer: (h, d, a = 'p') => `${a}.estado = 'Activo' AND ${a}.fecha_limite >= ${h}::date
+                                   AND ${a}.fecha_limite <= ${h}::date + ${d}::int`,
+  al_dia:     (h, d, a = 'p') => `${a}.estado = 'Activo' AND ${a}.fecha_limite > ${h}::date + ${d}::int`,
+  sin_plazo:  (h, d, a = 'p') => `${a}.estado = 'Activo' AND ${a}.fecha_limite IS NULL`,
 };
 
 // Precondición en SQL de los filtros de CARGO. La cifra pendiente la calcula
@@ -570,9 +573,9 @@ const FILTRO_SITUACION = {
 // mora» a secas recorrería todo el historial del negocio —9.976 filas en
 // Cellsite— para quedarse con veinte.
 const PRECONDICION_CARGO = {
-  mora:    (h) => `p.estado = 'Activo' AND p.mora_condicion IS NOT NULL
-                   AND p.fecha_limite < ${h}::date`,
-  interes: ()  => `p.estado = 'Activo' AND p.interes_condicion IS NOT NULL`,
+  mora:    (h, a = 'p') => `${a}.estado = 'Activo' AND ${a}.mora_condicion IS NOT NULL
+                            AND ${a}.fecha_limite < ${h}::date`,
+  interes: (h, a = 'p') => `${a}.estado = 'Activo' AND ${a}.interes_condicion IS NOT NULL`,
 };
 
 const buscarPrestamos = async (
@@ -680,6 +683,113 @@ const buscarPrestamos = async (
   return rows;
 };
 
+// ─── Búsqueda de FACTURAS A CRÉDITO con los mismos filtros ───────────────────
+//
+// La búsqueda de Préstamos solo leía `prestamos`: una venta a crédito no salía
+// por nombre, cédula ni IMEI, ni en «Vencidos», aunque el aviso de cobros sí la
+// cuenta. Mismos filtros y misma regla de situación (`SQL_SITUACION` con el
+// alias `c`); la mora y el interés los resuelve después `mora.service`, como
+// en la pestaña Créditos.
+//   · estado: literal sobre `creditos.estado` (Activo / Saldado / Cancelado):
+//     «Devuelto» no existe en créditos y por eso no trae ninguno.
+//   · tipo: lo decide el service (los compañeros no tienen créditos).
+//   · fecha: la de la venta (`creditos.creado_en`, TIMESTAMP en hora Bogotá).
+const buscarCreditos = async (
+  { q, estado, fechaDesde, fechaHasta, situacion, cargo },
+  negocioId, sucursalId, { hoy, diasAviso },
+) => {
+  const params     = [negocioId, hoy, diasAviso];
+  const conditions = ['su.negocio_id = $1'];
+  const H = '$2';
+  const D = '$3';
+  let   i          = 4;
+
+  if (sucursalId) {
+    conditions.push(`c.sucursal_id = $${i}`);
+    params.push(sucursalId);
+    i++;
+  }
+
+  if (q && q.trim()) {
+    // Productos e IMEI viven en las líneas de la factura: EXISTS y no JOIN, o
+    // el crédito saldría repetido una vez por línea.
+    conditions.push(`(
+      ${sn("COALESCE(f.nombre_cliente, '')")}      LIKE $${i}
+      OR ${sn("COALESCE(cl.nombre, '')")}          LIKE $${i}
+      OR LOWER(COALESCE(f.cedula, ''))             LIKE $${i}
+      OR LOWER(COALESCE(cl.cedula, ''))            LIKE $${i}
+      OR LOWER(COALESCE(f.celular, ''))            LIKE $${i}
+      OR COALESCE(f.numero, f.id)::text            LIKE $${i}
+      OR EXISTS (
+        SELECT 1 FROM lineas_factura lf
+         WHERE lf.factura_id = f.id
+           AND (${sn("COALESCE(lf.nombre_producto, '')")} LIKE $${i}
+                OR LOWER(COALESCE(lf.imei, '')) LIKE $${i})
+      )
+    )`);
+    params.push(`%${normalizarBusqueda(q)}%`);
+    i++;
+  }
+
+  if (estado) {
+    conditions.push(`c.estado = $${i}`);
+    params.push(estado);
+    i++;
+  }
+
+  if (FILTRO_SITUACION[situacion]) conditions.push(`(${FILTRO_SITUACION[situacion](H, D, 'c')})`);
+  if (PRECONDICION_CARGO[cargo])   conditions.push(`(${PRECONDICION_CARGO[cargo](H, 'c')})`);
+
+  if (fechaDesde) {
+    conditions.push(`c.creado_en::date >= $${i}`);
+    params.push(fechaDesde);
+    i++;
+  }
+  if (fechaHasta) {
+    conditions.push(`c.creado_en::date <= $${i}`);
+    params.push(fechaHasta);
+    i++;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT
+      c.id, c.creado_en AS fecha, c.estado,
+      c.valor_total, c.cuota_inicial, c.total_abonado,
+      c.cliente_id, c.sucursal_id,
+      -- Lo que necesita mora.service para calcular la mora y el interés.
+      c.fecha_limite, c.mora_condicion, c.interes_condicion, c.interes_desde,
+      su.nombre AS sucursal_nombre,
+      f.id AS factura_id, f.numero AS factura_numero,
+      f.nombre_cliente, f.cedula, f.celular,
+      cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula,
+      (c.valor_total - c.cuota_inicial - c.total_abonado) AS saldo_pendiente,
+      lin.productos, lin.nombre_producto, lin.imeis,
+      ${SQL_SITUACION(H, D, 'c')} AS situacion,
+      CASE WHEN c.estado = 'Activo' AND c.fecha_limite < ${H}::date
+           THEN (${H}::date - c.fecha_limite) ELSE 0 END           AS dias_vencidos,
+      CASE WHEN c.estado = 'Activo' AND c.fecha_limite >= ${H}::date
+           THEN (c.fecha_limite - ${H}::date) ELSE NULL END        AS dias_para_vencer
+    FROM creditos c
+    JOIN facturas   f  ON f.id  = c.factura_id
+    JOIN sucursales su ON su.id = c.sucursal_id
+    LEFT JOIN clientes cl ON cl.id = c.cliente_id
+    LEFT JOIN LATERAL (
+      SELECT
+        JSON_AGG(JSON_BUILD_OBJECT(
+          'nombre', lf.nombre_producto, 'imei', lf.imei,
+          'cantidad', lf.cantidad, 'cantidad_devuelta', COALESCE(lf.cantidad_devuelta, 0)
+        ) ORDER BY lf.id) AS productos,
+        STRING_AGG(lf.nombre_producto, ' · ' ORDER BY lf.id) AS nombre_producto,
+        STRING_AGG(NULLIF(BTRIM(lf.imei), ''), ' · ' ORDER BY lf.id) AS imeis
+      FROM lineas_factura lf
+      WHERE lf.factura_id = f.id
+    ) lin ON TRUE
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY c.creado_en DESC, c.id DESC
+  `, params);
+  return rows;
+};
+
 // ─── Búsqueda de abonos totales con filtros ───────────────────────────────────
 
 const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, sucursalId) => {
@@ -735,5 +845,5 @@ module.exports = {
   buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, buscarSerialPorCodigoExacto,
   getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,
-  buscarPrestamos, buscarAbonosTotales,
+  buscarPrestamos, buscarCreditos, buscarAbonosTotales,
 };

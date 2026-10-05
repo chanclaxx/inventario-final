@@ -254,5 +254,122 @@ check('★ «Con mora» y «Con interés» dependen de su opt-in',
 check('sin mora, «Más urgente» no se ofrece y el orden por defecto es la deuda',
   pagina.includes("o.id !== 'urgencia' || moraActiva") && pagina.includes("(moraActiva ? 'urgencia' : 'deuda')"), true);
 
+// ═══════════════════════════════════════════════════════════════════════════
+seccion('9. La sede seleccionada y las facturas a crédito (oct-2026)');
+// ═══════════════════════════════════════════════════════════════════════════
+// Reportado: «salen los préstamos de todas las sedes» — el admin buscaba en
+// todo el negocio aunque tuviera una sede elegida arriba — y las facturas a
+// crédito no salían en la búsqueda. Diana tiene dos créditos en Centro (uno
+// vencido con mora, uno saldado), Ernesto uno en Norte, y el negocio 2 uno.
+await db.exec(`
+  INSERT INTO facturas (id, numero, sucursal_id, usuario_id, cliente_id, nombre_cliente, cedula, celular, estado, fecha) VALUES
+    (901, 5001, 1, 1, 1,    'Diana',   '111222', '320111', 'Credito', $1),
+    (902, 5002, 1, 1, 1,    'Diana',   '111222', '320111', 'Credito', $1),
+    (903, 5003, 2, 1, NULL, 'Ernesto', '777888', '315000', 'Credito', $1),
+    (904, 5004, 3, 1, NULL, 'Ajeno',   '999',    '300',    'Credito', $1);
+  `.replace(/\$1/g, `'${dia(-40)} 10:00:00'`));
+await db.exec(`
+  INSERT INTO lineas_factura (factura_id, nombre_producto, imei, cantidad, precio) VALUES
+    (901, 'Moto G84', '357000999', 1, 900000),
+    (901, 'Vidrio',   NULL,        1, 20000),
+    (902, 'Audífonos', NULL,       1, 150000),
+    (903, 'Redmi 13', '358000111', 1, 700000),
+    (904, 'De otro',  '359000000', 1, 1);
+`);
+await db.query(`
+  INSERT INTO creditos (id, factura_id, cliente_id, sucursal_id, valor_total, cuota_inicial, total_abonado,
+                        estado, creado_en, fecha_limite, mora_condicion) VALUES
+    (801, 901, 1,    1, 920000, 120000, 100000, 'Activo',  $1, $2, $3::jsonb),
+    (802, 902, 1,    1, 150000, 0,      150000, 'Saldado', $1, NULL, NULL),
+    (803, 903, NULL, 2, 700000, 0,      0,      'Activo',  $1, $4, NULL),
+    (804, 904, NULL, 3, 1,      0,      0,      'Activo',  $1, $2, NULL)
+`, [`${dia(-40)} 10:00:00`, dia(-5), JSON.stringify(MORA), dia(10)]);
+
+const credIds = (r) => (r.creditos || []).map((c) => c.id).sort((a, b) => a - b);
+const sedesDe = (r) => [...new Set([...(r.prestamos || []), ...(r.creditos || [])].map((x) => x.sucursal_id))].sort();
+
+// — La sede —
+const adminCentro = await buscar({ estado: 'Activo' }, { sucursalId: 1 });
+check('★★ el admin con Centro elegido ve SOLO Centro (préstamos y créditos)', sedesDe(adminCentro), [1]);
+check('★ la Funda (Norte) ya no se cuela en Centro', ids(adminCentro).includes(ID.Funda), false);
+const adminNorte = await buscar({ estado: 'Activo' }, { sucursalId: 2 });
+check('★ y con Norte elegido, solo Norte', sedesDe(adminNorte), [2]);
+check('Norte: la Funda y el crédito de Ernesto', [ids(adminNorte), credIds(adminNorte)], [[ID.Funda], [803]]);
+check('el admin todavía puede pedir otra sede explícita con ?suc',
+  sedesDe(await buscar({ estado: 'Activo', suc: '2' }, { sucursalId: 1 })), [2]);
+check('la respuesta dice de qué sede es', adminCentro.sucursal_id, 1);
+check('un vendedor sigue en la suya, también para créditos',
+  sedesDe(await buscar({ estado: 'Activo', suc: '2' }, { rol: 'vendedor', sucursalId: 1 })), [1]);
+
+// — Los créditos salen —
+check('★★ las facturas a crédito salen en la búsqueda', credIds(adminCentro), [801]);
+check('★ marcadas como crédito', adminCentro.creditos.every((c) => c.es_credito === true), true);
+check('★ por la cédula de la factura', credIds(await buscar({ q: '111222' }, { sucursalId: 1 })), [801, 802]);
+check('★ por el IMEI de una línea', credIds(await buscar({ q: '357000999' }, { sucursalId: 1 })), [801]);
+check('por el producto', credIds(await buscar({ q: 'audifonos' }, { sucursalId: 1 })), [802]);
+check('por el número de factura', credIds(await buscar({ q: '5001' }, { sucursalId: 1 })), [801]);
+check('por el celular', credIds(await buscar({ q: '320111' }, { sucursalId: 1 })), [801, 802]);
+check('un crédito con dos líneas sale UNA vez (EXISTS, no JOIN)',
+  (await buscar({ q: 'diana' }, { sucursalId: 1 })).creditos.filter((c) => c.id === 801).length, 1);
+check('el otro negocio no se cuela', credIds(await buscar({ q: 'otro' }, { sucursalId: 1 })), []);
+
+const c801 = adminCentro.creditos.find((c) => c.id === 801);
+check('★ saldo = valor − cuota inicial − abonado', Number(c801.saldo_pendiente), 700000);
+check('trae sus productos con el IMEI', c801.productos.map((l) => l.imei), ['357000999', null]);
+check('y la factura', c801.factura_numero, 5001);
+
+// — Mismos filtros —
+check('★ tipo «Créditos» trae solo créditos', (await buscar({ tipo: 'credito' }, { sucursalId: 1 })).prestamos.length, 0);
+check('tipo «Créditos» con estado', credIds(await buscar({ tipo: 'credito', estado: 'Saldado' }, { sucursalId: 1 })), [802]);
+check('★ tipo «Compañeros» no trae créditos', (await buscar({ tipo: 'companero' }, { sucursalId: 1 })).creditos.length, 0);
+check('estado «Devuelto» no trae créditos (no existe en créditos)',
+  (await buscar({ estado: 'Devuelto' }, { sucursalId: 1 })).creditos.length, 0);
+const vencCentro = await buscar({ situacion: 'vencido' }, { sucursalId: 1 });
+check('★ «Vencidos» trae el crédito vencido', credIds(vencCentro), [801]);
+check('con sus días de atraso', vencCentro.creditos[0]?.dias_vencidos, 5);
+check('★ y su mora, del mismo motor', vencCentro.creditos[0]?.mora_pendiente > 0, true);
+check('«Con mora» lo incluye', credIds(await buscar({ cargo: 'mora' }, { sucursalId: 1 })), [801]);
+check('«Por vencer» no lo trae; el de Norte vence en 10 días (fuera de la ventana de 3)',
+  credIds(await buscar({ situacion: 'por_vencer' }, { sucursalId: 2 })), []);
+check('fecha de la venta: antes de la venta no sale',
+  credIds(await buscar({ tipo: 'credito', fechaDesde: dia(-30) }, { sucursalId: 1 })), []);
+check('y desde antes de la venta sí',
+  credIds(await buscar({ tipo: 'credito', fechaDesde: dia(-45), fechaHasta: dia(-35) }, { sucursalId: 1 })), [801, 802]);
+
+// — Cuadra con el aviso y con la pestaña Créditos —
+const vencNegocio = await buscar({ situacion: 'vencido' });
+const delAvisoCred = (await alertas.cartera(1)).vencidos.items
+  .filter((i) => i.tipo === 'credito').map((i) => i.id).sort((a, b) => a - b);
+check('★★ «Vencidos» en créditos == los créditos vencidos del aviso de cobros', credIds(vencNegocio), delAvisoCred);
+const credSvc = require(path.join(RAIZ, 'src/modules/creditos/creditos.service.js'));
+const pestana = (await credSvc.getCreditos(1, 1)).filter((c) => c.estado === 'Activo');
+check('★★ activos de Centro == los de la pestaña Créditos (ids)',
+  credIds(adminCentro), pestana.map((c) => c.id).sort((a, b) => a - b));
+check('★ y el mismo total a pagar',
+  adminCentro.creditos.reduce((s, c) => s + Number(c.total_a_pagar), 0),
+  pestana.reduce((s, c) => s + Number(c.total_a_pagar), 0));
+
+// — La lógica de la pantalla —
+const conCred = [...adminCentro.prestamos, ...adminCentro.creditos];
+const gruposCred = front.agruparPorPersona(conCred);
+const gDiana = gruposCred.find((g) => g.clave === 'credito_111222');
+check('★ el crédito se agrupa con la clave de la pestaña Créditos (cédula)', !!gDiana, true);
+check('aparte de sus préstamos (dos fichas distintas)', gruposCred.some((g) => g.clave === 'cliente_1'), true);
+check('el grupo es de tipo crédito, con su nombre', [gDiana?.tipo, gDiana?.nombre], ['credito', 'Diana']);
+check('★ el grupo debe lo que calculó el backend', gDiana?.total_a_pagar, Number(c801.total_a_pagar));
+check('la clave de React distingue préstamo y crédito con el mismo id',
+  front.claveDocumento({ id: 7 }) !== front.claveDocumento({ id: 7, es_credito: true }), true);
+check('el resumen cuenta el crédito vencido', front.resumenBusqueda(vencCentro.creditos).vencido.n, 1);
+
+const pagina9 = readFileSync(path.join(FRONT, 'pages/prestamos/PrestamosPage.jsx'), 'utf8');
+check('★ la clave de la consulta lleva la sede (cambiar de sede vuelve a buscar)',
+  pagina9.includes("queryKey: ['busqueda-prestamos', sucursalActiva,"), true);
+check('★ la pantalla junta préstamos y créditos', pagina9.includes('[...prestamosEnc, ...creditosEnc]'), true);
+check('pinta los créditos con su tarjeta', pagina9.includes('<TarjetaResultadoCredito'), true);
+check('★ abrir un crédito lleva a su ficha en Créditos',
+  pagina9.includes("clave.startsWith('credito_')") && pagina9.includes("setTabPrincipal('creditos')"), true);
+check('el filtro de tipo ofrece «Créditos»', pagina9.includes("{ v: 'credito',   label: 'Créditos'"), true);
+check('el Excel de préstamos no recibe créditos', pagina9.includes('prestamos: prestamosEnc, abonosTotales'), true);
+
 console.log(`\n${pasados} verificaciones pasaron · ${fallos} fallaron`);
 process.exit(fallos ? 1 : 0);

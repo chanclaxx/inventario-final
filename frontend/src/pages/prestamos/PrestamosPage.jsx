@@ -37,6 +37,7 @@ import { ModalAbonoTotal }                      from './ModalAbonoTotal';
 import { BadgeVencidosPersona }                 from './BadgeVencidosPersona';
 import {
   agruparPorPersona, resumenBusqueda, ordenarGrupos, ordenarPrestamos, ORDENES_BUSQUEDA,
+  claveDocumento,
 }                                               from '../../utils/busquedaPrestamos';
 import { useMetodosPago }                       from '../../hooks/useMetodosPago';
 import { useMora }                              from '../../hooks/useMora';
@@ -2427,17 +2428,22 @@ function TabDomiciliarios() {
 
 // ─── Tab: Búsqueda de préstamos ──────────────────────────────────────────────
 
+// «Devuelto» solo existe en préstamos y «Cancelado» solo en créditos: cada uno
+// filtra literal sobre su tabla, así que el otro simplemente no trae nada.
 const ESTADOS_FILTRO = [
-  { v: '',         label: 'Todos'    },
-  { v: 'Activo',   label: 'Activo'   },
-  { v: 'Saldado',  label: 'Saldado'  },
-  { v: 'Devuelto', label: 'Devuelto' },
+  { v: '',          label: 'Todos'     },
+  { v: 'Activo',    label: 'Activo'    },
+  { v: 'Saldado',   label: 'Saldado'   },
+  { v: 'Devuelto',  label: 'Devuelto'  },
+  { v: 'Cancelado', label: 'Cancelado' },
 ];
 
+// «Créditos» = solo facturas a crédito. «Compañeros» no trae créditos (no hay).
 const TIPOS_FILTRO = [
-  { v: '',          label: 'Todos',      Icn: Users },
-  { v: 'companero', label: 'Compañeros', Icn: User  },
-  { v: 'cliente',   label: 'Clientes',   Icn: Users },
+  { v: '',          label: 'Todos',      Icn: Users      },
+  { v: 'companero', label: 'Compañeros', Icn: User       },
+  { v: 'cliente',   label: 'Clientes',   Icn: Users      },
+  { v: 'credito',   label: 'Créditos',   Icn: CreditCard },
 ];
 
 function TipoPrestamoBadge({ prestatarioId }) {
@@ -2586,6 +2592,86 @@ function TarjetaResultadoPrestamo({ prestamo, onAbonar, onDevolver, onEditar }) 
   );
 }
 
+/**
+ * Una factura a crédito en los resultados. Muestra lo mismo que su tarjeta en
+ * la pestaña Créditos (productos, saldo, situación y cargos, del mismo motor)
+ * y lleva a su ficha para abonar: los modales de abono, saldar y devolver
+ * viven allá, con sus documentos.
+ */
+function TarjetaResultadoCredito({ credito, onAbrir }) {
+  const base     = Number(credito.valor_total) - Number(credito.cuota_inicial || 0);
+  const saldo    = Math.max(0, Number(credito.saldo_pendiente));
+  const progreso = base > 0 ? Math.min(100, (Number(credito.total_abonado) / base) * 100) : 0;
+  const esSaldado = credito.estado === 'Saldado';
+  const productos = Array.isArray(credito.productos) ? credito.productos : [];
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5
+              rounded-full border bg-amber-50 text-amber-700 border-amber-200">
+              <CreditCard size={9} /> Crédito
+            </span>
+            <Badge variant={credito.estado === 'Activo' ? 'blue' : esSaldado ? 'green' : 'gray'}>
+              {credito.estado}
+            </Badge>
+            <BadgeSituacion prestamo={credito} />
+          </div>
+          <p className="text-sm font-semibold text-gray-900 truncate">
+            {credito.nombre_cliente || credito.cliente_nombre}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Factura #{credito.factura_numero ?? credito.factura_id}
+          </p>
+          {productos.length ? productos.map((l, i) => (
+            <div key={i} className="mt-0.5">
+              <p className="text-sm text-gray-700 truncate">
+                {l.nombre}
+                {Number(l.cantidad) > 1 && <span className="text-xs text-gray-400"> × {l.cantidad}</span>}
+                {Number(l.cantidad_devuelta) > 0 && (
+                  <span className="text-xs text-orange-500"> · devolvió {l.cantidad_devuelta}</span>
+                )}
+              </p>
+              {l.imei && <p className="text-xs text-gray-400 font-mono">{l.imei}</p>}
+            </div>
+          )) : (
+            <p className="text-sm text-gray-700 truncate mt-0.5">{credito.nombre_producto}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">
+            {formatFechaHora(credito.fecha)} · {credito.sucursal_nombre}
+          </p>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p className="text-sm font-bold text-gray-900">{formatCOP(Number(credito.valor_total))}</p>
+          {Number(credito.cuota_inicial) > 0 && (
+            <p className="text-xs text-gray-400 mt-0.5">Inicial: {formatCOP(Number(credito.cuota_inicial))}</p>
+          )}
+          {credito.estado === 'Activo' && saldo > 0 && (
+            <p className="text-xs text-red-500 mt-0.5">Saldo: {formatCOP(saldo)}</p>
+          )}
+          {esSaldado && <p className="text-xs text-green-600 mt-0.5">✓ Saldado</p>}
+        </div>
+      </div>
+
+      <div className="w-full bg-gray-100 rounded-full h-1">
+        <div
+          className={`h-1 rounded-full transition-all ${esSaldado ? 'bg-green-400' : 'bg-amber-500'}`}
+          style={{ width: `${progreso}%` }}
+        />
+      </div>
+
+      {onAbrir && (
+        <Button size="sm" variant={credito.estado === 'Activo' ? 'primary' : 'secondary'}
+          className="self-start" onClick={() => onAbrir(credito)}>
+          <CreditCard size={14} /> {credito.estado === 'Activo' ? 'Abrir crédito para abonar' : 'Ver crédito'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ─── Búsqueda: situación, cargos y agrupación por persona ─────────────────────
 //
 // Atajos de SITUACIÓN y de CARGO que filtran en el backend (así «Vencidos» a
@@ -2661,7 +2747,8 @@ function TarjetaGrupoPersona({ grupo, abierto, onAlternar, onAbrirPersona, rende
         className="w-full flex items-start gap-3 p-4 text-left hover:bg-gray-50/60 transition-colors">
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold
           ${grupo.tipo === 'companero' ? 'bg-blue-100 text-blue-700'
-            : grupo.tipo === 'cliente' ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-500'}`}>
+            : grupo.tipo === 'cliente' ? 'bg-violet-100 text-violet-700'
+            : grupo.tipo === 'credito' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
           {iniciales(grupo.nombre)}
         </div>
         <div className="flex-1 min-w-0">
@@ -2677,11 +2764,18 @@ function TarjetaGrupoPersona({ grupo, abierto, onAlternar, onAbrirPersona, rende
             <p className="text-xs text-gray-400">CC: {grupo.cedula}</p>
           )}
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {grupo.tipo !== 'libre' && (
+            {grupo.tipo === 'credito' ? (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5
+                rounded-full border bg-amber-50 text-amber-700 border-amber-200">
+                <CreditCard size={9} /> Créditos
+              </span>
+            ) : grupo.tipo !== 'libre' && (
               <TipoPrestamoBadge prestatarioId={grupo.tipo === 'companero' ? 1 : null} />
             )}
             <span className="text-xs bg-gray-50 text-gray-500 px-2 py-0.5 rounded-full">
-              {_plural(grupo.prestamos.length, 'préstamo', 'préstamos')}
+              {grupo.tipo === 'credito'
+                ? _plural(grupo.prestamos.length, 'crédito', 'créditos')
+                : _plural(grupo.prestamos.length, 'préstamo', 'préstamos')}
               {grupo.n_activos > 0 && grupo.n_cerrados > 0
                 ? ` · ${_plural(grupo.n_activos, 'activo', 'activos')}` : ''}
             </span>
@@ -2760,8 +2854,14 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
 
   const hasFilter = q.trim().length >= 2 || estado || tipo || situacion || cargo || fechaDesde || fechaHasta;
 
+  // La búsqueda es de la SEDE de la cabecera (el backend la lee del
+  // `sucursal_id` que inyecta el interceptor). Va en la clave para que cambiar
+  // de sede vuelva a buscar en vez de mostrar lo de la anterior.
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
+  const sucursales     = useSucursalStore((s) => s.sucursales);
+
   const { data: searchData, isLoading } = useQuery({
-    queryKey: ['busqueda-prestamos', q, estado, tipo, situacion, cargo, fechaDesde, fechaHasta],
+    queryKey: ['busqueda-prestamos', sucursalActiva, q, estado, tipo, situacion, cargo, fechaDesde, fechaHasta],
     queryFn:  () => buscarPrestamosApi({
       q: q.trim(), estado, tipo, fechaDesde, fechaHasta,
       ...(situacion && { situacion }),
@@ -2771,9 +2871,16 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
     staleTime: 30 * 1000,
   });
 
-  const resultados    = searchData?.prestamos    ?? [];
+  const prestamosEnc  = searchData?.prestamos    ?? [];
+  // Las facturas a crédito salen junto a los préstamos, con la misma situación
+  // y los mismos cargos (un backend viejo no manda `creditos`: lista vacía).
+  const creditosEnc   = (searchData?.creditos ?? []).map((c) => ({ ...c, es_credito: true }));
+  const resultados    = [...prestamosEnc, ...creditosEnc];
   const abonosTotales = searchData?.abonosTotales ?? [];
   const diasAviso     = searchData?.dias_aviso;
+  const hayCreditos   = creditosEnc.length > 0;
+  const docs = (n) => (hayCreditos ? _plural(n, 'registro', 'registros') : _plural(n, 'préstamo', 'préstamos'));
+  const nombreSede = sucursales.find((x) => x.id === (searchData?.sucursal_id ?? sucursalActiva))?.nombre;
 
   const resumen = resumenBusqueda(resultados);
   const grupos  = ordenarGrupos(agruparPorPersona(resultados), orden);
@@ -2797,15 +2904,21 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
 
   const filtrosOcultosActivos = [estado, tipo, fechaDesde, fechaHasta].filter(Boolean).length;
 
-  const renderPrestamo = (p) => (
+  const renderPrestamo = (p) => (p.es_credito ? (
+    <TarjetaResultadoCredito
+      key={claveDocumento(p)}
+      credito={p}
+      onAbrir={onAbrirPersona ? (c) => onAbrirPersona(`credito_${c.cedula || c.nombre_cliente || c.id}`) : null}
+    />
+  ) : (
     <TarjetaResultadoPrestamo
-      key={p.id}
+      key={claveDocumento(p)}
       prestamo={p}
       onAbonar={setPrestamoAbono}
       onDevolver={setPrestamoDevol}
       onEditar={setPrestamoEditar}
     />
-  );
+  ));
 
   return (
     <div className="flex flex-col gap-4">
@@ -2817,7 +2930,7 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por nombre, cédula, teléfono, IMEI, producto o línea…"
+          placeholder="Buscar préstamos y créditos por nombre, cédula, teléfono, IMEI, producto o factura…"
           className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl
             text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
         />
@@ -2925,41 +3038,49 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
 
       {hasFilter && !isLoading && resultados.length === 0 && (
         <EmptyState icon={Search} titulo="Sin resultados"
-          descripcion="No se encontraron préstamos con esos filtros" />
+          descripcion={`No se encontraron préstamos ni créditos con esos filtros${nombreSede ? ` en ${nombreSede}` : ''}`} />
       )}
 
       {resultados.length > 0 && (
         <div className="flex flex-col gap-3">
+
+          {nombreSede && (
+            <p className="text-xs text-gray-500">
+              Sucursal <span className="font-semibold text-gray-700">{nombreSede}</span>
+              {' · '}{_plural(prestamosEnc.length, 'préstamo', 'préstamos')}
+              {' · '}{_plural(creditosEnc.length, 'crédito', 'créditos')}
+            </p>
+          )}
 
           {/* Resumen de lo encontrado: cada tarjeta filtra a lo suyo */}
           <div className="flex gap-2 flex-wrap">
             {(resumen.vencido.n > 0 || situacion === 'vencido') && (
               <TarjetaResumenBusqueda tono="rojo" titulo="Vencidos"
                 valor={_plural(resumen.vencido.personas, 'persona', 'personas')}
-                detalle={_plural(resumen.vencido.n, 'préstamo', 'préstamos')}
+                detalle={docs(resumen.vencido.n)}
                 activa={situacion === 'vencido'} onClick={() => alternarSituacion('vencido')} />
             )}
             {(resumen.por_vencer.n > 0 || situacion === 'por_vencer') && (
               <TarjetaResumenBusqueda tono="ambar" titulo="Por vencer"
                 valor={_plural(resumen.por_vencer.personas, 'persona', 'personas')}
-                detalle={_plural(resumen.por_vencer.n, 'préstamo', 'préstamos')}
+                detalle={docs(resumen.por_vencer.n)}
                 activa={situacion === 'por_vencer'} onClick={() => alternarSituacion('por_vencer')} />
             )}
             {(resumen.con_mora.n > 0 || cargo === 'mora') && (
               <TarjetaResumenBusqueda tono="rojo" titulo="Mora pendiente"
                 valor={formatCOP(resumen.con_mora.valor)}
-                detalle={_plural(resumen.con_mora.n, 'préstamo', 'préstamos')}
+                detalle={docs(resumen.con_mora.n)}
                 activa={cargo === 'mora'} onClick={() => alternarCargo('mora')} />
             )}
             {(resumen.con_interes.n > 0 || cargo === 'interes') && (
               <TarjetaResumenBusqueda tono="teal" titulo="Interés pendiente"
                 valor={formatCOP(resumen.con_interes.valor)}
-                detalle={_plural(resumen.con_interes.n, 'préstamo', 'préstamos')}
+                detalle={docs(resumen.con_interes.n)}
                 activa={cargo === 'interes'} onClick={() => alternarCargo('interes')} />
             )}
             <TarjetaResumenBusqueda tono="gris" titulo="Saldo activo"
               valor={formatCOP(resumen.saldo)}
-              detalle={`${_plural(resumen.personas, 'persona', 'personas')} · ${_plural(resumen.total, 'préstamo', 'préstamos')}`}
+              detalle={`${_plural(resumen.personas, 'persona', 'personas')} · ${docs(resumen.total)}`}
               activa={false} onClick={() => { setSituacion(''); setCargo(''); }} />
           </div>
 
@@ -2987,8 +3108,11 @@ function TabBusquedaPrestamos({ onAbrirPersona }) {
                 {ordenesVisibles.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
               <Button size="sm" variant="secondary"
+                disabled={prestamosEnc.length === 0}
                 onClick={() => exportarPrestamosExcel({
-                  prestamos: resultados, abonosTotales,
+                  // El Excel es el de préstamos: los créditos tienen su export
+                  // en la ficha de Créditos.
+                  prestamos: prestamosEnc, abonosTotales,
                   titulo:  'PRÉSTAMOS FILTRADOS',
                   archivo: 'prestamos-filtrados',
                 })}>
@@ -3202,6 +3326,8 @@ export default function PrestamosPage() {
   // Cliente que debe quedar abierto en la pestaña de créditos, si el aviso venía
   // de una factura a crédito.
   const personaCreditoInicial = paramTab === 'creditos' ? paramPersona : null;
+  // También la abre la Búsqueda («Abrir crédito»). TabCreditos la lee al montar.
+  const [personaCreditoAbrir, setPersonaCreditoAbrir] = useState(personaCreditoInicial);
   const filtroCreditoInicial  = paramTab === 'creditos' ? paramFiltro  : null;
   const [prestamoAbono,        setPrestamoAbono]        = useState(null);
   const [prestamoDevol,        setPrestamoDevol]        = useState(null);
@@ -3463,7 +3589,9 @@ export default function PrestamosPage() {
           {TABS_PRINCIPALES.map((tab) => {
             const TabIcon = tab.Icn;
             return (
-              <button key={tab.id} onClick={() => setTabPrincipal(tab.id)}
+              // Tocar la pestaña abre la LISTA: la ficha que trajo un aviso o la
+              // Búsqueda no se vuelve a abrir sola.
+              <button key={tab.id} onClick={() => { setPersonaCreditoAbrir(null); setTabPrincipal(tab.id); }}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap
                   ${tabPrincipal === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                 <TabIcon size={16} />{tab.label}
@@ -3680,10 +3808,20 @@ export default function PrestamosPage() {
         </div>
       )}
 
-      {tabPrincipal === 'creditos'      && <TabCreditos personaInicial={personaCreditoInicial} filtroInicial={filtroCreditoInicial} />}
+      {tabPrincipal === 'creditos'      && (
+        <TabCreditos key={personaCreditoAbrir ?? 'lista'}
+          personaInicial={personaCreditoAbrir} filtroInicial={filtroCreditoInicial} />
+      )}
       {tabPrincipal === 'domiciliarios' && <TabDomiciliarios />}
       {tabPrincipal === 'busqueda'      && (
         <TabBusquedaPrestamos onAbrirPersona={(clave) => {
+          // Un crédito abre su ficha en la pestaña Créditos (misma clave que
+          // arma TabCreditos: cédula o nombre).
+          if (clave.startsWith('credito_')) {
+            setPersonaCreditoAbrir(clave.slice('credito_'.length));
+            setTabPrincipal('creditos');
+            return;
+          }
           // La misma clave de la lista de personas: abre su ficha en Préstamos.
           setTabPrincipal('prestamos');
           setTabPrestamos(clave.startsWith('cliente_') ? 'clientes' : 'companeros');
