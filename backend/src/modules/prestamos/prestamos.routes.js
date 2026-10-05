@@ -109,6 +109,9 @@ router.post(   '/ajuste-deuda',                            requireModulo('presta
 // '/:id/pdf': declarado después, Express lo resolvía con id="reporte-empleado".
 router.get('/reporte-empleado/empleados', requireModulo('prestamos'), ctrl.getEmpleadosReporte);
 router.get('/reporte-empleado/pdf',       requireModulo('prestamos'), ctrl.exportarPdfReporteEmpleado);
+// Reporte por SEDE: mismas consultas, la sede entera. También antes de '/:id/pdf'.
+router.get('/reporte-sede',              requireModulo('prestamos'), ctrl.getResumenReporteSede);
+router.get('/reporte-sede/pdf',          requireModulo('prestamos'), ctrl.exportarPdfReporteSede);
 
 router.get('/pdf/:tipo/:personaId',              requireModulo('prestamos'), ctrl.exportarPdfPorPersona);
 router.get('/pdf/:tipo/:personaId/estado-cuenta', requireModulo('prestamos'), ctrl.exportarPdfEstadoCuenta);

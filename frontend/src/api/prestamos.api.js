@@ -83,6 +83,24 @@ export const descargarPdfReporteEmpleado = ({ usuario_id, desde, hasta, solo_equ
     timeout: 120000,
   });
 
+// ── Reporte por sede (la sede entera, por tipo, mes y empleado) ──────────────
+// `todas` = una sede por hoja con consolidado (solo admin; el backend lo
+// ignora para los demás). `sucursal_id` explícito si el admin eligió otra sede
+// en el modal.
+const _paramsSede = ({ desde, hasta, todas, sucursal_id }) => ({
+  desde, hasta,
+  ...(todas ? { todas: '1' } : {}),
+  ...(!todas && sucursal_id ? { sucursal_id } : {}),
+});
+export const getResumenReporteSede = (filtros) =>
+  api.get('/prestamos/reporte-sede', { params: _paramsSede(filtros), timeout: 120000 });
+export const descargarPdfReporteSede = ({ pendientes = true, ...filtros }) =>
+  api.get('/prestamos/reporte-sede/pdf', {
+    params: { ..._paramsSede(filtros), pendientes: pendientes ? '1' : '0' },
+    responseType: 'blob',
+    timeout: 120000,
+  });
+
 // ── Documentos de la obligación (iguales a los de facturas a crédito) ────────
 export const getDocumentoPrestamo = (prestamoId) =>
   api.get(`/prestamos/${prestamoId}/documento`);

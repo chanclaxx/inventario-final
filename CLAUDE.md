@@ -665,6 +665,26 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Prueba: `68-reporte-empleado` (112; la 7 renderiza el PDF de verdad y la 9
 > compara el número de la lista contra las filas del PDF).
 >
+> **Reporte por SEDE** (`prestamos/reporteSede.service.js` + `.pdf.js`, pestaña
+> «Por sede» del mismo modal, `GET /prestamos/reporte-sede[/pdf]`; pedido del
+> negocio, oct-2026): la sucursal entera en el período — cuántos **equipos**
+> (línea con IMEI) y **accesorios** (sin IMEI), cuántos siguen pendientes y
+> cuántos ya se pagaron, y **aquí sí hay plata** (pedido explícito): valor,
+> pagado y debe; por tipo, **mes a mes**, **por empleado** y, opcional, la lista
+> de lo que se debe documento por documento. Sale de **las mismas consultas**
+> del de empleado (`consultarLineas`/`consultarPrestamos`, exportadas) y la
+> misma clasificación: la sede = la suma de sus empleados, y la prueba lo exige.
+> Plata: contado = precio × (cantidad − devuelta); crédito por CRÉDITO, no por
+> línea (valor_total, cuota + abonos, saldo si Activo); préstamo = valor,
+> abonado, saldo si Activo. Lo cancelado y lo devuelto no suman; es CAPITAL
+> (mora e interés aparte). Un «Saldado» sin abono (Caliwood) va como
+> `cerrado_sin_pago` y el PDF lo explica: valor = pagado + debe + eso.
+> Vendedor 403; supervisor solo la suya (sin sede → 400, nunca «todas»);
+> `todas=1` solo el admin: consolidado + una sede por hoja. El modal muestra
+> las cifras antes de descargar (el resumen va sin la lista larga).
+> Prueba: `72-reporte-sede` (80; la 2 compara contra el reporte por empleado
+> tipo por tipo y estado por estado, la 3 la plata, la 7 renderiza el PDF).
+>
 > **La BÚSQUEDA de Préstamos agrupa por persona y dice la situación**
 > (`GET /busqueda/prestamos`, `utils/busquedaPrestamos.js`, pedido del negocio
 > sep-2026): atajos de **situación** (`?situacion=vencido|por_vencer|al_dia|sin_plazo`)

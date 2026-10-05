@@ -51,6 +51,7 @@ import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestam
 import { ModalReporteEmpleado }                  from './ModalReporteEmpleado';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
+import { useAuth }                              from '../../context/useAuth';
 import {
   getProductosSerial, getProductosCantidad,
 }                                               from '../../api/productos.api';
@@ -3292,6 +3293,8 @@ function BotonExportarCartera({ hayPersonas, prestatarios }) {
 export default function PrestamosPage() {
   const { coloresActivo }  = useColoresConfig();
   const sucursalActiva     = useSucursalStore((s) => s.sucursalActiva);
+  // El vendedor solo saca su propio reporte; el de sede es de admin y supervisor.
+  const usuarioRol         = useAuth().usuario?.rol;
 
   // ── Entrada desde una notificación ────────────────────────────────────────
   //
@@ -3571,7 +3574,7 @@ export default function PrestamosPage() {
           <Button size="sm" variant="secondary" className="flex-shrink-0"
             onClick={() => setModalReporteEmpleado(true)}>
             <FileText size={14} />
-            Reporte por empleado
+            {usuarioRol === 'vendedor' ? 'Reporte por empleado' : 'Reporte por empleado / sede'}
           </Button>
           <BotonExportarCartera
             hayPersonas={Object.keys(gruposCompaneros).length > 0 || Object.keys(gruposClientes).length > 0}

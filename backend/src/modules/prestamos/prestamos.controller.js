@@ -4,6 +4,8 @@ const { pool }   = require('../../config/db');
 const audit      = require('../../utils/auditoria.util');
 const reporteEmpleado = require('./reporteEmpleado.service');
 const { generarPdfReporteEmpleado } = require('./reporteEmpleado.pdf');
+const reporteSede = require('./reporteSede.service');
+const { generarPdfReporteSede } = require('./reporteSede.pdf');
 const { configDocumento } = require('../../utils/emisor.util');
 
 // Detalle estándar de auditoría para un préstamo ya creado/cargado
@@ -332,6 +334,54 @@ const exportarPdfReporteEmpleado = async (req, res, next) => {
     const pdf = generarPdfReporteEmpleado({ reporte, config });
 
     const filename = `reporte-empleado-${reporte.desde}-a-${reporte.hasta}.pdf`;
+    res.setHeader('Content-Type',        'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    pdf.pipe(res);
+  } catch (err) { next(err); }
+};
+
+// ── Reporte por sede ─────────────────────────────────────────────────────────
+// La sede entera: equipos y accesorios, activos y pagados, lo pagado y lo que
+// se debe; por tipo, mes y empleado. Admin y supervisor (el vendedor no: son
+// las cifras de toda la sede, lo impone el service). `todas=1` solo lo honra
+// el admin: una sede por hoja con un consolidado al principio.
+
+const _paramsReporteSede = (req) => {
+  const todas = req.user.rol === 'admin_negocio' && req.query.todas === '1';
+  return {
+    negocioId:  req.user.negocio_id,
+    sucursalId: todas ? null : req.sucursal_id,
+    usuario:    req.user,
+    desde:      req.query.desde,
+    hasta:      req.query.hasta,
+  };
+};
+
+/** Las cifras sin la lista de pendientes: el modal las muestra antes de descargar. */
+const getResumenReporteSede = async (req, res, next) => {
+  try {
+    const r = await reporteSede.obtenerReporteSede({ ..._paramsReporteSede(req), incluirPendientes: false });
+    res.json({
+      ok: true,
+      data: {
+        desde: r.desde, hasta: r.hasta, todas: r.todas,
+        consolidado: r.consolidado,
+        sedes: r.sedes.map((s) => ({ sucursal_id: s.sucursal_id, nombre: s.nombre, total: s.total, vacio: s.vacio })),
+      },
+    });
+  } catch (err) { next(err); }
+};
+
+const exportarPdfReporteSede = async (req, res, next) => {
+  try {
+    const params = _paramsReporteSede(req);
+    const reporte = await reporteSede.obtenerReporteSede({
+      ...params, incluirPendientes: req.query.pendientes !== '0',
+    });
+    // Una sede: sus datos de documento. Todas: los del negocio.
+    const config = await configDocumento(req.user.negocio_id, params.sucursalId);
+    const pdf = generarPdfReporteSede({ reporte, config });
+    const filename = `reporte-sede-${reporte.desde}-a-${reporte.hasta}.pdf`;
     res.setHeader('Content-Type',        'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     pdf.pipe(res);
@@ -799,6 +849,7 @@ module.exports = {
   devolverPrestamo, devolverParcial,
   exportarPdfPorPersona, exportarPdfPrestamoIndividual, exportarPdfEstadoCuenta,
   getEmpleadosReporte, exportarPdfReporteEmpleado,
+  getResumenReporteSede, exportarPdfReporteSede,
   getDocumentoPrestamo, exportarPdfAvisoMoraPrestamo, exportarPdfPazYSalvoPrestamo,
   registrarSaldoAFavor,
   intercambiarPrestamo,

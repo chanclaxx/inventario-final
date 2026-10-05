@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, FileDown, Smartphone, Store, UserRound } from 'lucide-react';
+import { AlertTriangle, Building2, FileDown, ListChecks, Smartphone, Store, UserRound, Users } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Spinner } from '../../components/ui/Spinner';
-import { getEmpleadosReporte, descargarPdfReporteEmpleado } from '../../api/prestamos.api';
+import {
+  getEmpleadosReporte, descargarPdfReporteEmpleado, getResumenReporteSede, descargarPdfReporteSede,
+} from '../../api/prestamos.api';
+import { useAuth } from '../../context/useAuth';
+import useSucursalStore from '../../store/sucursalStore';
+import { formatCOP } from '../../utils/formatters';
 import { fechaHoyBogota } from '../../utils/formatters';
 
 /**
@@ -55,7 +60,7 @@ function guardar(blob, nombre) {
 const numero = (n) => Number(n || 0).toLocaleString('es-CO');
 const registros = (n) => (n > 0 ? `${numero(n)} registro${n !== 1 ? 's' : ''}` : 'sin movimientos');
 
-export function ModalReporteEmpleado({ onClose }) {
+function PanelReporteEmpleado({ onClose }) {
   const hoy = fechaHoyBogota();
   const [rango,       setRango]       = useState(() => rangoMes(hoy));
   const [seleccion,   setSeleccion]   = useState(null);
@@ -131,7 +136,6 @@ export function ModalReporteEmpleado({ onClose }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Reporte por empleado" size="md">
       <div className="flex flex-col gap-4">
         <p className="text-xs text-gray-500 leading-relaxed">
           Todo lo que el empleado vendió de contado, dio a crédito y prestó a clientes y a
@@ -274,6 +278,230 @@ export function ModalReporteEmpleado({ onClose }) {
             {generando ? 'Generando…' : 'Descargar PDF'}
           </Button>
         </div>
+      </div>
+  );
+}
+
+// ─── Reporte por SEDE ───────────────────────────────────────────────────────
+//
+// La sede entera en el período: cuántos equipos (con IMEI) y accesorios, cuántos
+// siguen pendientes y cuántos ya se pagaron, lo pagado y lo que se debe, por
+// tipo, mes a mes y por empleado. Sale de las MISMAS consultas que el reporte por
+// empleado. Aquí sí hay plata (pedido del negocio, oct-2026). Las cifras se ven
+// ANTES de descargar: son las mismas que trae el PDF.
+
+const unidadesVigentes = (t, cat) => {
+  const u = t?.unidades?.[cat];
+  return u ? u.pagado + u.pendiente + u.devuelto_parcial : 0;
+};
+
+function CifraSede({ titulo, valor, detalle, tono = 'text-gray-900' }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 truncate">{titulo}</p>
+      <p className={`text-base font-bold tabular-nums truncate ${tono}`}>{valor}</p>
+      {detalle && <p className="text-[11px] text-gray-500 truncate">{detalle}</p>}
+    </div>
+  );
+}
+
+function PanelReporteSede({ onClose }) {
+  const hoy = fechaHoyBogota();
+  const { usuario } = useAuth();
+  const esAdmin    = usuario?.rol === 'admin_negocio';
+  const sucursales = useSucursalStore((s) => s.sucursales);
+  const activa     = useSucursalStore((s) => s.sucursalActiva);
+
+  const [rango,      setRango]      = useState(() => rangoMes(hoy));
+  // 'todas' | id de sede | null (= la activa arriba).
+  const [sede,       setSede]       = useState(null);
+  const [pendientes, setPendientes] = useState(true);
+  const [generando,  setGenerando]  = useState(false);
+  const [error,      setError]      = useState('');
+
+  const rangoMalo = !rango.desde || !rango.hasta || rango.desde > rango.hasta;
+  const todas     = esAdmin && sede === 'todas';
+  const sedeId    = todas ? null : (sede ?? null);
+  const filtros   = { desde: rango.desde, hasta: rango.hasta, todas, sucursal_id: sedeId };
+
+  const { data, isLoading, isFetching, isError } = useQuery({
+    queryKey: ['prestamos', 'reporte-sede', rango.desde, rango.hasta, todas, sedeId ?? activa],
+    queryFn:  () => getResumenReporteSede(filtros).then((r) => r.data.data),
+    enabled:  !rangoMalo,
+    placeholderData: (prev) => prev,
+  });
+
+  const total  = data ? (data.consolidado ?? data.sedes?.[0]?.total) : null;
+  const vacio  = data && (data.sedes || []).every((s) => s.vacio);
+  const nombre = todas ? 'Todas las sedes' : (data?.sedes?.[0]?.nombre || '');
+
+  const mesActual = rangoMes(hoy);
+  const mesPasado = rangoMes(hoy, -1);
+  const esRango   = (r) => r.desde === rango.desde && r.hasta === rango.hasta;
+
+  const descargar = async () => {
+    if (generando || rangoMalo) return;
+    setError('');
+    setGenerando(true);
+    try {
+      const res = await descargarPdfReporteSede({ ...filtros, pendientes });
+      const quien = (todas ? 'todas-las-sedes' : nombre || 'sede')
+        .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
+      guardar(res.data, `reporte-sede-${quien}-${rango.desde}-a-${rango.hasta}.pdf`);
+      onClose();
+    } catch (err) {
+      setError(await mensajeDeError(err));
+    } finally {
+      setGenerando(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-gray-500 leading-relaxed">
+        La sucursal completa: cuántos <span className="font-medium text-gray-600">celulares y equipos</span> y
+        cuántos <span className="font-medium text-gray-600">accesorios</span> se vendieron y prestaron, cuántos
+        siguen pendientes y cuántos ya se pagaron, lo pagado y lo que se debe — por tipo, mes a mes y por empleado.
+      </p>
+
+      {/* Sucursal */}
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+          <Store size={14} className="text-gray-400" /> Sucursal
+        </label>
+        {esAdmin && sucursales.length > 1 ? (
+          <select value={sede ?? String(activa ?? '')}
+            onChange={(e) => setSede(e.target.value === 'todas' ? 'todas' : Number(e.target.value))}
+            className="w-full px-3 py-2.5 bg-gray-100 border-0 rounded-xl text-sm text-gray-900
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white">
+            {sucursales.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+            <option value="todas">Todas las sedes (consolidado + una por hoja)</option>
+          </select>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-100 rounded-xl text-sm text-gray-800">
+            <Building2 size={15} className="text-gray-400" /> {nombre || 'Tu sucursal'}
+          </div>
+        )}
+      </div>
+
+      {/* Período */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-sm font-medium text-gray-700">Período</label>
+          <div className="flex gap-1">
+            {[{ id: 'este', label: 'Este mes', r: mesActual }, { id: 'pasado', label: 'Mes pasado', r: mesPasado }]
+              .map((p) => (
+                <button key={p.id} type="button" onClick={() => setRango(p.r)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors
+                    ${esRango(p.r) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                  {p.label}
+                </button>
+              ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input type="date" label="Desde" value={rango.desde} max={rango.hasta || undefined}
+            onChange={(e) => setRango((r) => ({ ...r, desde: e.target.value }))} />
+          <Input type="date" label="Hasta" value={rango.hasta} min={rango.desde || undefined}
+            onChange={(e) => setRango((r) => ({ ...r, hasta: e.target.value }))} />
+        </div>
+        <p className="text-[11px] text-gray-400">Con varios meses, el PDF trae una fila por mes.</p>
+        {rangoMalo && rango.desde && rango.hasta && (
+          <p className="text-xs text-red-500">La fecha inicial no puede ser posterior a la final.</p>
+        )}
+      </div>
+
+      {/* Vista previa: las mismas cifras del PDF */}
+      {!rangoMalo && (
+        isLoading ? (
+          <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-400">
+            <Spinner size="sm" /> Calculando…
+          </div>
+        ) : isError ? (
+          <p className="text-xs text-red-500">No se pudieron calcular las cifras. Intenta de nuevo.</p>
+        ) : vacio ? (
+          <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            No hay ventas, créditos ni préstamos en {nombre || 'esta sucursal'} en este período.
+          </div>
+        ) : total && (
+          <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2 transition-opacity ${isFetching ? 'opacity-60' : ''}`}>
+            <CifraSede titulo="Celulares y equipos" valor={numero(unidadesVigentes(total, 'equipo'))}
+              detalle={`${numero(total.unidades.equipo.pendiente)} pendientes · ${numero(total.unidades.equipo.pagado)} pagados`}
+              tono="text-blue-600" />
+            <CifraSede titulo="Accesorios" valor={numero(unidadesVigentes(total, 'accesorio'))}
+              detalle={`${numero(total.unidades.accesorio.pendiente)} pendientes · ${numero(total.unidades.accesorio.pagado)} pagados`}
+              tono="text-violet-600" />
+            <CifraSede titulo="Activos por cobrar" valor={numero(total.activos)}
+              detalle={`${numero(total.saldados)} documentos pagados`} tono="text-amber-600" />
+            <CifraSede titulo="Valor del período" valor={formatCOP(total.valor)}
+              detalle={`${numero(total.documentos)} documentos`} />
+            <CifraSede titulo="Total pagado" valor={formatCOP(total.pagado)} tono="text-green-600" />
+            <CifraSede titulo="Total debido" valor={formatCOP(total.debe)} detalle="capital, sin mora" tono="text-red-600" />
+          </div>
+        )
+      )}
+
+      {/* Qué incluye */}
+      <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+        <input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+        <span className="flex-1">
+          <span className="flex items-center gap-1.5 text-sm font-medium text-gray-800">
+            <ListChecks size={14} className="text-gray-400" /> Incluir lo que se debe, documento por documento
+          </span>
+          <span className="block text-xs text-gray-500 mt-0.5">
+            Cada crédito y préstamo con saldo: persona, producto, empleado, pagado y debe. Desmárcalo para solo el resumen.
+          </span>
+        </span>
+      </label>
+
+      {error && <p className="text-xs text-red-500 text-center">{error}</p>}
+
+      <div className="flex gap-2">
+        <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+        <Button className="flex-1" loading={generando} disabled={rangoMalo || isError} onClick={descargar}>
+          {!generando && <FileDown size={15} />}
+          {generando ? 'Generando…' : 'Descargar PDF'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Reportes de Préstamos: por empleado (lo que cada uno movió) y por sede (la
+ * sucursal entera, con plata). El vendedor solo ve el suyo: el de sede son las
+ * cifras de todos y el backend se lo niega.
+ */
+export function ModalReporteEmpleado({ onClose }) {
+  const { usuario } = useAuth();
+  const puedeSede = usuario?.rol && usuario.rol !== 'vendedor';
+  const [vista, setVista] = useState('empleado');
+
+  return (
+    <Modal open onClose={onClose} title={puedeSede ? 'Reportes' : 'Reporte por empleado'} size="md">
+      <div className="flex flex-col gap-4">
+        {puedeSede && (
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+            {[
+              { id: 'empleado', label: 'Por empleado', Icn: Users     },
+              { id: 'sede',     label: 'Por sede',     Icn: Building2 },
+            ].map((v) => {
+              const VIcn = v.Icn;
+              return (
+                <button key={v.id} type="button" onClick={() => setVista(v.id)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all
+                    ${vista === v.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <VIcn size={13} /> {v.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {vista === 'sede' && puedeSede
+          ? <PanelReporteSede onClose={onClose} />
+          : <PanelReporteEmpleado onClose={onClose} />}
       </div>
     </Modal>
   );

@@ -234,6 +234,7 @@ const _lineasFactura = async ({ sucursalId, desde, hasta, usuarioId, soloEquipos
     SELECT
       f.id AS factura_id, f.numero, f.estado AS factura_estado,
       TO_CHAR(f.fecha, 'DD/MM/YYYY') AS fecha_txt,
+      TO_CHAR(f.fecha, 'YYYY-MM')    AS mes,
       f.usuario_id, u.nombre AS usuario_nombre,
       f.nombre_cliente, f.cedula, vd.nombre AS vendedor_nombre,
       l.id AS linea_id, l.nombre_producto, l.imei, l.cantidad,
@@ -274,6 +275,7 @@ const _prestamos = async ({ sucursalId, desde, hasta, usuarioId, soloEquipos }) 
     SELECT
       p.id, p.numero, p.estado,
       TO_CHAR(p.fecha, 'DD/MM/YYYY') AS fecha_txt,
+      TO_CHAR(p.fecha, 'YYYY-MM')    AS mes,
       p.usuario_id, u.nombre AS usuario_nombre,
       p.prestatario, p.cedula, p.prestatario_id, p.cliente_id,
       pr.nombre AS prestatario_nombre, e.nombre AS empleado_nombre, c.nombre AS cliente_nombre,
@@ -511,4 +513,7 @@ module.exports = {
   tituloGrupo, clasificarLineaFactura, clasificarPrestamo,
   filaDeLinea, filaDePrestamo, armarReporte,
   validarRango, listarEmpleados, obtenerReporte,
+  // Las MISMAS consultas alimentan el reporte por sede (reporteSede.service):
+  // si cada uno filtrara a su manera, los dos documentos no cuadrarían.
+  consultarLineas: _lineasFactura, consultarPrestamos: _prestamos,
 };
