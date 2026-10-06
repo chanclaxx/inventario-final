@@ -4,6 +4,8 @@ import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor, asignarCodigosProveedores } from '../../api/proveedores.api';
 import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
 import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
+import { ArchivosCompra } from './ArchivosCompra';
+import { puedeVerArchivosCompra } from '../../utils/archivosCompra';
 import { getComprasByProveedor, getCompraById, getComprasPaginadas, cancelarCompra as cancelarCompraApi, devolverCompra as devolverCompraApi, editarPreciosCompra as editarPreciosCompraApi } from '../../api/compras.api';
 import { getAcreedores, registrarMovimiento as registrarMovAcreedor, getComprasConSaldo, getAbonosPorCargo } from '../../api/acreedores.api';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
@@ -540,6 +542,7 @@ function ModalDetalleCompra({ compraId, onClose }) {
     queryFn:  () => api.get('/config').then((r) => r.data.data),
   });
   const etiquetasActivas = etiquetasCompraActivas(config);
+  const conArchivos      = puedeVerArchivosCompra(config, usuario);
   const [imprimiendo, setImprimiendo] = useState(false);
 
   const invalidarCompras = () => {
@@ -806,6 +809,10 @@ function ModalDetalleCompra({ compraId, onClose }) {
               <p className="text-xs text-gray-600">{data.notas}</p>
             </div>
           )}
+
+          {/* El manifiesto de importación y los demás papeles. También en una
+              compra cancelada: cancelar no pierde sus documentos. */}
+          {conArchivos && <ArchivosCompra compraId={compraId} />}
 
           {/* Confirmación de cancelación */}
           {!esCancelada && confirmando && (

@@ -274,4 +274,5 @@ const editarPreciosCompra = async (req, res, next) => {
 module.exports = { getCompras, getCompraById, getComprasByProveedor, registrarCompra, getComprasPaginadas, cancelarCompra, devolverCompra, editarPreciosCompra,
   registrarEntrada, getEntradas, getEntradaDetalle, getOrdenesParaRecibir, getPorConfirmar, confirmarEntrada,
   corregirEntrada, getCorrecciones,
+  _proveedorIds,
 };

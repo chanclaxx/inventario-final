@@ -4,6 +4,12 @@ const { validate }      = require('../../middlewares/validate.middleware');
 const { requireNivel, requirePermisoVerCompras } = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
 const ctrl     = require('./compras.controller');
+const multer   = require('multer');
+const configRepo      = require('../config/config.repository');
+const archivosCtrl    = require('./archivosCompra.controller');
+const archivosCompra  = require('./archivosCompra.service');
+const archivosStorage = require('../archivos/archivos.storage');
+const { hayArchivosCompra } = require('../../config/columnas');
 
 const validarCompra = [
   body('proveedor_id').isInt({ gt: 0 }).withMessage('Proveedor requerido'),
@@ -96,6 +102,60 @@ router.get  ('/entradas/:id/correcciones', requireModulo('inventario'), requireN
   ctrl.getCorrecciones);
 router.patch('/entradas/:id/corregir',     requireModulo('inventario'), requireNivel('supervisor'),
   validarCorreccion, validate, ctrl.corregirEntrada);
+
+// ── Archivos de la compra: el manifiesto de importación y sus papeles ───────
+//
+// Candado propio: `compras_archivos_activo` (ausente = apagado). Sin él —o sin
+// la tabla— estas rutas no existen (404) y las compras siguen como siempre.
+// Apagarlo NO borra nada: al volver a encenderlo está todo.
+//
+// Van bajo `proveedores` + el permiso de VER COMPRAS, también para adjuntar:
+// un manifiesto trae proveedor y precios, que es justo lo que el bodeguero de
+// Entradas (módulo `inventario`) no ve. No hay ruta de borrado, y no debe
+// haberla: lo que no corresponde se ANULA (solo el admin, con motivo) y el
+// archivo sigue guardado.
+//
+// ANTES de `/:id`, como todo lo de este archivo.
+const requireArchivosCompra = async (req, res, next) => {
+  try {
+    if (!hayArchivosCompra()) return res.status(404).json({ ok: false, error: 'Recurso no encontrado' });
+    const cfg = await configRepo.getMap(req.user.negocio_id);
+    if (!archivosCompra.activo(cfg)) return res.status(404).json({ ok: false, error: 'Recurso no encontrado' });
+    return next();
+  } catch (err) { return next(err); }
+};
+
+// El archivo va a memoria y de ahí al almacenamiento. multer va DESPUÉS de los
+// permisos: quien no puede adjuntar no llega a ocupar 15 MB del servidor. Sus
+// errores se traducen aquí; si llegaran al manejador global, en producción
+// saldrían como un 500 sin explicación.
+const _subida = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: archivosStorage.MAX_BYTES, files: 1 },
+  // Sin esto el nombre del archivo llega en latin1 y las tildes salen rotas.
+  defParamCharset: 'utf8',
+});
+const recibirArchivo = (req, res, next) => _subida.single('archivo')(req, res, (err) => {
+  if (!err) return next();
+  const mb = Math.round(archivosStorage.MAX_BYTES / 1024 / 1024);
+  return res.status(400).json({
+    ok: false,
+    error: err.code === 'LIMIT_FILE_SIZE'
+      ? `El archivo supera los ${mb} MB`
+      : 'No se pudo leer el archivo enviado',
+  });
+});
+
+router.get  ('/archivos/:archivoId/descargar', requireModulo('proveedores'), requirePermisoVerCompras,
+  requireArchivosCompra, archivosCtrl.descargar);
+router.patch('/archivos/:archivoId/anular',    requireModulo('proveedores'), requireNivel('admin_negocio'),
+  requireArchivosCompra,
+  [body('motivo').isString().trim().isLength({ min: 1, max: 300 }).withMessage('Escribe por qué se anula este archivo')],
+  validate, archivosCtrl.anular);
+router.get  ('/:id/archivos', requireModulo('proveedores'), requirePermisoVerCompras,
+  requireArchivosCompra, archivosCtrl.listar);
+router.post ('/:id/archivos', requireModulo('proveedores'), requirePermisoVerCompras, requireNivel('supervisor'),
+  requireArchivosCompra, recibirArchivo, archivosCtrl.adjuntar);
 
 // La bandeja y la confirmación SÍ son de administración: ponen proveedor y
 // precios, y la corrección en cascada toca costo, total y deuda.

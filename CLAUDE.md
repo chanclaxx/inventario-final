@@ -564,6 +564,56 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > `es_entrada` desde 20260828 y la suite reventaba antes de su primera
 > verificación; con esas dos columnas vuelve a correr entera (118).
 
+> **Archivos de la compra — el manifiesto de importación NO SE PIERDE**
+> (`compras/archivosCompra.*`, `archivos/archivos.storage.js`,
+> `20261006_archivos_compra.sql`, `ArchivosCompra.jsx`; opt-in
+> `compras_archivos_activo`, **ausente = apagado**; Ajustes → Compras →
+> «Documentos de la compra»; pedido del usuario, 6-oct-2026). Una compra guardaba
+> el número de la factura y nada más: el manifiesto, la declaración o la lista de
+> empaque vivían en el correo de alguien. Ahora se adjuntan a la compra (tipo,
+> número, fecha y nota del documento).
+> **La regla que manda es que no se pierda, y son cuatro candados**: (1) **no hay
+> borrado, en ninguna capa** —ni ruta DELETE, ni `DELETE` en el módulo, ni función
+> de borrar en el almacenamiento—: lo que no corresponde se **ANULA** con motivo
+> (solo admin; criterio de los abonos) y sigue guardado y descargable para el
+> admin; (2) la FK es `ON DELETE RESTRICT`: una compra con documentos no se puede
+> borrar, y cancelarla (un estado) no los toca; (3) apagar la feature responde 404
+> pero no borra nada; (4) cada ficha guarda **dónde** quedó el archivo
+> (`proveedor_storage`, `bucket`, `storage_path`) y su `sha256`: se lee de donde
+> se escribió —cambiar de almacenamiento no deja huérfano lo viejo, mientras sigan
+> las credenciales— y al descargar se comprueba la huella (502
+> `ARCHIVO_ALTERADO` en vez de entregar otra cosa).
+> **El almacenamiento es PRIVADO y NO es el del catálogo**: `catalogo.storage`
+> sube a un bucket con dominio público, y un manifiesto trae proveedor y precios.
+> Aquí nada tiene URL: el archivo solo sale por `GET
+> /compras/archivos/:id/descargar`, con sesión. Dos proveedores: **R2** (las
+> credenciales `R2_*` MÁS `R2_BUCKET_DOCUMENTOS`, escrito a propósito; si
+> coincide con el bucket del catálogo se rechaza) y, si no, **Supabase Storage**
+> (bucket privado `documentos-compras`, se crea solo; las mismas credenciales del
+> backup). Supabase sirve aquí porque estos archivos se suben una vez y casi no
+> se leen — no es el perfil del catálogo. Sin ninguno, `saveConfig` no deja
+> encender el interruptor. El contenido NO va a la base (un BYTEA inflaría el
+> backup, que hace `SELECT *`).
+> **El tipo lo decide el CONTENIDO** (firma de los primeros bytes; la extensión
+> solo desempata entre formatos de Office, que comparten firma): PDF, JPG, PNG,
+> WebP, Excel y Word, hasta 15 MB, 20 por compra y un cupo por negocio
+> (`ARCHIVOS_CUPO_MB_NEGOCIO`, 300 MB: el almacenamiento es compartido). Todo se
+> valida ANTES de subir, porque lo subido no se borra. El mismo archivo dos veces
+> en la misma compra responde 409 (índice único parcial sobre la huella: es lo
+> que deja un doble clic).
+> **Quién**: módulo `proveedores` + `requirePermisoVerCompras` para ver y bajar
+> —por eso el bodeguero de Entradas no entra—, además supervisor para adjuntar,
+> `admin_negocio` para anular; y respeta `ver_lista` de proveedores. multer va
+> DESPUÉS de los permisos. Las rutas van ANTES de `/:id`.
+> En pantalla: sección en `ModalDetalleCompra` (también en compras canceladas) y
+> un paso al registrar en `ModalCompra`, antes de las etiquetas. `ModalRecibir`
+> y las Entradas no lo ofrecen: se adjunta desde el detalle. La descarga es un
+> blob (el SW la deja en `NetworkOnly`). La lista de tipos está en el CHECK, en
+> el service y en `utils/archivosCompra.js`; la suite compara las tres.
+> Prueba: `73-archivos-compra` (136; levanta las rutas REALES por HTTP con un
+> almacenamiento en memoria — la sección 1 es la de apagado, la 6 —★— la de que
+> nada se pierde y la 7 que R2 nunca escribe en el bucket público).
+
 > **La lista de préstamos se pide POR PERSONA — el historial completo era el
 > cuello de botella** (`prestamos.repository.findResumenPersonas`,
 > `PrestamosPage.jsx`): `GET /api/prestamos` devolvía **siempre** todo el
@@ -2459,6 +2509,8 @@ R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_URL, R2_BUCKET
                                                      # fotos del catálogo web
 CATALOGO_URL, CATALOGO_REVALIDATE_SECRET             # refresco inmediato del catálogo
 QZ_PRIVATE_KEY                                       # etiquetas: QZ Tray imprime sin preguntar
+R2_BUCKET_DOCUMENTOS, SUPABASE_BUCKET_DOCUMENTOS, ARCHIVOS_CUPO_MB_NEGOCIO
+                                                     # documentos de las compras (bucket PRIVADO)
 ```
 
 > **Refresco del catálogo web.** La app pública cachea su HTML 30 min (ISR) para

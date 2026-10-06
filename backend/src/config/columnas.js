@@ -52,6 +52,7 @@ const detectarColumnas = async () => {
   await _detectarObsequios();
   await _detectarMoraEnvios();
   await _detectarDatosDocumentoSucursal();
+  await _detectarArchivosCompra();
   return _ubicacionDisponible;
 };
 
@@ -527,6 +528,27 @@ const _detectarDatosDocumentoSucursal = async () => {
 const hayDatosDocumentoSucursal = () => _datosDocSucursalDisponible;
 const _setDatosDocumentoSucursalDisponible = (v) => { _datosDocSucursalDisponible = !!v; };
 
+// ── Archivos de una compra (manifiesto de importación y sus papeles) ─────────
+// Ver migrations/20261006_archivos_compra.sql. Sin la tabla, las rutas de
+// archivos responden 404, el interruptor sale apagado y las compras siguen
+// exactamente igual: ninguna consulta de compras la nombra.
+let _archivosCompraDisponible = false;
+const _detectarArchivosCompra = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+         AND table_name = 'archivos_compra'`
+    );
+    _archivosCompraDisponible = rows.length > 0;
+  } catch (err) {
+    _archivosCompraDisponible = false;
+    console.error('⚠️  No se pudo verificar `archivos_compra` (feature desactivada):', err.message);
+  }
+};
+const hayArchivosCompra = () => _archivosCompraDisponible;
+const _setArchivosCompraDisponible = (v) => { _archivosCompraDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -555,4 +577,5 @@ module.exports = {
   hayObsequios, _setObsequiosDisponible,
   hayMoraEnvios, _setMoraEnviosDisponible,
   hayDatosDocumentoSucursal, _setDatosDocumentoSucursalDisponible,
+  hayArchivosCompra, _setArchivosCompraDisponible,
 };

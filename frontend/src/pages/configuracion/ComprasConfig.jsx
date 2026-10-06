@@ -1,6 +1,6 @@
 import {
   ToggleLeft, ToggleRight, ClipboardList, Info, AlertTriangle,
-  ShieldCheck, Barcode, CheckCircle2, Tag,
+  ShieldCheck, Barcode, CheckCircle2, Tag, Paperclip,
 } from 'lucide-react';
 
 // El mismo ejemplo que `EJEMPLO` en backend/src/utils/codigoProveedor.util.js.
@@ -23,6 +23,8 @@ const EJEMPLO_CODIGO_PROVEEDOR = 'DIS-900-CAL-001';
 //   proveedor_codigo_activo   (código NOMBRE-NIT-CIUDAD del proveedor en las
 //                              etiquetas al recibir — no confundir con el de arriba,
 //                              que traduce las referencias DEL proveedor)
+//   compras_archivos_activo   (manifiesto de importación y demás papeles,
+//                              adjuntos a la compra; ausente = apagado)
 //
 // Sin el primer flag el backend responde 404 y la pestaña Órdenes no aparece:
 // para ese negocio el módulo no existe y el flujo de compra sigue siendo el de
@@ -144,6 +146,7 @@ export function ComprasConfig({ valores, set }) {
   const codigoInterno = valores.codigo_producto_activo  === '1';
   const detalleNodo   = valores.ordenes_compra_detalle_nodo === '1';
   const codigoProveedor = valores.proveedor_codigo_activo === '1';
+  const archivosCompra  = valores.compras_archivos_activo === '1';
   // Prerrequisito, igual que los códigos del proveedor exigen el código interno:
   // sin árbol de variantes no hay talla ni color que pedir, y el selector no
   // podría seleccionar nada. El backend lo vuelve a comprobar al guardar.
@@ -433,6 +436,51 @@ export function ComprasConfig({ valores, set }) {
             <p className="text-xs text-blue-700">
               • El código de barras sigue siendo el del producto (el que lee el escáner); el del
               proveedor va escrito debajo.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-gray-100" />
+
+      {/* ── Documentos de la compra ───────────────────────────────────────── */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <Paperclip size={18} className="text-gray-400" />
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Documentos de la compra</h3>
+            <p className="text-xs text-gray-400">
+              Guarda el manifiesto de importación y los demás papeles junto a la compra a la que pertenecen.
+            </p>
+          </div>
+        </div>
+
+        <Toggle
+          label="Adjuntar archivos a las compras"
+          description="Manifiesto de importación, declaración, factura del proveedor, lista de empaque"
+          enabled={archivosCompra}
+          onChange={(val) => set('compras_archivos_activo', val ? '1' : '0')}
+        />
+
+        {archivosCompra && (
+          <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5 border-l-2 border-blue-100">
+            <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
+            <p className="text-xs text-blue-700">
+              • Al registrar una compra se ofrece adjuntar sus documentos, y después se pueden
+              agregar más desde el detalle de la compra. Cada uno lleva qué es, su número y su fecha.
+            </p>
+            <p className="text-xs text-blue-700">
+              • <strong>No se pierden</strong>: un documento no se puede borrar. Si se adjuntó el que
+              no era, el administrador lo <strong>anula</strong> escribiendo el motivo, y sigue
+              guardado para consultarlo. Cancelar la compra tampoco los toca.
+            </p>
+            <p className="text-xs text-blue-700">
+              • Los ve quien puede ver el historial de compras (traen proveedor y precios).
+              Adjuntar es de supervisores y administradores; anular, solo del administrador.
+            </p>
+            <p className="text-xs text-blue-700">
+              • Se aceptan PDF, imágenes, Excel y Word de hasta 15 MB, y hasta 20 por compra.
+              Si apagas esta opción los documentos no se borran: al volver a encenderla ahí están.
             </p>
           </div>
         )}

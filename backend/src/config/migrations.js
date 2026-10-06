@@ -1718,6 +1718,21 @@ const aplicarMigraciones = async (client) => {
     if (sqlDocSuc) await migrar(client, 'Datos de sucursal para documentos', sqlDocSuc);
   }
 
+  // Archivos de una compra — el manifiesto de importación y sus papeles,
+  // vinculados a la compra. Ver migrations/20261006_archivos_compra.sql.
+  // Se lee el mismo archivo. Bloque PROPIO: si fallara, `hayArchivosCompra()`
+  // queda en falso, las rutas responden 404 y las compras siguen igual.
+  {
+    let sqlArchivos = null;
+    try {
+      sqlArchivos = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261006_archivos_compra.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Archivos de compra: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlArchivos) await migrar(client, 'Archivos de compra', sqlArchivos);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

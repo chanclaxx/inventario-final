@@ -51,7 +51,11 @@ export default defineConfig({
             // con `maxEntries: 50` compartido esa sola entrada desalojaba al resto de
             // la API. Además cachear 5 minutos una pantalla de dinero es lo que hace
             // que un abono recién registrado se siga viendo pendiente.
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas|prestamos)/i,
+            //
+            // `compras/archivos` es la descarga de un documento adjunto a una compra
+            // (hasta 15 MB): un manifiesto de importación no tiene por qué quedar
+            // copiado en la caché del navegador.
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas|prestamos|compras\/archivos)/i,
             handler: 'NetworkOnly',
           },
           {

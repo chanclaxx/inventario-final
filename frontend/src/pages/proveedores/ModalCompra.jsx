@@ -32,6 +32,8 @@ import {
 import { CuadriculaImei } from './CuadriculaImei';
 import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
 import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
+import { ArchivosCompra } from './ArchivosCompra';
+import { puedeVerArchivosCompra } from '../../utils/archivosCompra';
 // Compartidas con ModalRecibir: una sola implementación de la captura de un
 // IMEI (con su color y sus características) y del reparto por variante. Si cada
 // modal tuviera la suya, un equipo recibido contra una orden acabaría guardando
@@ -1619,6 +1621,7 @@ function PasoPago({ proveedor, productos, tipo, ordenesActivas, onConfirmar, onV
 export function ModalCompra({ proveedor, onClose }) {
   const queryClient                    = useQueryClient();
   const { sucursalKey, sucursalLista } = useSucursalKey();
+  const { usuario }                    = useAuth();
 
   const [paso,           setPaso]           = useState(1);
   const [tipo,           setTipo]           = useState(null);
@@ -1628,6 +1631,9 @@ export function ModalCompra({ proveedor, onClose }) {
   // Con las etiquetas de compra activas, registrar no cierra: la misma ventana
   // pasa a ofrecer las etiquetas de lo que acaba de entrar.
   const [compraRegistrada, setCompraRegistrada] = useState(null);
+  // Con los archivos de compra activos, ANTES de las etiquetas se ofrece
+  // adjuntar el manifiesto: es el momento en que se tiene el papel en la mano.
+  const [documentosListos, setDocumentosListos] = useState(false);
 
   // ── Config: colores de serial ─────────────────────────────────────────────
   const { data: configData } = useQuery({
@@ -1647,6 +1653,7 @@ export function ModalCompra({ proveedor, onClose }) {
   // se haya olvidado crear la orden no hace que la factura deje de vencer.
   const ordenesActivas         = configData?.ordenes_compra_activas === '1';
   const etiquetasAlRecibir     = etiquetasCompraActivas(configData);
+  const archivosAlRegistrar    = puedeVerArchivosCompra(configData, usuario);
 
   const {
     verificando, verificarYProceder,
@@ -1663,7 +1670,7 @@ export function ModalCompra({ proveedor, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['compras'],            exact: false });
       queryClient.invalidateQueries({ queryKey: ['acreedores'],         exact: false });
       const compra = res?.data?.data;
-      if (etiquetasAlRecibir && compra?.id) setCompraRegistrada(compra);
+      if ((etiquetasAlRecibir || archivosAlRegistrar) && compra?.id) setCompraRegistrada(compra);
       else onClose();
     },
   });
@@ -1789,6 +1796,27 @@ export function ModalCompra({ proveedor, onClose }) {
       return i.valor || '';
     }),
   }));
+
+  // La compra YA está registrada: cerrar esta ventana no la deshace, y los
+  // documentos se pueden adjuntar después desde el detalle de la compra.
+  if (compraRegistrada && archivosAlRegistrar && !documentosListos) {
+    const seguir = () => (etiquetasAlRecibir ? setDocumentosListos(true) : onClose());
+    return (
+      <Modal open onClose={seguir} size="lg"
+        title={`Compra #${String(compraRegistrada.numero ?? compraRegistrada.id).padStart(5, '0')} registrada`}>
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-gray-500">
+            La compra ya quedó guardada. Si tienes el manifiesto de importación u otro papel a la
+            mano, adjúntalo aquí; también puedes hacerlo después desde el detalle de la compra.
+          </p>
+          <ArchivosCompra compraId={compraRegistrada.id} />
+          <Button className="w-full" onClick={seguir}>
+            {etiquetasAlRecibir ? 'Continuar a las etiquetas' : 'Terminar'}
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
 
   if (compraRegistrada) {
     return <ModalEtiquetasCompra compraId={compraRegistrada.id} recienRegistrada onClose={onClose} />;

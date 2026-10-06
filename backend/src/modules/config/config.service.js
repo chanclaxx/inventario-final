@@ -174,8 +174,12 @@ const _validarDiasAviso = (raw, etiqueta) => {
   }
 };
 
-const { hayUbicacion, hayCodigoProveedor } = require('../../config/columnas');
+const { hayUbicacion, hayCodigoProveedor, hayArchivosCompra } = require('../../config/columnas');
 const codigoProveedor = require('../../utils/codigoProveedor.util');
+// La misma clave que `CLAVE_CONFIG` de compras/archivosCompra.service (la
+// suite 73 las compara). Se repite para no cargar el módulo de compras desde
+// la config.
+const CLAVE_ARCHIVOS_COMPRA = 'compras_archivos_activo';
 
 // La ubicación de productos solo puede reportarse activa si la columna existe
 // realmente en la BD. Si la migración no llegó a aplicarse, el flag sale en '0'
@@ -184,6 +188,7 @@ const getConfig = async (negocioId) => {
   const config = await repo.getMap(negocioId);
   if (!hayUbicacion()) config.ubicacion_activa = '0';
   if (!hayCodigoProveedor()) config[codigoProveedor.CLAVE_CONFIG] = '0';
+  if (!hayArchivosCompra()) config[CLAVE_ARCHIVOS_COMPRA] = '0';
   return config;
 };
 
@@ -359,6 +364,31 @@ const saveConfig = async (negocioId, datos) => {
         status: 400,
         message: 'Para imprimir el código del proveedor en las etiquetas primero tienes que activar el '
           + 'código único de producto: es el código que lleva la etiqueta.',
+      };
+    }
+  }
+
+  // ── Archivos de la compra (manifiesto de importación) ─────────────────────
+  // Encenderlo sin dónde guardar sería ofrecer un botón que siempre falla: se
+  // dice aquí, al guardar, y no al primer archivo. Apagarlo siempre se puede,
+  // y no borra nada.
+  if (datosProcesados[CLAVE_ARCHIVOS_COMPRA] !== undefined
+      && !['0', '1'].includes(String(datosProcesados[CLAVE_ARCHIVOS_COMPRA]))) {
+    throw { status: 400, message: 'Los archivos de compra solo pueden estar encendidos (1) o apagados (0)' };
+  }
+  if (datosProcesados[CLAVE_ARCHIVOS_COMPRA] === '1') {
+    if (!hayArchivosCompra()) {
+      throw {
+        status: 400,
+        message: 'Los archivos de compra todavía no están disponibles en tu base de datos. Intenta de nuevo en unos minutos.',
+      };
+    }
+    const storage = require('../archivos/archivos.storage');
+    if (!storage.estaActivo()) {
+      throw {
+        status: 400,
+        message: 'Todavía no se pueden adjuntar archivos a las compras: el almacenamiento de documentos '
+          + 'no está configurado en el servidor. Escríbenos para activarlo.',
       };
     }
   }
