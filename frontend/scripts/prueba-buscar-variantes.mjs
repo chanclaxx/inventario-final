@@ -10,16 +10,17 @@
 //   3. las hojas del árbol traen su código;
 //   4. el cuadro, renderizado de verdad (se compila con el Vite del proyecto y
 //      se pinta con react-dom/server): cuándo aparece y qué dice;
-//   5. el selector de la compra, renderizado: con 8 variantes igual que antes,
-//      con 9 aparece el buscador y siguen estando todas;
-//   6. los ocho selectores lo usan (estática), y el punto de venta no se tocó.
+//   5. el selector de la compra, renderizado: con 5 variantes igual que antes,
+//      con 6 aparece el buscador y siguen estando todas;
+//   6. los ocho selectores lo usan (estática), y la vista del producto en
+//      Inventario usa EL MISMO mínimo.
 //
 //   node scripts/prueba-buscar-variantes.mjs
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import {
-  UMBRAL_BUSCADOR_VARIANTES, normalizarBusqueda, filtrarHojas, mereceBuscador,
+  MIN_VARIANTES_BUSCADOR, normalizarBusqueda, filtrarHojas, mereceBuscador,
 } from '../src/utils/buscarVariantes.js';
 import { hojasDelArbol } from '../src/pages/proveedores/capturaMercancia.utils.js';
 
@@ -57,9 +58,10 @@ const etiquetas = (lista) => lista.map((h) => (h.labelPadre ? `${h.labelPadre} /
 const muchas = (n) => Array.from({ length: n }, (_, i) => ({ key: `a-${i}`, id: i, tipo: 'atributo', label: `Talla: ${30 + i}`, stock: i }));
 
 console.log('\n1. Por debajo del umbral nada cambia');
-check('el umbral es 8: aparece con MÁS de 8', UMBRAL_BUSCADOR_VARIANTES, 8);
-check('8 variantes: sin buscador', mereceBuscador(muchas(8)), false);
-check('★ 9 variantes: con buscador', mereceBuscador(muchas(9)), true);
+check('el mínimo es 6: aparece con 6 o más', MIN_VARIANTES_BUSCADOR, 6);
+check('5 variantes: sin buscador', mereceBuscador(muchas(5)), false);
+check('★ 6 variantes: con buscador', mereceBuscador(muchas(6)), true);
+check('★ 8 variantes: con buscador (antes no salía hasta la novena)', mereceBuscador(muchas(8)), true);
 check('20 variantes: con buscador', mereceBuscador(muchas(20)), true);
 check('sin lista no revienta', [mereceBuscador([]), mereceBuscador(undefined), mereceBuscador(null)], [false, false, false]);
 cierto('★ sin texto devuelve EL MISMO arreglo, no una copia', filtrarHojas(hojas, '') === hojas && filtrarHojas(hojas, '   ') === hojas);
@@ -147,13 +149,13 @@ if (render) {
 
   console.log('\n5. El selector de la compra, renderizado');
   const contar = (html, re) => (html.match(re) || []).length;
-  const sel8 = pintar(MultiSelector, { hojas: muchas(8), nodosData: {}, onActualizar() {} });
-  cierto('★ con 8 variantes: sin cuadro de búsqueda', !sel8.includes('Buscar variante'));
-  check('…y sus 8 chips', contar(sel8, /<button/g), 8);
-  cierto('…sin tope de alto (igual que antes)', !sel8.includes('max-h-40'));
-  const sel9 = pintar(MultiSelector, { hojas: muchas(9), nodosData: {}, onActualizar() {} });
-  cierto('★ con 9 variantes: aparece el cuadro', sel9.includes('Buscar variante'));
-  check('…y siguen las 9 (sin escribir no se esconde ninguna)', contar(sel9, /type="button"[^>]*class="flex items-center gap-1 px-2\.5/g), 9);
+  const sel5 = pintar(MultiSelector, { hojas: muchas(5), nodosData: {}, onActualizar() {} });
+  cierto('★ con 5 variantes: sin cuadro de búsqueda', !sel5.includes('Buscar variante'));
+  check('…y sus 5 chips', contar(sel5, /<button/g), 5);
+  cierto('…sin tope de alto (igual que antes)', !sel5.includes('max-h-40'));
+  const sel6 = pintar(MultiSelector, { hojas: muchas(6), nodosData: {}, onActualizar() {} });
+  cierto('★ con 6 variantes: aparece el cuadro', sel6.includes('Buscar variante'));
+  check('…y siguen las 6 (sin escribir no se esconde ninguna)', contar(sel6, /type="button"[^>]*class="flex items-center gap-1 px-2\.5/g), 6);
   const sel20 = pintar(MultiSelector, {
     hojas: muchas(20), nodosData: { 'a-3': { cantidad: '5', costo: '1000' } }, onActualizar() {}, mostrarCosto: false,
   });
@@ -194,9 +196,12 @@ const reciben = leer('pages/proveedores/ModalRecibir.jsx') + leer('pages/entrada
 cierto('lo que ya está en la recepción no se ofrece como «de más»', (reciben.match(/!nodosUsados\?\.has\(h\.key\)/g) || []).length === 2);
 const hook = leer('hooks/useBuscadorVariantes.js');
 cierto('★ inactivo, el hook devuelve la lista TAL CUAL', /visibles: activo \? filtrarHojas\(hojas, consulta\) : hojas/.test(hook));
-cierto('el punto de venta conserva su propia búsqueda (no se tocó)',
-  leer('pages/inventario/VistaVariantesProducto.jsx').includes('function coincideNodo(')
-  && !leer('pages/inventario/VistaVariantesProducto.jsx').includes('BuscadorVariantes'));
+const vista = leer('pages/inventario/VistaVariantesProducto.jsx');
+cierto('la vista del producto conserva su búsqueda por niveles', vista.includes('function coincideNodo(') && !vista.includes('<BuscadorVariantes'));
+cierto('★ …y usa EL MISMO mínimo que los selectores (un producto no puede tener buscador en una pantalla y no en la otra)',
+  vista.includes("import { MIN_VARIANTES_BUSCADOR } from '../../utils/buscarVariantes'")
+  && vista.includes('const MIN_NODOS_BUSCADOR = MIN_VARIANTES_BUSCADOR;')
+  && !/const MIN_NODOS_BUSCADOR = \d/.test(vista));
 
 try { rmSync(TMP, { recursive: true, force: true }); } catch { /* da igual */ }
 

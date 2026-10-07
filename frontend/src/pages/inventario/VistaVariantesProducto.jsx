@@ -17,6 +17,7 @@ import { Input }      from '../../components/ui/Input';
 import { ErrorArbolVariantes } from './ErrorArbolVariantes';
 import { Spinner }    from '../../components/ui/Spinner';
 import { SearchInput } from '../../components/ui/SearchInput';
+import { MIN_VARIANTES_BUSCADOR } from '../../utils/buscarVariantes';
 import { Modal }      from '../../components/ui/Modal';
 import { formatCOP }      from '../../utils/formatters';
 import { InputMoneda }    from '../../components/ui/InputMoneda';
@@ -39,7 +40,11 @@ function labelNodo(nodo) {
 // de caber en la pantalla y encontrar la 38MM pasa a ser trabajo de vista. Con
 // pocos nodos el buscador estorba más de lo que ayuda, así que aparece solo
 // cuando la lista deja de verse de un vistazo.
-const MIN_NODOS_BUSCADOR = 6;
+//
+// El número vive en `utils/buscarVariantes`, compartido con los selectores de
+// variante de Agregar, Compras y Entradas: con dos números, un mismo producto
+// tenía buscador aquí y no al tocar «Agregar».
+const MIN_NODOS_BUSCADOR = MIN_VARIANTES_BUSCADOR;
 
 // Se busca por lo mismo que en la lista de productos de afuera —valor, tipo y
 // código— para que el texto que sirve allá sirva también aquí adentro.

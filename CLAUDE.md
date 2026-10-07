@@ -1621,9 +1621,12 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > `hooks/useBuscadorVariantes.js`, `components/ui/BuscadorVariantes.jsx`; pedido
 > del usuario, 6-oct-2026: «con 20 variantes es difícil buscarlo»). Solo
 > frontend. Todo selector que lista las HOJAS del árbol muestra un cuadro de
-> búsqueda cuando hay **más de 8** (`UMBRAL_BUSCADOR_VARIANTES`); **hasta 8 no
+> búsqueda cuando hay **6 o más** (`MIN_VARIANTES_BUSCADOR`); **con menos no
 > cambia nada**: el componente no pinta y el hook devuelve la lista TAL CUAL (el
-> mismo arreglo, no una copia). Busca sin tildes ni mayúsculas, por PALABRAS en
+> mismo arreglo, no una copia). **Es el MISMO número de la vista del producto**
+> (`VistaVariantesProducto` lo importa de ahí): nació en 9 mientras esa vista
+> usaba 6, y con un producto de 6 a 8 variantes (151 en la base) el buscador
+> salía al abrir el producto y no al tocar «Agregar» — reportado el 7-oct-2026. Busca sin tildes ni mayúsculas, por PALABRAS en
 > cualquier orden («38 negro» encuentra «Talla: 38MM / Color: Negro»), por el
 > padre y por el **código** de la hoja (`hojasDelArbol` ahora lo trae: se puede
 > leer la etiqueta con el lector dentro del cuadro). **Enter elige cuando queda
@@ -1639,9 +1642,9 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > selectores con chips las filas con cantidad salen de TODAS las hojas (buscar
 > otra variante no puede esconder ni borrar una cantidad escrita, y Enter sobre
 > una ya elegida no la quita); en los costos, guardar recorre `hojas`, no lo
-> visible. El punto de venta (`VistaVariantesProducto`) ya tenía su propia
-> búsqueda por niveles y no se tocó.
-> Prueba: `frontend/scripts/prueba-buscar-variantes.mjs` (57; compila los
+> visible. La vista del producto (`VistaVariantesProducto`) conserva su propia
+> búsqueda por niveles; solo comparte el mínimo.
+> Prueba: `frontend/scripts/prueba-buscar-variantes.mjs` (59; compila los
 > componentes con el Vite del proyecto y los pinta con `react-dom/server` — la
 > sección 1 es la de «por debajo del umbral nada cambia» y la 6 revisa los ocho
 > sitios).
