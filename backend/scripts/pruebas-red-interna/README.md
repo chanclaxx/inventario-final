@@ -51,6 +51,8 @@ node scripts/pruebas-red-interna/60-mora-envios.mjs
 node scripts/pruebas-red-interna/63-reserva-transito.mjs
 node scripts/pruebas-red-interna/64-utilidad-esperada.mjs
 node scripts/pruebas-red-interna/73-archivos-compra.mjs
+node scripts/pruebas-red-interna/74-inventario-menos-deuda.mjs
+node scripts/pruebas-red-interna/75-analisis-asesor.mjs
 ```
 
 > `20-borradores` verifica sobre todo una invariante negativa: guardar un

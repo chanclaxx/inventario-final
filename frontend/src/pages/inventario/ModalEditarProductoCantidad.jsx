@@ -15,6 +15,8 @@ import { useAuth }      from '../../context/useAuth';
 import { PanelProcedencia } from '../../components/ui/PanelProcedencia';
 import { usePuedeVerCostos, usePuedeVerCostoInventario } from '../../hooks/usePuedeVerCostos';
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, garantiaActiva, onClose }) {
   const [verProcedencia, setVerProcedencia] = useState(false);
@@ -45,6 +47,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
           tipo:          'atributo',
           id:            at.id,
           label:         at.valor,
+          codigo:        at.codigo ?? null,   // solo para buscarla
           costoOriginal: at.costo_unitario != null ? Number(at.costo_unitario) : '',
         });
       } else {
@@ -53,6 +56,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
             tipo:          'variante',
             id:            v.id,
             label:         `${at.valor} / ${v.valor}`,
+            codigo:        v.codigo ?? null,
             costoOriginal: v.costo_unitario != null ? Number(v.costo_unitario) : '',
           });
         }
@@ -60,6 +64,11 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
     }
     return lista;
   }, [arbol, tieneAtributos]);
+
+  // Con muchas variantes, la lista de costos se busca. Solo filtra lo que se
+  // VE: los costos ya escritos de las que quedan ocultas se guardan igual,
+  // porque al guardar se recorre `hojas`, no lo visible.
+  const buscadorCostos = useBuscadorVariantes(hojas);
 
   // Solo almacena los valores que el usuario haya modificado.
   // Para leer el costo actual de una hoja: costosEditados[key] ?? h.costoOriginal
@@ -253,8 +262,10 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
                 {tieneAtributos ? 'Costo por variante' : 'Costo unitario'}
               </label>
               {tieneAtributos ? (
+                <>
+                <BuscadorVariantes buscador={buscadorCostos} />
                 <div className={`flex flex-col gap-2 ${hojas.length > 4 ? 'max-h-52 overflow-y-auto pr-1' : ''}`}>
-                  {hojas.map((h) => {
+                  {buscadorCostos.visibles.map((h) => {
                     const key = `${h.tipo}-${h.id}`;
                     return (
                       <div key={key} className="flex items-center gap-2">
@@ -273,6 +284,7 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
                     );
                   })}
                 </div>
+                </>
               ) : (
                 <InputMoneda
                   id="edit-costo-cant"

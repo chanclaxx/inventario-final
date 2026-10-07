@@ -1617,6 +1617,35 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > mismos ejemplos que genera el motor) y `frontend/scripts/prueba-variantes-nuevas.mjs`
 > (14; la forma del payload y que el costo no viaje sin permiso).
 >
+> **Buscar la variante cuando son muchas** (`utils/buscarVariantes.js`,
+> `hooks/useBuscadorVariantes.js`, `components/ui/BuscadorVariantes.jsx`; pedido
+> del usuario, 6-oct-2026: «con 20 variantes es difícil buscarlo»). Solo
+> frontend. Todo selector que lista las HOJAS del árbol muestra un cuadro de
+> búsqueda cuando hay **más de 8** (`UMBRAL_BUSCADOR_VARIANTES`); **hasta 8 no
+> cambia nada**: el componente no pinta y el hook devuelve la lista TAL CUAL (el
+> mismo arreglo, no una copia). Busca sin tildes ni mayúsculas, por PALABRAS en
+> cualquier orden («38 negro» encuentra «Talla: 38MM / Color: Negro»), por el
+> padre y por el **código** de la hoja (`hojasDelArbol` ahora lo trae: se puede
+> leer la etiqueta con el lector dentro del cuadro). **Enter elige cuando queda
+> UNA sola coincidencia** —con varias no adivina— y Escape borra la búsqueda.
+> Los ocho sitios: `MultiSelectorCompra` (compra, recibir una orden y entrada de
+> bodega), su copia `MultiSelectorVariante` de `ModalAgregarProducto`,
+> `ModalOrden` (pedir la variante), `ModalRecibir` y `VistaEntrada` («llegó otra
+> variante» y «llegó otra que no pediste»), `SelectorNodoRetoma`,
+> `ModalCorregirEntrada` y el costo por variante de
+> `ModalEditarProductoCantidad`. Un selector nuevo de hojas debe usar el mismo
+> hook, no un filtro propio.
+> **El filtro solo toca lo que se OFRECE, nunca lo ya elegido**: en los
+> selectores con chips las filas con cantidad salen de TODAS las hojas (buscar
+> otra variante no puede esconder ni borrar una cantidad escrita, y Enter sobre
+> una ya elegida no la quita); en los costos, guardar recorre `hojas`, no lo
+> visible. El punto de venta (`VistaVariantesProducto`) ya tenía su propia
+> búsqueda por niveles y no se tocó.
+> Prueba: `frontend/scripts/prueba-buscar-variantes.mjs` (57; compila los
+> componentes con el Vite del proyecto y los pinta con `react-dom/server` — la
+> sección 1 es la de «por debajo del umbral nada cambia» y la 6 revisa los ocho
+> sitios).
+
 > **Etiquetas al RECIBIR, con el código del PROVEEDOR**
 > (`utils/codigoProveedor.util.js`, `etiquetas.service` → `lineasDeCompra`,
 > `ModalEtiquetasCompra.jsx`, `20260916_codigo_proveedor.sql`): opt-in
@@ -2119,6 +2148,97 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > también si el equipo consignado ya se vendió.
 > Prueba: `65-reportes-coherentes` (32; la sección 1 compara Ventas contra la
 > serie de Análisis y la 8 lee el PDF instrumentando pdfkit).
+
+> **Tablas para asesoría — Reportes → Análisis** (`reportes/asesor.service.js`,
+> `GET /reportes/analisis/asesor`, `PanelAsesor.jsx`, `asesor/tablasAsesor.js`,
+> `utils/exportarAnalisisAsesorExcel.js`; pedido del usuario, 7-oct-2026: «que
+> un asesor comercial pueda decir: este proveedor no es tan bueno, este producto
+> no está dando resultados»). Análisis tenía gráficas de CUÁNTO se vendió; la
+> vista «Tablas para asesoría» responde lo que se decide: proveedores, el mismo
+> producto según el proveedor, productos, variantes, líneas, mes a mes (vendido,
+> costo y comprado), sedes, día y hora, clientes, cartera por antigüedad,
+> deudores y equipos quietos — 13 tablas, más los **hallazgos** y un **Excel**
+> con una hoja por tabla.
+> **No hay un costo ni una utilidad nuevos**: el costo de lo vendido es
+> `SQL_COSTO_LINEA`, IMPORTADO de `reportes.service._sql` (no copiado); el stock
+> usa los mismos filtros que `getValorInventario` (Σ de la tabla Productos ==
+> «Costo total inventario») y la deuda es `acreedores.findSaldosPorProveedor`.
+> Lo que no tiene costo NO suma utilidad (null, nunca 0).
+> **La utilidad de aquí es DESEMPEÑO DE VENTA** (la de la pestaña Productos:
+> toda factura no cancelada, por su fecha, cobrada o no), NO la «utilidad del
+> período» de las gráficas, que cuenta el crédito al cobrarlo. Son preguntas
+> distintas y la pantalla y el Excel lo dicen; no hacerlas coincidir.
+> **Agrupa por el producto de HOY** (`COALESCE(pc.nombre, l.nombre_producto)`):
+> la pestaña Productos agrupa por el nombre escrito en la venta, que trae la
+> talla entre paréntesis y los nombres viejos, y parte un producto en varias
+> filas — por eso esas dos tablas no coinciden fila a fila en una bodega con
+> renombres (en Tesla, 695 de 792 líneas), aunque los totales sí. La identidad
+> es el NOMBRE (y el valor de la talla), no el id: con varias sedes en el
+> alcance, el mismo producto suma en una fila.
+> **Las SEÑALES son reglas con umbral, no opiniones** (`UMBRALES`, que viajan en
+> la respuesta y se muestran): No rota, Agotado, Por agotarse, Sobrestock,
+> Pérdida, Margen bajo, Más caro, Equipos sin vender, Deuda vencida, Deuda
+> vieja… Tres que costaron afinar contra datos reales: **«Margen bajo» se mide
+> contra la LÍNEA** del producto (un celular deja 9 % y un estuche 25 %; con un
+> listón fijo salían marcados todos los celulares); **lo recién comprado no se
+> acusa** de no rotar (ni el producto, ni los equipos de un proveedor: en Tesla
+> salía «no se venden» de una compra de hacía 2 días); y la diferencia de
+> precio entre proveedores es «el mismo artículo te costó $X más» en mercancía
+> por cantidad, pero en **equipos** solo «para revisar», porque puede ser el
+> estado de cada unidad.
+> **Qué pasó con los equipos de cada proveedor** es exacto (IMEI por IMEI:
+> cuántos se vendieron, en cuántos días, con qué margen); la venta se busca en
+> todo el negocio (la bodega compra, el local vende) con `DISTINCT ON`, no con
+> un JOIN por IMEI. Con mercancía por cantidad no se puede saber de qué
+> proveedor era la unidad que salió, y no se inventa.
+> **Alcance**: la sede de la cabecera, o `alcance=negocio` (todas las activas).
+> Las sedes salen de la base y se validan contra el negocio DENTRO del servicio
+> (403 si alguna es ajena). La deuda con proveedores es siempre la del negocio.
+> Solo `admin_negocio`. **De solo lectura**: el servicio no escribe nada.
+> **Una sola definición de tablas** (`tablasAsesor.js`, JS puro) para la
+> pantalla y el Excel; `soloExcel` marca las columnas que solo van al archivo.
+> La suite comprueba que cada columna exista en lo que manda el backend y que
+> toda señal tenga texto. El Excel lleva los números como NÚMEROS con formato y
+> no genera hojas vacías. La pantalla no calcula ni usa `useEffect`.
+> Fuera, a propósito: cumplimiento de órdenes de compra (opt-in y casi sin uso),
+> ventas por vendedor (ya tiene su pestaña) y la mora de la cartera (solo
+> capital).
+> Prueba: `75-analisis-asesor` (165; la sección 1 es la coherencia con las
+> pantallas existentes, la 10 —★— el contrato backend↔pantalla, la 11 genera el
+> Excel y lo relee). Se revisó además contra Tesla en solo lectura (transacción
+> `READ ONLY` + `ROLLBACK`): inventario y deuda idénticos a las pantallas, ~8 s
+> desde un portátil para 16 consultas.
+
+> **Inventario menos deuda con proveedores** (`reportes.getInventarioMenosDeuda`,
+> `acreedores.findTotalesDeuda`, bloque `InventarioMenosDeuda` de Reportes →
+> Inventario y sección 7 del PDF de gestión; pedido del usuario, 6-oct-2026):
+> cuánto de la mercancía ya es del negocio = inventario en costo − lo que se le
+> debe a los proveedores. Valor A LA FECHA, como el inventario.
+> **Se mide a nivel de NEGOCIO, no de sede**: el inventario es de cada sede pero
+> la cuenta con un proveedor no tiene sede (el acreedor es del negocio y un pago
+> sale de cualquier caja). Restarle toda la deuda al inventario de UNA sede daría
+> un número sin sentido, así que se suma el inventario de TODAS las sedes activas
+> (más la elegida, si está inactiva) y se resta la deuda completa; desde cualquier
+> sede da lo mismo, y con varias la pantalla lista cuánto pone cada una. Con una
+> sola sede es el «Costo total inventario» de la pestaña.
+> **Nada se calcula de nuevo**: el inventario de cada sede es `getValorInventario`
+> (con `{ soloTotales: true }` para las otras sedes: se salta la lista de lo que
+> no tiene costo, que es la consulta pesada; las sedes van en serie porque el
+> pool es de diez) y la deuda vive en `acreedores.repository`, pegada a `findAll`,
+> con la MISMA expresión de saldo y el mismo filtro de proveedores activos — da
+> lo mismo que sumar la columna «saldo» de la lista de Acreedores. Se suma por
+> acreedor y solo lo positivo: un **saldo a favor** con un proveedor no le paga a
+> otro (va aparte, sin sumar); los **acreedores sin proveedor** tampoco se restan
+> (se informan aparte). El neto puede ser negativo y no se recorta.
+> Viaja DENTRO de `GET /reportes/inventario/valor` (`menos_deuda`, admin) con
+> try/catch: si fallara, la pestaña sale como siempre sin el bloque; el PDF lo
+> pide con `negocioId` y sin él imprime lo de antes. La pantalla solo pinta.
+> Límite conocido: en un local de la red lo consignado va al valor del despacho,
+> no al costo de compra (es lo que dice su pestaña); el bloque avisa cuánto es.
+> No resta lo que un local le debe a la bodega: eso no es deuda con proveedores.
+> Prueba: `74-inventario-menos-deuda` (54; la sección 1 es que
+> `getValorInventario` no cambió, la 3 compara contra la lista de Acreedores y la
+> 5 —★— que con varias sedes el número es el mismo desde cualquiera).
 
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),

@@ -607,7 +607,7 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
 // ─────────────────────────────────────────────────────────────────────────────
 // GENERADOR PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
-const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, desde, hasta, agrupacion, logo, detalleFacturas = false }) => {
+const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, negocioId = null, desde, hasta, agrupacion, logo, detalleFacturas = false }) => {
   // ── Recolectar datos (reusa los servicios existentes) ──────────────────────
   const [analisis, productos, inventario, ventas] = await Promise.all([
     service.getAnalisis(sucursalId, desde, hasta, agrupacion),
@@ -615,6 +615,18 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
     service.getValorInventario(sucursalId),
     service.getVentasRango(sucursalId, desde, hasta),
   ]);
+
+  // Inventario menos deuda con proveedores: la MISMA función que la pestaña
+  // Inventario. Es un extra del reporte: sin `negocioId`, o si fallara, la
+  // sección de inventario sale como siempre.
+  let menosDeuda = null;
+  if (negocioId) {
+    try {
+      menosDeuda = await service.getInventarioMenosDeuda(negocioId, sucursalId, inventario);
+    } catch (err) {
+      console.error('[reportes.pdf] inventario menos deuda no disponible:', err.message);
+    }
+  }
 
   const unit       = analisis.agrupacion;
   const resumen    = ventas.resumen;
@@ -764,11 +776,35 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, des
   y += 8;
 
   // ── 7. Inventario valorizado a la fecha ────────────────────────────────────
-  y = ensureSpace(doc, y, 90);
+  y = ensureSpace(doc, y, menosDeuda ? 190 : 90);
   y = tituloSeccion(doc, y, 'Inventario disponible a la fecha');
   y = fila(doc, y, `Unidades en stock`, String(inventario.totales.unidades));
   y = fila(doc, y, 'Valor en costo', formatCOP(inventario.totales.costo_total), { bold: true });
   y = fila(doc, y, 'Valor en precio de venta', formatCOP(inventario.totales.precio_venta_total));
+  // Lo que de la mercancía ya es del negocio. La deuda es de TODO el negocio,
+  // así que se resta del inventario de todas las sedes, no del de esta.
+  if (menosDeuda) {
+    const variasSedes = menosDeuda.sedes.length > 1;
+    y += 4;
+    if (variasSedes) {
+      y = fila(doc, y, `Inventario en costo de las ${menosDeuda.sedes.length} sedes del negocio`, formatCOP(menosDeuda.inventario_costo));
+    }
+    y = fila(doc, y,
+      `(-) Deuda con proveedores${variasSedes ? ' (todo el negocio)' : ''} · ${menosDeuda.proveedores_con_deuda} con saldo`,
+      formatCOP(menosDeuda.deuda_proveedores), { valorColor: C.rojo });
+    hLine(doc, y); y += 6;
+    y = fila(doc, y, 'Inventario menos deuda con proveedores', formatCOP(menosDeuda.neto),
+      { bold: true, valorColor: menosDeuda.neto >= 0 ? C.verde : C.rojo });
+    if (menosDeuda.unidades_sin_costo > 0) {
+      y = fila(doc, y, `   ${menosDeuda.unidades_sin_costo} unidad(es) sin costo registrado no suman al inventario`, '', { valorColor: C.gris });
+    }
+    if (menosDeuda.deuda_otros > 0) {
+      y = fila(doc, y, '   Otros acreedores que no son proveedores (no se restan)', formatCOP(menosDeuda.deuda_otros), { valorColor: C.gris });
+    }
+    if (menosDeuda.saldo_a_favor > 0) {
+      y = fila(doc, y, '   Saldo a favor con proveedores (no se suma)', formatCOP(menosDeuda.saldo_a_favor), { valorColor: C.gris });
+    }
+  }
   y += 10;
 
   // ── 8. Cartera por cobrar ──────────────────────────────────────────────────

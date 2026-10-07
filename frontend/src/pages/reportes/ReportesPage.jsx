@@ -1947,6 +1947,103 @@ const FilaInventario = ({ label, datos, colorCosto, colorVenta }) => (
   </div>
 );
 
+// ── Inventario menos deuda con proveedores ───────────────────────────────────
+// Lo que de la mercancía ya es del negocio. Lo calcula el backend
+// (`getInventarioMenosDeuda`) y aquí solo se pinta: la deuda es la misma suma de
+// la lista de Acreedores, y el inventario el mismo de esta pestaña.
+//
+// Se mide a nivel de NEGOCIO: la cuenta con un proveedor no tiene sede, así que
+// se resta del inventario de TODAS las sedes. Con una sola sede coincide con el
+// «Costo total inventario» de arriba; con varias, se dice de cuáles sale.
+// Un backend anterior no manda el bloque (`datos` ausente) y no se pinta nada.
+const InventarioMenosDeuda = ({ datos }) => {
+  if (!datos) return null;
+  const variasSedes = datos.sedes.length > 1;
+  const positivo = datos.neto >= 0;
+  return (
+    <div className="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col gap-3">
+      <div>
+        <p className="text-sm font-semibold text-gray-700">Inventario menos deuda con proveedores</p>
+        <p className="text-xs text-gray-400">
+          Lo que de la mercancía ya es tuyo: el inventario en costo, menos lo que todavía le debes a
+          los proveedores{variasSedes ? '. La deuda es de todo el negocio, así que se resta del inventario de todas las sedes' : ''}.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-gray-600">
+            Inventario en costo{variasSedes ? ` (${datos.sedes.length} sedes)` : ''}
+          </span>
+          <span className="font-semibold text-gray-900 tabular-nums">{formatCOP(datos.inventario_costo)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-gray-600">
+            − Deuda con proveedores
+            <span className="text-xs text-gray-400">
+              {' '}· {datos.proveedores_con_deuda === 1 ? '1 con saldo' : `${datos.proveedores_con_deuda} con saldo`}
+            </span>
+          </span>
+          <span className="font-semibold text-red-600 tabular-nums">{formatCOP(datos.deuda_proveedores)}</span>
+        </div>
+        <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 mt-1
+          ${positivo ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
+          <span className="font-semibold">Inventario menos deuda</span>
+          <span className="text-xl font-bold tabular-nums">{formatCOP(datos.neto)}</span>
+        </div>
+        {!positivo && (
+          <p className="text-xs text-red-600">
+            Debes a los proveedores más de lo que vale la mercancía que tienes hoy.
+          </p>
+        )}
+      </div>
+
+      {variasSedes && (
+        <div className="flex flex-col gap-1 border-t border-gray-100 pt-2">
+          <p className="text-xs font-medium text-gray-500">De dónde sale el inventario</p>
+          {datos.sedes.map((s) => (
+            <div key={s.sucursal_id} className="flex items-center justify-between gap-3 text-xs text-gray-500">
+              <span>{s.nombre} · {s.unidades} u.</span>
+              <span className="tabular-nums">{formatCOP(s.costo_total)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(datos.unidades_sin_costo > 0 || datos.valorado_por_despacho > 0
+        || datos.deuda_otros > 0 || datos.saldo_a_favor > 0) && (
+        <div className="flex flex-col gap-1 border-t border-gray-100 pt-2 text-xs text-gray-500">
+          {datos.unidades_sin_costo > 0 && (
+            <p className="flex items-start gap-1">
+              <Info size={11} className="flex-shrink-0 mt-0.5" />
+              {datos.unidades_sin_costo} unidad(es) sin costo registrado no suman al inventario: el valor real es mayor.
+            </p>
+          )}
+          {datos.valorado_por_despacho > 0 && (
+            <p className="flex items-start gap-1">
+              <Info size={11} className="flex-shrink-0 mt-0.5" />
+              {formatCOP(datos.valorado_por_despacho)} son equipos que la bodega despachó a los locales,
+              contados al valor del despacho y no al costo de compra.
+            </p>
+          )}
+          {datos.deuda_otros > 0 && (
+            <p className="flex items-start gap-1">
+              <Info size={11} className="flex-shrink-0 mt-0.5" />
+              Además debes {formatCOP(datos.deuda_otros)} a acreedores que no son proveedores. No se restan aquí.
+            </p>
+          )}
+          {datos.saldo_a_favor > 0 && (
+            <p className="flex items-start gap-1">
+              <Info size={11} className="flex-shrink-0 mt-0.5" />
+              Tienes {formatCOP(datos.saldo_a_favor)} de saldo a favor con proveedores. No se suma aquí.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PanelInventario = () => {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['valor-inventario'],
@@ -1981,6 +2078,8 @@ const PanelInventario = () => {
             sub={formatCOP(data.totales.precio_venta_total - data.totales.costo_total)} />
         )}
       </div>
+      <InventarioMenosDeuda datos={data.menos_deuda} />
+
       {/* En un LOCAL de la red, parte de la vitrina es mercancía de la bodega y
           está valorada al valor interno de la remisión: es exactamente lo que
           el local le debe por ella. En la bodega y en un negocio sin red este

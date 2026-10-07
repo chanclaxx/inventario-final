@@ -8,6 +8,8 @@ import { Button }      from '../../components/ui/Button';
 import { InputMoneda } from '../../components/ui/InputMoneda';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { FilaImeiCompra, MultiSelectorCompra } from './capturaMercancia';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 import {
   hojasDelArbol, extraerImei, extraerColor, extraerCaracteristicas,
   itemSerialVacio,
@@ -275,6 +277,25 @@ function FilaCantidad({
   const tieneArbol = hojas.length > 0;
   const pedido     = nodoPedido(linea);
 
+  // Los dos selectores de variante de esta línea, cada uno con su búsqueda.
+  // Van aquí arriba, antes de cualquier `return`: son hooks.
+  const hojasLibres = hojas.filter((h) => !nodosUsados?.has(h.key));
+  const buscSust    = useBuscadorVariantes(hojas);
+  const buscExtra   = useBuscadorVariantes(hojasLibres);
+  const elegirSust  = (h) => {
+    onCambiar('nodoSust', h.key === pedido?.key ? null : h);
+    onCambiar('eligiendoNodo', false);
+    buscSust.limpiar();
+  };
+  const elegirExtra = (h) => {
+    onAgregarExtra({
+      key: h.key, id: h.id, tipo: h.tipo, cantidad: 1,
+      label: `${h.labelPadre ? `${h.labelPadre} · ` : ''}${h.label}`,
+    });
+    onCambiar('agregandoExtra', false);
+    buscExtra.limpiar();
+  };
+
   // ── La orden pidio una VARIANTE concreta ──────────────────────────────────
   //
   // No se reparte nada: ya se sabe QUE se pidio, asi que la pregunta se reduce a
@@ -324,15 +345,13 @@ function FilaCantidad({
             ) : (
               <div className="border border-purple-200 bg-purple-50/40 rounded-lg p-2 flex flex-col gap-1">
                 <p className="text-xs text-purple-700">¿Cuál llegó de verdad?</p>
+                <BuscadorVariantes buscador={buscSust} onUnico={elegirSust} autoFocus />
                 <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
-                  {hojas.map((h) => {
+                  {buscSust.visibles.map((h) => {
                     const esPedida = h.key === pedido.key;
                     return (
                       <button key={h.key} type="button"
-                        onClick={() => {
-                          onCambiar('nodoSust', esPedida ? null : h);
-                          onCambiar('eligiendoNodo', false);
-                        }}
+                        onClick={() => elegirSust(h)}
                         className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
                                    text-left text-xs text-gray-700 hover:bg-white transition-colors">
                         <span className="truncate">
@@ -397,20 +416,15 @@ function FilaCantidad({
                     cancelar
                   </button>
                 </div>
+                <BuscadorVariantes buscador={buscExtra} onUnico={elegirExtra} autoFocus />
                 <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
-                  {hojas.filter((h) => !nodosUsados.has(h.key)).length === 0 ? (
+                  {hojasLibres.length === 0 ? (
                     <p className="text-xs text-gray-400 py-1.5">
                       Todas las variantes de este producto ya están en la recepción.
                     </p>
-                  ) : hojas.filter((h) => !nodosUsados.has(h.key)).map((h) => (
+                  ) : buscExtra.visibles.map((h) => (
                     <button key={h.key} type="button"
-                      onClick={() => {
-                        onAgregarExtra({
-                          key: h.key, id: h.id, tipo: h.tipo, cantidad: 1,
-                          label: `${h.labelPadre ? `${h.labelPadre} · ` : ''}${h.label}`,
-                        });
-                        onCambiar('agregandoExtra', false);
-                      }}
+                      onClick={() => elegirExtra(h)}
                       className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
                                  text-left text-xs text-gray-700 hover:bg-white transition-colors">
                       <span className="truncate">

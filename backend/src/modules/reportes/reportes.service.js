@@ -2314,9 +2314,81 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
   );
 };
 
+// ─── getInventarioMenosDeuda ─────────────────────────────────────────────────
+//
+// «Cuánto vale el inventario menos lo que le debemos a los proveedores»
+// (pedido del usuario, 6-oct-2026): lo que de la mercancía ya es del negocio.
+//
+// SE MIDE A NIVEL DE NEGOCIO, y esa es la decisión: el inventario es de cada
+// sede, pero la cuenta con un proveedor es del NEGOCIO —un acreedor no tiene
+// sede, y un pago puede salir de la caja de cualquiera—. Restarle toda la deuda
+// al inventario de UNA sede daría un número sin sentido (negativo en un local
+// que no le compra a nadie). Por eso se suma el inventario de TODAS las sedes
+// activas y se resta la deuda completa; con una sola sede es el mismo «Costo
+// total inventario» de la pestaña.
+//
+// Nada nuevo se calcula aquí: el inventario de cada sede es `getValorInventario`
+// (la misma cifra que muestra su pestaña — en un local de la red, lo consignado
+// va al valor del despacho) y la deuda es `acreedores.findTotalesDeuda` (la
+// misma suma de la lista de Acreedores). Es un valor A LA FECHA, como el
+// inventario: no depende del rango del reporte.
+//
+// `valorSede` es el resultado ya calculado de la sede elegida, para no
+// repetirlo. Las sedes van una tras otra: cada una ya lanza cuatro consultas en
+// paralelo y el pool es de diez para todos los negocios.
+const getInventarioMenosDeuda = async (negocioId, sucursalId = null, valorSede = null) => {
+  const acreedoresRepo = require('../acreedores/acreedores.repository');
+  const { rows: sedes } = await pool.query(
+    `SELECT id, nombre FROM sucursales
+     WHERE negocio_id = $1 AND (activa = TRUE OR id = $2)
+     ORDER BY id`,
+    [negocioId, sucursalId]
+  );
+
+  const porSede = [];
+  for (const sede of sedes) {
+    const v = (valorSede && Number(sede.id) === Number(sucursalId))
+      ? valorSede
+      : await getValorInventario(sede.id, { soloTotales: true });
+    porSede.push({
+      sucursal_id: sede.id,
+      nombre:      sede.nombre,
+      unidades:    v.totales.unidades,
+      costo_total: v.totales.costo_total,
+      sin_costo:   Number(v.serial.sin_costo || 0) + Number(v.cantidad.sin_costo || 0),
+      // Mercancía que la bodega le despachó: va al valor del despacho, no al
+      // costo de compra del negocio.
+      costo_bodega: Number(v.serial.costo_bodega || 0),
+    });
+  }
+
+  const deuda = await acreedoresRepo.findTotalesDeuda(negocioId);
+  const inventario = porSede.reduce((s, x) => s + Number(x.costo_total || 0), 0);
+
+  return {
+    inventario_costo:      inventario,
+    unidades:              porSede.reduce((s, x) => s + Number(x.unidades || 0), 0),
+    // Lo que no tiene costo no suma al inventario: el neto queda por debajo de
+    // lo real, y se dice cuántas unidades son.
+    unidades_sin_costo:    porSede.reduce((s, x) => s + x.sin_costo, 0),
+    valorado_por_despacho: porSede.reduce((s, x) => s + x.costo_bodega, 0),
+    deuda_proveedores:     deuda.deuda_proveedores,
+    proveedores_con_deuda: deuda.proveedores_con_deuda,
+    neto:                  inventario - deuda.deuda_proveedores,
+    // Aparte, sin restar: no son proveedores, o no son deuda.
+    deuda_otros:           deuda.deuda_otros,
+    saldo_a_favor:         deuda.saldo_a_favor,
+    sedes:                 porSede.map(({ sucursal_id, nombre, unidades, costo_total }) =>
+      ({ sucursal_id, nombre, unidades, costo_total })),
+  };
+};
+
 // ─── getValorInventario ───────────────────────────────────────────────────────
 
-const getValorInventario = async (sucursalId) => {
+// `soloTotales` se salta la lista de lo que no tiene costo (la consulta más
+// pesada): la pide `getInventarioMenosDeuda` para las OTRAS sedes, de las que
+// solo necesita la cifra. Sin la opción responde exactamente lo de siempre.
+const getValorInventario = async (sucursalId, { soloTotales = false } = {}) => {
   const [serialResult, sinVariantesResult, atributosResult, variantesResult, sinCostoResult] = await Promise.all([
 
     // ── Productos seriales ────────────────────────────────────────────────
@@ -2397,7 +2469,7 @@ const getValorInventario = async (sucursalId) => {
     `, [sucursalId]),
 
     // Todos los nodos hoja sin costo, para listarlos en el reporte
-    pool.query(`
+    soloTotales ? Promise.resolve({ rows: [] }) : pool.query(`
       SELECT 'simple'::text   AS tipo,
              pc.id::int        AS producto_id,
              pc.nombre::text   AS nombre,
@@ -2753,6 +2825,10 @@ const eliminarGastoFijo = async (sucursalId, id) => {
 };
 
 module.exports = {
+  // Los fragmentos SQL que definen lo vendido y su costo. Los IMPORTA
+  // `asesor.service` (las tablas para asesoría): con una copia, el costo de un
+  // producto saldría distinto en esas tablas que en el resto de Reportes.
+  _sql: { CANT_EFECTIVA, SUBTOTAL_EFECTIVO, SQL_COSTO_LINEA },
   getVentasALocales, getMoraEnviosRango, getUtilidadEsperadaRango,
   getDashboard,
   getVentasRango,
@@ -2767,6 +2843,7 @@ module.exports = {
   getInventarioBajo,
   actualizarCostoCompra,
   getValorInventario,
+  getInventarioMenosDeuda,
   listarGastosFijos,
   crearGastoFijo,
   actualizarGastoFijo,

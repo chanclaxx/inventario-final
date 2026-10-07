@@ -1,5 +1,6 @@
 const service    = require('./reportes.service');
 const pdfService = require('./reportes.pdf');
+const asesor     = require('./asesor.service');
 const { pool }   = require('../../config/db');
 
 const getDashboard = async (req, res, next) => {
@@ -48,6 +49,7 @@ const exportarPdf = async (req, res, next) => {
       negocio:        negocioRes.rows[0] || null,
       sucursalNombre: sucursalRes.rows[0]?.nombre || null,
       sucursalId:     req.sucursal_id,
+      negocioId:      req.user.negocio_id,
       desde,
       hasta,
       agrupacion,
@@ -209,11 +211,43 @@ const actualizarCostoCompra = async (req, res, next) => {
 const getValorInventario = async (req, res, next) => {
   try {
     const data = await service.getValorInventario(req.sucursal_id);
+    // El inventario menos la deuda con proveedores viaja en la misma respuesta
+    // (misma pestaña, sin otra petición). Es un extra: si fallara, la pestaña
+    // de inventario sigue mostrando lo de siempre, sin ese bloque.
+    try {
+      data.menos_deuda = await service.getInventarioMenosDeuda(req.user.negocio_id, req.sucursal_id, data);
+    } catch (err) {
+      console.error('[reportes] inventario menos deuda no disponible:', err.message);
+      data.menos_deuda = null;
+    }
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// Las tablas para asesoría (Reportes → Análisis). `alcance=negocio` suma todas
+// las sedes ACTIVAS; sin él, la sede de la cabecera. Las sedes salen siempre de
+// la base y del negocio de la sesión: el cliente no manda ids.
+const getAnalisisAsesor = async (req, res, next) => {
+  try {
+    const { desde, hasta, alcance } = req.query;
+    const todo = alcance === 'negocio';
+    let sucursalIds = [req.sucursal_id];
+    if (todo) {
+      const { rows } = await pool.query(
+        'SELECT id FROM sucursales WHERE negocio_id = $1 AND activa = TRUE ORDER BY id',
+        [req.user.negocio_id]
+      );
+      sucursalIds = rows.map((r) => r.id);
+    }
+    const data = await asesor.getAnalisisAsesor(req.user.negocio_id, {
+      sucursalIds, desde, hasta, todoElNegocio: todo,
+    });
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
 module.exports = {
+  getAnalisisAsesor,
   getDashboard, getVentasRango, getAnalisis, exportarPdf, getVentasPorVendedor, getProductosTop,
   getInventarioBajo, actualizarCostoCompra, getValorInventario,
   getProyeccion, exportarProyeccionPdf, listarGastosFijos, crearGastoFijo, actualizarGastoFijo, eliminarGastoFijo,

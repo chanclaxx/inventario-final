@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { getArbol } from '../../api/variantesProductoApi';
 import { hojasDelArbol } from '../../pages/proveedores/capturaMercancia.utils';
+import { BuscadorVariantes } from './BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 import { Spinner } from './Spinner';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,27 +39,33 @@ export function SelectorNodoRetoma({ productoId, sucursalId, atributoId, variant
   });
 
   const hojas = hojasDelArbol(arbol);
+  const buscador = useBuscadorVariantes(hojas);
   if (!productoId) return null;
   if (isLoading) return <Spinner className="py-2 scale-75" />;
   // Producto sin variantes: el stock vive en el producto y no hay nada que elegir.
   if (hojas.length === 0) return null;
 
   const actual = varianteId ? `v-${varianteId}` : atributoId ? `a-${atributoId}` : null;
+  const elegir = (h) => {
+    onElegir({
+      atributo_id: h.tipo === 'atributo' ? h.id : null,
+      variante_id: h.tipo === 'variante' ? h.id : null,
+      label:       h.labelPadre ? `${h.labelPadre} · ${h.label}` : h.label,
+    });
+    buscador.limpiar();
+  };
 
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-gray-600">
         ¿A cuál entra? <span className="text-red-400">*</span>
       </label>
+      <BuscadorVariantes buscador={buscador} onUnico={elegir} />
       <div className="max-h-32 overflow-y-auto flex flex-col gap-0.5 rounded-xl border border-gray-100 bg-white p-1">
-        {hojas.map((h) => (
+        {buscador.visibles.map((h) => (
           <button
             key={h.key} type="button"
-            onClick={() => onElegir({
-              atributo_id: h.tipo === 'atributo' ? h.id : null,
-              variante_id: h.tipo === 'variante' ? h.id : null,
-              label:       h.labelPadre ? `${h.labelPadre} · ${h.label}` : h.label,
-            })}
+            onClick={() => elegir(h)}
             className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-left text-xs transition-colors
               ${h.key === actual
                 ? 'bg-purple-100 text-purple-800 font-medium'

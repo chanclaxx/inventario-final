@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, ComposedChart, Line, Bar, Area,
@@ -8,12 +8,16 @@ import {
 import {
   LineChart as LineIcon, BarChart3, AreaChart as AreaIcon,
   TrendingUp, PieChart as PieIcon, CreditCard, Package, FileDown,
-  Scale, Info,
+  Scale, Info, Table2,
 } from 'lucide-react';
 import { getAnalisis, getProductosTop, exportarAnalisisPdf, getGastosFijos } from '../../api/reportes.api';
 import { formatCOP, formatFechaISO, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
+
+// Las tablas para asesoría se cargan solo si alguien las abre: traen su propia
+// consulta (más pesada que las gráficas) y no tienen por qué pagarla todos.
+const PanelAsesor = lazy(() => import('./PanelAsesor'));
 
 // ─────────────────────────────────────────────
 // HELPERS
@@ -244,6 +248,9 @@ export default function PanelAnalisis() {
   const [exportando, setExportando] = useState(false);
   const [errorPdf, setErrorPdf]     = useState(null);
   const [detalleFacturas, setDetalleFacturas] = useState(false);
+  // 'graficas' = lo de siempre. 'tablas' = proveedores, compras, productos,
+  // cartera… en tablas con detalle y su Excel (`PanelAsesor`).
+  const [vista, setVista] = useState('graficas');
 
   const handleExportarPdf = async () => {
     setExportando(true);
@@ -300,6 +307,14 @@ export default function PanelAnalisis() {
 
   return (
     <div className="flex flex-col gap-4">
+      <Segmented
+        value={vista} onChange={setVista}
+        options={[
+          { value: 'graficas', label: 'Gráficas',              icon: BarChart3 },
+          { value: 'tablas',   label: 'Tablas para asesoría',  icon: Table2 },
+        ]}
+      />
+
       {/* Controles globales */}
       <div className="flex flex-col sm:flex-row sm:items-end gap-3 flex-wrap">
         <div className="flex flex-col gap-1">
@@ -312,6 +327,7 @@ export default function PanelAnalisis() {
           <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
             className="px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
+        {vista === 'graficas' && (
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-gray-600">Agrupar por</label>
           <Segmented
@@ -323,6 +339,8 @@ export default function PanelAnalisis() {
             ]}
           />
         </div>
+        )}
+        {vista === 'graficas' && (
         <div className="flex flex-col gap-1.5 sm:ml-auto">
           <label className="flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer select-none">
             <input
@@ -343,7 +361,14 @@ export default function PanelAnalisis() {
             {exportando ? 'Generando…' : 'Exportar PDF'}
           </button>
         </div>
+        )}
       </div>
+
+      {vista === 'tablas' && (
+        <Suspense fallback={<Spinner className="py-20" />}>
+          <PanelAsesor desde={desde} hasta={hasta} />
+        </Suspense>
+      )}
 
       {errorPdf && (
         <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
@@ -351,14 +376,14 @@ export default function PanelAnalisis() {
         </div>
       )}
 
-      {isLoading && <Spinner className="py-20" />}
-      {isError && (
+      {vista === 'graficas' && isLoading && <Spinner className="py-20" />}
+      {vista === 'graficas' && isError && (
         <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
           Error al cargar el análisis. Intenta de nuevo.
         </div>
       )}
 
-      {!isLoading && !isError && (
+      {vista === 'graficas' && !isLoading && !isError && (
         <>
           {/* Tendencia */}
           <ChartCard

@@ -11,6 +11,8 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { Badge }      from '../../components/ui/Badge';
 import { formatFechaHora } from '../../utils/formatters';
 import { hojasDelArbol }   from '../proveedores/capturaMercancia.utils';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORREGIR UNA ENTRADA — sin rehacerla
@@ -56,6 +58,7 @@ function SelectorNodo({ productoId, sucursalId, actual, onElegir, onCancelar }) 
     staleTime: 30_000,
   });
   const hojas = hojasDelArbol(arbol);
+  const buscador = useBuscadorVariantes(hojas);
 
   return (
     <div className="border border-purple-200 bg-purple-50/40 rounded-lg p-2 flex flex-col gap-1">
@@ -69,8 +72,12 @@ function SelectorNodo({ productoId, sucursalId, actual, onElegir, onCancelar }) 
       {isLoading ? <Spinner className="py-4 scale-75" /> : hojas.length === 0 ? (
         <p className="text-xs text-gray-400 py-2">Este producto no tiene variantes</p>
       ) : (
+        <>
+        {/* Enter elige la única coincidencia, salvo que sea la que ya está. */}
+        <BuscadorVariantes buscador={buscador} autoFocus
+          onUnico={(h) => { if (h.key !== actual) onElegir(h); }} />
         <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5">
-          {hojas.map((h) => (
+          {buscador.visibles.map((h) => (
             <button key={h.key} type="button" disabled={h.key === actual}
               onClick={() => onElegir(h)}
               className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-left text-xs
@@ -82,6 +89,7 @@ function SelectorNodo({ productoId, sucursalId, actual, onElegir, onCancelar }) 
             </button>
           ))}
         </div>
+        </>
       )}
     </div>
   );

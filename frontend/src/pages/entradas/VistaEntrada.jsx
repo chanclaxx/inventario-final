@@ -16,6 +16,8 @@ import { Badge }       from '../../components/ui/Badge';
 import { EmptyState }  from '../../components/ui/EmptyState';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { FilaImeiCompra, MultiSelectorCompra } from '../proveedores/capturaMercancia';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 import {
   extraerImei, extraerColor, extraerCaracteristicas,
   parsearColoresConfig, parsearCaracteristicasConfig,
@@ -102,6 +104,21 @@ function FilaLinea({
 
   const hojas      = useMemo(() => hojasDelArbol(arbol), [arbol]);
   const tieneArbol = hojas.length > 0;
+
+  // Los dos selectores de variante de esta línea, cada uno con su búsqueda.
+  // (`pedido` se declara más abajo: aquí solo se lee al hacer clic.)
+  const hojasLibres = hojas.filter((h) => !nodosUsados?.has(h.key));
+  const buscSust    = useBuscadorVariantes(hojas);
+  const buscExtra   = useBuscadorVariantes(hojasLibres);
+  const elegirSust  = (h) => {
+    onCambiar(linea.key, { nodoSust: h.key === pedido?.key ? null : h, eligiendoNodo: false });
+    buscSust.limpiar();
+  };
+  const elegirExtra = (h) => {
+    onAgregarExtra(linea, h);
+    onCambiar(linea.key, { agregandoExtra: false });
+    buscExtra.limpiar();
+  };
 
   // Unidades de la línea: con árbol es la suma de lo repartido por variante.
   // Con un nodo pedido no se reparte nada: ya se sabe QUE se pidio, asi que la
@@ -298,17 +315,15 @@ function FilaLinea({
                   cancelar
                 </button>
               </div>
+              <BuscadorVariantes buscador={buscExtra} onUnico={elegirExtra} autoFocus />
               <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
-                {hojas.filter((h) => !nodosUsados.has(h.key)).length === 0 ? (
+                {hojasLibres.length === 0 ? (
                   <p className="text-xs text-gray-400 py-1.5">
                     Todas las variantes de este producto ya están en la entrada.
                   </p>
-                ) : hojas.filter((h) => !nodosUsados.has(h.key)).map((h) => (
+                ) : buscExtra.visibles.map((h) => (
                   <button key={h.key} type="button"
-                    onClick={() => {
-                      onAgregarExtra(linea, h);
-                      onCambiar(linea.key, { agregandoExtra: false });
-                    }}
+                    onClick={() => elegirExtra(h)}
                     className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
                                text-left text-xs text-gray-700 hover:bg-white transition-colors">
                     <span className="truncate">
@@ -321,14 +336,13 @@ function FilaLinea({
           ) : (
             <div className="border border-purple-200 bg-purple-50/40 rounded-lg p-2 flex flex-col gap-1">
               <p className="text-xs text-purple-700">¿Cuál llegó de verdad?</p>
+              <BuscadorVariantes buscador={buscSust} onUnico={elegirSust} autoFocus />
               <div className="max-h-36 overflow-y-auto flex flex-col gap-0.5">
-                {hojas.map((h) => {
+                {buscSust.visibles.map((h) => {
                   const esPedida = h.key === pedido.key;
                   return (
                     <button key={h.key} type="button"
-                      onClick={() => onCambiar(linea.key, {
-                        nodoSust: esPedida ? null : h, eligiendoNodo: false,
-                      })}
+                      onClick={() => elegirSust(h)}
                       className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md
                                  text-left text-xs text-gray-700 hover:bg-white transition-colors">
                       <span className="truncate">

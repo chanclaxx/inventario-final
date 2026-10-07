@@ -90,8 +90,13 @@ export function hojasDelArbol(arbol) {
       return atr.variantes.map((v) => ({
         key: `v-${v.id}`, id: v.id, tipo: 'variante',
         labelPadre: labelNodo(atr), label: labelNodo(v), stock: v.stock,
+        // Solo para buscarla (`utils/buscarVariantes`): nadie lo envía.
+        codigo: v.codigo ?? null,
       }));
     }
-    return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodo(atr), stock: atr.stock }];
+    return [{
+      key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodo(atr), stock: atr.stock,
+      codigo: atr.codigo ?? null,
+    }];
   });
 }

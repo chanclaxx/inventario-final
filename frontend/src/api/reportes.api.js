@@ -9,6 +9,12 @@ export const getVentasPorVendedor = (desde, hasta) =>
   api.get('/reportes/ventas-vendedor', { params: { desde, hasta } });
 export const getAnalisis = (desde, hasta, agrupacion) =>
   api.get('/reportes/analisis', { params: { desde, hasta, agrupacion } });
+// Las tablas para asesoría: proveedores, precios de compra, productos, líneas,
+// clientes, cartera y hallazgos, en una sola respuesta. `alcance` = 'sede' (la
+// de la cabecera) o 'negocio' (todas). Timeout propio: son una docena de
+// consultas de agregación y un período largo no cabe en los 30 s globales.
+export const getAnalisisAsesor = (desde, hasta, alcance = 'sede') =>
+  api.get('/reportes/analisis/asesor', { params: { desde, hasta, alcance }, timeout: 120000 });
 export const getProyeccion = (meses) =>
   api.get('/reportes/proyeccion', { params: { meses } });
 export const exportarProyeccionPdf = (meses) =>
@@ -41,6 +47,7 @@ export const REPORT_QUERY_KEYS = [
   'productos-top',
   'ventas-vendedor',
   'analisis',
+  'analisis-asesor',
   'proyeccion',
   'gastos-fijos',
   'valor-inventario',

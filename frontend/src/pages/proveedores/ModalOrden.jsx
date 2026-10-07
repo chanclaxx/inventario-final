@@ -4,6 +4,8 @@ import { crearOrden, editarOrden } from '../../api/ordenesCompra.api';
 import { getProductosCantidad, getProductosSerial } from '../../api/productos.api';
 import { getArbol }        from '../../api/variantesProductoApi';
 import { hojasDelArbol }   from './capturaMercancia.utils';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 import { formatCOP }   from '../../utils/formatters';
 import { Modal }       from '../../components/ui/Modal';
 import { Button }      from '../../components/ui/Button';
@@ -75,6 +77,7 @@ function PanelVariantes({ producto, yaAgregados, onElegir, onVolver }) {
 
   const hojas = hojasDelArbol(arbol);
   const claveProducto = `cantidad-${producto.id}-p`;
+  const buscador = useBuscadorVariantes(hojas);
 
   return (
     <div className="flex flex-col gap-2">
@@ -87,6 +90,12 @@ function PanelVariantes({ producto, yaAgregados, onElegir, onVolver }) {
         <Layers size={14} className="text-purple-400 flex-shrink-0" />
         <span className="text-sm font-medium text-gray-800 truncate">{producto.nombre}</span>
       </div>
+
+      {/* Enter elige la única coincidencia, salvo que ya esté en la orden. */}
+      {!isLoading && (
+        <BuscadorVariantes buscador={buscador}
+          onUnico={(h) => { if (!yaAgregados.has(`cantidad-${producto.id}-${h.key}`)) onElegir(h); }} />
+      )}
 
       {isLoading ? <Spinner className="py-6" /> : (
         <div className="max-h-52 overflow-y-auto flex flex-col gap-1">
@@ -105,7 +114,7 @@ function PanelVariantes({ producto, yaAgregados, onElegir, onVolver }) {
             <p className="text-xs text-gray-400 text-center py-4">
               Este producto no tiene variantes configuradas
             </p>
-          ) : hojas.map((h) => {
+          ) : buscador.visibles.map((h) => {
             const clave  = `cantidad-${producto.id}-${h.key}`;
             const puesto = yaAgregados.has(clave);
             return (

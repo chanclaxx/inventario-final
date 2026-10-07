@@ -26,6 +26,12 @@ router.get('/analisis/pdf',     requireModulo('reportes'), requireNivel('admin_n
    query('agrupacion').optional().isIn(['dia', 'semana', 'mes']).withMessage('Agrupación inválida'),
    query('detalle').optional().isIn(['resumen', 'completo']).withMessage('Detalle inválido')],
   validate, ctrl.exportarPdf);
+// Las tablas para asesoría: proveedores, precios de compra, productos, cartera…
+// Solo admin_negocio, como todo Análisis: son costos y márgenes de principio a
+// fin. De solo lectura. `alcance=negocio` suma todas las sedes.
+router.get('/analisis/asesor',  requireModulo('reportes'), requireNivel('admin_negocio'),
+  [...validarRango, query('alcance').optional().isIn(['sede', 'negocio']).withMessage('Alcance inválido')],
+  validate, ctrl.getAnalisisAsesor);
 // Proyección mensual + gastos fijos: solo admin_negocio.
 router.get('/proyeccion',       requireModulo('reportes'), requireNivel('admin_negocio'),
   [query('meses').optional().isIn(['3', '6', '12']).withMessage('meses inválido (3, 6 o 12)')],

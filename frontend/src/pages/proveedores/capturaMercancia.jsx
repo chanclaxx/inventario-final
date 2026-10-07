@@ -4,6 +4,8 @@ import { Trash2, ChevronDown, X } from 'lucide-react';
 import {
   extraerImei, extraerColor, extraerCaracteristicas, usaItemObjeto,
 } from './capturaMercancia.utils';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CAPTURA DE MERCANCÍA QUE ENTRA — componentes compartidos
@@ -134,14 +136,27 @@ export function MultiSelectorCompra({ hojas, nodosData, onActualizar, mostrarCos
     });
   };
 
+  // Con muchas variantes, los chips se buscan. El filtro solo toca los CHIPS:
+  // las filas de abajo son lo ya elegido y no pueden desaparecer por buscar otra.
+  const buscador = useBuscadorVariantes(hojas);
+  // La que se eligió con Enter desde el buscador: su casilla de cantidad toma
+  // el foco al aparecer, para seguir escribiendo sin tocar el mouse.
+  const [recienElegida, setRecienElegida] = useState(null);
+  const elegirDesdeBuscador = (h) => {
+    // Enter sobre una que YA estaba elegida no la quita: borraría su cantidad.
+    if (!seleccionadas.has(h.key)) { toggle(h); setRecienElegida(h.key); }
+    buscador.limpiar();
+  };
+
   const hojasSel     = hojas.filter((h) => seleccionadas.has(h.key));
   const nodosActivos = hojasSel.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
   const totalUds     = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-1.5">
-        {hojas.map((h) => {
+      <BuscadorVariantes buscador={buscador} onUnico={elegirDesdeBuscador} />
+      <div className={`flex flex-wrap gap-1.5 ${buscador.activo ? 'max-h-40 overflow-y-auto' : ''}`}>
+        {buscador.visibles.map((h) => {
           const activa = seleccionadas.has(h.key);
           const chipLabel = h.labelPadre ? `${h.labelPadre} / ${h.label}` : h.label;
           return (
@@ -178,6 +193,7 @@ export function MultiSelectorCompra({ hojas, nodosData, onActualizar, mostrarCos
                     <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
                   </div>
                   <input type="number" min="0" value={data.cantidad}
+                    autoFocus={h.key === recienElegida}
                     onChange={(e) => onActualizar(h.key, { ...base(h), cantidad: e.target.value })}
                     onWheel={noWheel} placeholder="0"
                     className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200

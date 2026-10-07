@@ -1,4 +1,6 @@
 import { useState, useRef } from 'react';
+import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
+import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal }        from '../../components/ui/Modal';
 import { Button }       from '../../components/ui/Button';
@@ -1526,15 +1528,25 @@ function MultiSelectorVariante({ hojas, nodosData, onActualizar }) {
     });
   };
 
+  // Mismo buscador que `MultiSelectorCompra`: filtra los chips, nunca las
+  // filas ya elegidas.
+  const buscador = useBuscadorVariantes(hojas);
+  const [recienElegida, setRecienElegida] = useState(null);
+  const elegirDesdeBuscador = (h) => {
+    if (!seleccionadas.has(h.key)) { toggle(h); setRecienElegida(h.key); }
+    buscador.limpiar();
+  };
+
   const hojasSel    = hojas.filter((h) => seleccionadas.has(h.key));
   const nodosActivos = hojasSel.filter((h) => Number(nodosData[h.key]?.cantidad) > 0);
   const totalUds    = nodosActivos.reduce((s, h) => s + Number(nodosData[h.key]?.cantidad || 0), 0);
 
   return (
     <div className="flex flex-col gap-3">
+      <BuscadorVariantes buscador={buscador} onUnico={elegirDesdeBuscador} />
       {/* Chips de selección */}
-      <div className="flex flex-wrap gap-1.5">
-        {hojas.map((h) => {
+      <div className={`flex flex-wrap gap-1.5 ${buscador.activo ? 'max-h-40 overflow-y-auto' : ''}`}>
+        {buscador.visibles.map((h) => {
           const activa = seleccionadas.has(h.key);
           const chipLabel = h.labelPadre ? `${h.labelPadre} / ${h.label}` : h.label;
           return (
@@ -1572,6 +1584,7 @@ function MultiSelectorVariante({ hojas, nodosData, onActualizar }) {
                     <p className="text-[10px] text-gray-400">{h.stock} en stock</p>
                   </div>
                   <input type="number" min="0" value={data.cantidad}
+                    autoFocus={h.key === recienElegida}
                     onChange={(e) => onActualizar(h.key, 'cantidad', e.target.value)}
                     onWheel={(e) => e.target.blur()} placeholder="0"
                     className="w-14 px-2 py-1.5 text-xs text-center bg-white border border-gray-200 rounded-lg

@@ -65,6 +65,72 @@ const findAll = async (negocioId, filtro) => {
   return rows;
 };
 
+// ── Cuánto se debe en total ─────────────────────────────────────────────────
+//
+// Lo usa Reportes («inventario menos deuda con proveedores»). Vive AQUÍ, pegado
+// a `findAll`, porque tiene que dar lo mismo que sumar la columna «saldo» de la
+// lista de acreedores: la misma expresión de saldo (cargos − abonos, con los
+// abonos libres incluidos) y el mismo filtro de proveedores activos. Con una
+// copia en reportes, el día que cambie una, el reporte y la pantalla de
+// Acreedores dirían cifras distintas de la misma deuda.
+//
+// Se suma por ACREEDOR y solo lo positivo: un saldo a favor con un proveedor
+// no le paga la deuda a otro, así que va aparte y no se resta.
+// «Proveedores» son las cuentas ligadas a un proveedor; las demás (un acreedor
+// creado a mano) se reportan por separado.
+const findTotalesDeuda = async (negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT
+      COALESCE(SUM(GREATEST(s.saldo, 0)) FILTER (WHERE s.proveedor_id IS NOT NULL), 0) AS deuda_proveedores,
+      COUNT(*) FILTER (WHERE s.proveedor_id IS NOT NULL AND s.saldo > 0)::int          AS proveedores_con_deuda,
+      COALESCE(SUM(GREATEST(s.saldo, 0)) FILTER (WHERE s.proveedor_id IS NULL), 0)     AS deuda_otros,
+      COALESCE(SUM(GREATEST(-s.saldo, 0)), 0)                                          AS saldo_a_favor
+    FROM (
+      SELECT a.id, a.proveedor_id,
+             COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+      FROM acreedores a
+      LEFT JOIN proveedores p ON p.id = a.proveedor_id
+      LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+      WHERE a.negocio_id = $1
+        AND (a.proveedor_id IS NULL OR p.activo = TRUE)
+      GROUP BY a.id, a.proveedor_id
+    ) s
+  `, [negocioId]);
+  const r = rows[0] || {};
+  return {
+    deuda_proveedores:     Number(r.deuda_proveedores || 0),
+    proveedores_con_deuda: Number(r.proveedores_con_deuda || 0),
+    deuda_otros:           Number(r.deuda_otros || 0),
+    saldo_a_favor:         Number(r.saldo_a_favor || 0),
+  };
+};
+
+// Lo que se le debe HOY a cada proveedor, y cuánto de eso ya venció. Lo usan
+// las tablas para asesoría de Reportes. Misma expresión de saldo y mismo filtro
+// que `findAll`, y «vencido» con la misma regla que `findVencidasPorAcreedor`
+// (cargo con fecha pasada y saldo), para que ese reporte no diga otra cifra que
+// la ficha del proveedor.
+const findSaldosPorProveedor = async (negocioId) => {
+  const { rows } = await pool.query(`
+    SELECT a.id AS acreedor_id, a.proveedor_id,
+           COALESCE(SUM(CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END), 0) AS saldo
+    FROM acreedores a
+    JOIN proveedores p ON p.id = a.proveedor_id AND p.activo = TRUE
+    LEFT JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+    WHERE a.negocio_id = $1
+    GROUP BY a.id, a.proveedor_id
+  `, [negocioId]);
+  const vencidas = new Map(
+    (await findVencidasPorAcreedor(negocioId, rows.map((r) => r.acreedor_id)))
+      .map((v) => [Number(v.acreedor_id), Number(v.saldo)]),
+  );
+  return rows.map((r) => ({
+    proveedor_id:  Number(r.proveedor_id),
+    saldo:         Number(r.saldo),
+    saldo_vencido: vencidas.get(Number(r.acreedor_id)) || 0,
+  }));
+};
+
 // Acreedores cuyos proveedores están en la lista permitida del usuario
 const findByProveedorIds = async (negocioId, proveedorIds, filtro) => {
   if (!proveedorIds || !proveedorIds.length) return [];
@@ -783,7 +849,7 @@ const eliminarAbono = async (negocioId, acreedorId, movId) => {
 };
 
 module.exports = {
-  findAll, findByProveedorIds, findByCruces, findById,
+  findAll, findTotalesDeuda, findSaldosPorProveedor, findByProveedorIds, findByCruces, findById,
   getMovimientos, getCargosAbiertos,
   getComprasConSaldo, getAbonosPorCargo,
   getSaldoAFavor, aplicarSaldoAFavor,
