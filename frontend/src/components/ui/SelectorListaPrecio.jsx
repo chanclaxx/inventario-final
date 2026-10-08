@@ -101,14 +101,27 @@ export function SelectorListaPrecio({
 // NO se esconde nunca es el aviso de que el precio no vino de la lista elegida:
 // ese es justo el que hay que ver antes de cobrar.
 // ─────────────────────────────────────────────────────────────────────────────
-export function ListaPrecioItem({ item, listas, onAplicar }) {
+//
+// `principal` llega SOLO en una sede que vende solo con listas y para un
+// producto por cantidad: ahí no existe el «precio normal», la línea sin lista
+// propia va por la lista principal, y los textos lo dicen. Sin él, todo igual.
+export function ListaPrecioItem({ item, listas, onAplicar, principal = null }) {
   const [abierto, setAbierto] = useState(false);
   const activa = buscarLista(listas, item.lista_precio_id);
+  const sinNinguna = principal && !(Number(item.precio) > 0);
+  const avisoCorto = principal && !sinNinguna
+    ? `· va al de «${principal.nombre}»`
+    : '· sin precio en esa lista';
+  const avisoLargo = principal
+    ? (sinNinguna
+      ? 'Sin precio en esa lista ni en la principal'
+      : `Sin precio en esa lista — va al de «${principal.nombre}»`)
+    : 'Sin precio en esa lista — va a su precio normal';
 
   // Qué dice el renglón cuando está cerrado. «Precio normal» y no un hueco en
   // blanco: sin lista elegida el producto SÍ se está cobrando a algo, y decirlo
   // es lo que evita que alguien crea que falta configurar cada línea.
-  const etiqueta = activa ? activa.nombre : 'Precio normal';
+  const etiqueta = activa ? activa.nombre : (principal ? principal.nombre : 'Precio normal');
 
   if (!abierto) {
     return (
@@ -121,7 +134,7 @@ export function ListaPrecioItem({ item, listas, onAplicar }) {
         <Tag size={10} className="text-gray-300 flex-shrink-0" />
         <span className={`truncate ${activa ? 'text-gray-600 font-medium' : ''}`}>{etiqueta}</span>
         {item.sin_precio_en_lista && (
-          <span className="text-amber-600 flex-shrink-0">· sin precio en esa lista</span>
+          <span className="text-amber-600 flex-shrink-0">{avisoCorto}</span>
         )}
         <ChevronDown size={11} className="text-gray-300 flex-shrink-0 ml-auto" />
       </button>
@@ -133,13 +146,13 @@ export function ListaPrecioItem({ item, listas, onAplicar }) {
       <SelectorListaPrecio
         compacto
         listas={listas}
-        valor={item.lista_precio_id || null}
+        valor={item.lista_precio_id || principal?.id || null}
         precios={item.precios}
         onChange={(l) => { onAplicar(item.key, l); setAbierto(false); }}
       />
       {item.sin_precio_en_lista && (
         <span className="text-[11px] text-amber-600">
-          Sin precio en esa lista — va a su precio normal
+          {avisoLargo}
         </span>
       )}
       <button

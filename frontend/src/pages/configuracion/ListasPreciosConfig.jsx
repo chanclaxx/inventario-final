@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ToggleLeft, ToggleRight, Tag, Trash2, Plus, Info, AlertTriangle } from 'lucide-react';
-import { parsearListas, MAX_LISTAS, MAX_NOMBRE } from '../../utils/listasPrecios';
+import { parsearListas, parsearSedesSoloListas, MAX_LISTAS, MAX_NOMBRE } from '../../utils/listasPrecios';
+import useSucursalStore from '../../store/sucursalStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LISTAS DE PRECIOS (feature opt-in por negocio)
@@ -14,6 +15,7 @@ import { parsearListas, MAX_LISTAS, MAX_NOMBRE } from '../../utils/listasPrecios
 //
 // Todo lo que se escribe aquí son claves de `config_negocio`:
 //   listas_precios_activo · listas_precios_lista
+//   listas_precios_principal · listas_precios_solo_sucursales  (solo con listas)
 // Un negocio que no encienda el primer flag no ve absolutamente nada de esto.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -87,6 +89,17 @@ export function ListasPreciosConfig({ valores, set }) {
   const [error,  setError]  = useState('');
 
   const setListas = (lista) => set('listas_precios_lista', JSON.stringify(lista));
+
+  // ── Sedes que venden SOLO con listas (opt-in por sede) ────────────────────
+  // Ausente = ninguna. En las sedes marcadas los productos por cantidad dejan
+  // de usar su «Precio de venta» y la lista principal ocupa su lugar. El
+  // backend valida lo mismo al guardar (`soloListas.util.validarGuardado`).
+  const sucursales  = useSucursalStore((s) => s.sucursales);
+  const sedesSolo   = parsearSedesSoloListas(valores.listas_precios_solo_sucursales);
+  const principalId = String(valores.listas_precios_principal || '');
+  const principalValida = listas.some((l) => l.id === principalId);
+  const alternarSede = (id) => set('listas_precios_solo_sucursales', JSON.stringify(
+    sedesSolo.includes(id) ? sedesSolo.filter((s) => s !== id) : [...sedesSolo, id]));
 
   const handleAgregar = () => {
     const limpio = nombre.trim();
@@ -216,6 +229,64 @@ export function ListasPreciosConfig({ valores, set }) {
             </div>
             {error && <span className="text-xs text-red-500">{error}</span>}
           </div>
+
+          {listas.length > 0 && (
+            <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium text-gray-700">Vender solo con listas</span>
+                <span className="text-xs text-gray-500">
+                  En las sedes que marques, los productos por cantidad dejan de usar su
+                  «Precio de venta»: todo se cobra por las listas. Los equipos con IMEI
+                  siguen con su precio de siempre. Sin marcar ninguna, nada cambia.
+                </span>
+              </div>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-gray-500">Lista principal</span>
+                <select
+                  value={principalValida ? principalId : ''}
+                  onChange={(e) => set('listas_precios_principal', e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white
+                    focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Elige una lista…</option>
+                  {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                </select>
+                <span className="text-xs text-gray-400">
+                  Es el precio que se cobra cuando no se ha elegido otra lista, el de las
+                  etiquetas, y al que cae un producto que la lista elegida no menciona.
+                </span>
+              </label>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-gray-500">Sedes</span>
+                {sucursales.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={sedesSolo.includes(s.id)}
+                      onChange={() => alternarSede(s.id)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    {s.nombre}
+                  </label>
+                ))}
+              </div>
+
+              {sedesSolo.length > 0 && !principalValida && (
+                <span className="flex items-start gap-1.5 text-xs text-amber-700">
+                  <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                  Elige la lista principal: sin ella no se puede guardar.
+                </span>
+              )}
+              {sedesSolo.length > 0 && principalValida && (
+                <span className="text-xs text-gray-500">
+                  En esas sedes, un producto sin precio en ninguna lista entra al carrito
+                  sin precio y hay que escribirlo para poder cobrarlo.
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="flex items-start gap-2 text-xs text-gray-500 bg-gray-50
             border border-gray-100 rounded-xl px-3 py-2.5">

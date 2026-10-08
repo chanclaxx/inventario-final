@@ -30,7 +30,8 @@ import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
 import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
 import { esObsequio, unidadesObsequio } from '../../utils/obsequios';
 import { SelectorListaPrecio, ListaPrecioItem } from '../../components/ui/SelectorListaPrecio';
-import { contarSinPrecio } from '../../utils/listasPrecios';
+import { contarSinPrecio, esItemSoloListas, sinPrecioSoloListas } from '../../utils/listasPrecios';
+import { useSoloListas } from '../../hooks/useSoloListas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Aviso cuando la cantidad del carrito se come lo apartado en un borrador.
@@ -205,6 +206,25 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   const sinPrecioEnLista = listasCfg.activo && listaPrecioActiva
     ? contarSinPrecio(items, listaPrecioActiva.id)
     : 0;
+
+  // ── Vender solo con listas (opt-in POR SEDE) ──────────────────────────────
+  // En la sede que lo encendió, los productos por cantidad no tienen «precio
+  // normal»: sin lista elegida mandan los de la lista principal, y lo que la
+  // lista elegida no menciona cae a esa. Lo que ninguna lista menciona entra
+  // SIN PRECIO y no se deja facturar ni prestar hasta escribirlo. Apagado
+  // (`solo.activo` falso) nada de este bloque pinta ni bloquea.
+  const solo = useSoloListas();
+  const principal = solo.activo ? solo.principal : null;
+  const sinPrecio = principal ? items.filter(sinPrecioSoloListas) : [];
+  // El aviso de «no están en la lista» se parte en dos: los productos por
+  // cantidad caen a la lista principal; los equipos con IMEI, a su precio
+  // normal. Con la principal elegida no hay a dónde caer: eso ya es «sin precio».
+  const caenAPrincipal = principal && listaPrecioActiva && listaPrecioActiva.id !== principal.id
+    ? items.filter((i) => esItemSoloListas(i) && i.sin_precio_en_lista && Number(i.precio) > 0).length
+    : 0;
+  const caenANormal = principal
+    ? (listaPrecioActiva ? contarSinPrecio(items.filter((i) => !esItemSoloListas(i)), listaPrecioActiva.id) : 0)
+    : sinPrecioEnLista;
 
   // ── Precio mínimo (feature opt-in) ────────────────────────────────────────
   // El backend rechaza la factura igual; esto lo dice ANTES, en la línea.
@@ -448,12 +468,19 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                   si no se lee — el de los productos que no están en la lista. */}
               <SelectorListaPrecio
                 listas={listasCfg.listas}
-                valor={listaPrecioActiva?.id || null}
+                // Solo con listas: sin lista elegida la que manda es la
+                // principal, y se ve encendida para que nadie crea que falta elegir.
+                valor={listaPrecioActiva?.id || principal?.id || null}
                 onChange={aplicarListaPreciosATodos}
               />
-              {sinPrecioEnLista > 0 && (
+              {caenANormal > 0 && (
                 <span className="text-[11px] text-amber-600">
-                  {sinPrecioEnLista} sin precio en «{listaPrecioActiva.nombre}» — van a su precio normal
+                  {caenANormal} sin precio en «{listaPrecioActiva.nombre}» — van a su precio normal
+                </span>
+              )}
+              {caenAPrincipal > 0 && (
+                <span className="text-[11px] text-amber-600">
+                  {caenAPrincipal} sin precio en «{listaPrecioActiva.nombre}» — van al de «{principal.nombre}»
                 </span>
               )}
             </div>
@@ -572,6 +599,7 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                           border rounded-lg px-2 py-1.5 focus:outline-none
                           focus:ring-2 focus:ring-blue-500 focus:border-transparent
                           ${bajoMinimo(item.precioFinal, pisoPorKey.get(item.key))
+                            || (principal && sinPrecioSoloListas(item))
                             ? 'border-red-400' : 'border-gray-200'}`}
                       />
                       </>
@@ -605,6 +633,15 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                     </button>
                   )}
 
+                  {/* Solo con listas: ninguna lista le pone precio a este
+                      producto. No se inventa uno (ni el viejo, ni el costo):
+                      se pide escribirlo. */}
+                  {principal && sinPrecioSoloListas(item) && (
+                    <span className="self-end text-xs text-red-600">
+                      Sin precio en las listas · escríbelo
+                    </span>
+                  )}
+
                   {/* La cantidad se comió lo que otro cliente tenía apartado */}
                   <AvisoApartado item={item} />
 
@@ -616,6 +653,7 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                       item={item}
                       listas={listasCfg.listas}
                       onAplicar={aplicarListaPrecio}
+                      principal={principal && esItemSoloListas(item) ? principal : null}
                     />
                   )}
 
@@ -706,12 +744,21 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                   : `${bajoElMinimo.length} productos están por debajo de su precio mínimo`}
               </p>
             )}
-            <Button className="w-full" onClick={onFacturar} disabled={bajoElMinimo.length > 0}>
+            {sinPrecio.length > 0 && (
+              <p className="text-xs text-red-600 text-center">
+                {sinPrecio.length === 1
+                  ? '1 producto no tiene precio en ninguna lista: escríbelo para poder cobrar'
+                  : `${sinPrecio.length} productos no tienen precio en ninguna lista: escríbelos para poder cobrar`}
+              </p>
+            )}
+            <Button className="w-full" onClick={onFacturar}
+              disabled={bajoElMinimo.length > 0 || sinPrecio.length > 0}>
               <FileText size={16} /> Hacer Factura
             </Button>
 
             <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1 min-w-0" onClick={onPrestar}>
+              <Button variant="secondary" className="flex-1 min-w-0" onClick={onPrestar}
+                disabled={sinPrecio.length > 0}>
                 <Handshake size={16} /> Prestar
               </Button>
 

@@ -14,6 +14,7 @@ import { usePermisos }  from '../../hooks/usePermisos';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
+import { useSoloListas } from '../../hooks/useSoloListas';
 import { crearCompra }  from '../../api/compras.api';
 import { buscarPorCedula, crearCliente, getClientes } from '../../api/clientes.api';
 import {
@@ -754,6 +755,7 @@ function FilaImei({ index, item, coloresActivo, coloresConfig, caracteristicasAc
 function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEncontrados, coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, codigoActivo, codigoAuto, ubicacionActiva }) {
   const queryClient        = useQueryClient();
   const puedeVerCosto      = usePuedeVerCostos();
+  const soloListas         = useSoloListas().activo;
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [tipoProducto,        setTipoProducto]        = useState('serial');
@@ -1142,11 +1144,14 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
                         <InputMoneda value={nuevoProducto.costo_unitario} onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })} placeholder="0"
                           className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400" />
                       </div>
+                      {/* Solo con listas (opt-in por sede): el precio se pone en «Precios por lista». */}
+                      {!soloListas && (
                       <div className="flex-1 flex flex-col gap-1">
                         <label className="text-xs text-gray-600 font-medium">Precio venta</label>
                         <InputMoneda value={nuevoProducto.precio} onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })} placeholder="0"
                           className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400" />
                       </div>
+                      )}
                     </div>
                   )}
                   <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
@@ -1700,6 +1705,7 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
 function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, codigoAuto, ubicacionActiva }) {
   const queryClient   = useQueryClient();
   const puedeVerCosto = usePuedeVerCostos();
+  const soloListas    = useSoloListas().activo;
 
   const [busqueda,       setBusqueda]       = useState('');
   const [filtroLineaId,  setFiltroLineaId]  = useState('');  // ← NUEVO
@@ -1966,16 +1972,20 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
                     <InputMoneda value={nuevoProducto.costo_unitario} onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })} placeholder="0"
                       className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400" />
                   </div>
+                  {/* Solo con listas (opt-in por sede): el precio se pone en «Precios por lista». */}
+                  {!soloListas && (
                   <div className="flex-1 flex flex-col gap-1">
                     <label className="text-xs text-gray-600 font-medium">Precio venta</label>
                     <InputMoneda value={nuevoProducto.precio} onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })} placeholder="0"
                       className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400" />
                   </div>
+                  )}
                 </div>
               )}
               <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
               {puedeCrearVariantes && (
                 <EditorVariantesNuevas
+                  ocultarPrecio={soloListas}
                   estado={variantesNuevas}
                   onChange={setVariantesNuevas}
                   puedeVerCosto={puedeVerCosto}

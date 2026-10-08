@@ -1,5 +1,7 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion, hayCodigoProveedor } = require('../../config/columnas');
+const { hayUbicacion, hayCodigoProveedor, hayListasPrecios } = require('../../config/columnas');
+const { selPreciosNodo } = require('../../utils/listasPreciosSql.util');
+const soloListas = require('../../utils/soloListas.util');
 
 // ── Qué se puede etiquetar ───────────────────────────────────────────────────
 //
@@ -97,6 +99,48 @@ const sqlNodos = () => `
 `;
 
 /**
+ * En una sede que vende SOLO con listas de precios (`soloListas.util`, opt-in
+ * por sede) el precio de la etiqueta es el de la LISTA PRINCIPAL: ahí el
+ * predeterminado no se usa, y una etiqueta con ese número diría un precio que
+ * el mostrador ya no cobra. Sin precio en la lista, la etiqueta sale sin
+ * precio — nunca con el viejo.
+ *
+ * Va DESPUÉS de la consulta y no dentro de `sqlNodos`: así el SQL de los demás
+ * negocios (y de las demás sedes del mismo) es el de siempre, letra por letra,
+ * y solo la sede que lo encendió paga una consulta más.
+ */
+const _conPrecioDeLista = async (negocioId, sucursalId, filas) => {
+  if (!filas.length || !hayListasPrecios()) return filas;
+  const regla = await soloListas.leer(pool, negocioId);
+  if (!soloListas.aplica(regla, sucursalId)) return filas;
+
+  const ids = (nivel, campo) => filas.filter((f) => f.nivel === nivel).map((f) => f[campo]);
+  const { rows } = await pool.query(
+    `SELECT 'producto'::text AS nivel, pc.id, ${selPreciosNodo('producto')}
+     FROM productos_cantidad pc
+     WHERE pc.sucursal_id = $1 AND pc.id = ANY($2::int[])
+     UNION ALL
+     SELECT 'atributo', ap.id, ${selPreciosNodo('atributo')}
+     FROM atributos_producto ap
+     JOIN productos_cantidad pc ON pc.id = ap.producto_id
+     WHERE ap.sucursal_id = $1 AND ap.id = ANY($3::int[])
+     UNION ALL
+     SELECT 'variante', v.id, ${selPreciosNodo('variante')}
+     FROM variantes_atributo v
+     JOIN atributos_producto ap ON ap.id = v.atributo_id
+     JOIN productos_cantidad pc ON pc.id = ap.producto_id
+     WHERE ap.sucursal_id = $1 AND v.id = ANY($4::int[])`,
+    [sucursalId, ids('producto', 'producto_id'), ids('atributo', 'atributo_id'), ids('variante', 'variante_id')]
+  );
+  const deLista = new Map(rows.map((r) => {
+    const v = Number(r.precios?.[regla.principal]);
+    return [`${r.nivel}:${r.id}`, Number.isFinite(v) && v > 0 ? v : null];
+  }));
+  const idDe = { producto: 'producto_id', atributo: 'atributo_id', variante: 'variante_id' };
+  return filas.map((f) => ({ ...f, precio: deLista.get(`${f.nivel}:${f[idDe[f.nivel]]}`) ?? null }));
+};
+
+/**
  * Nodos etiquetables de una sucursal, con los filtros de la pantalla.
  *
  * Los filtros son los de una bodega recorriendo estantes: por línea, por
@@ -132,7 +176,7 @@ const listarNodos = async (negocioId, sucursalId, f = {}) => {
      ORDER BY linea_nombre NULLS LAST, nombre, variante_label NULLS FIRST`,
     [negocioId, sucursalId, q, lineaId, ubicacion, soloConStock, codigo]
   );
-  return rows;
+  return _conPrecioDeLista(negocioId, sucursalId, rows);
 };
 
 /**
@@ -167,7 +211,7 @@ const nodosPorSeleccion = async (negocioId, sucursalId, seleccion) => {
       idsDe('atributo', 'atributo_id'),
       idsDe('variante', 'variante_id')]
   );
-  return rows;
+  return _conPrecioDeLista(negocioId, sucursalId, rows);
 };
 
 /** Datos del encabezado que va en la etiqueta (nombre del negocio, sucursal).

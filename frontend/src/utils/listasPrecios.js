@@ -205,3 +205,90 @@ export const contarSinPrecio = (items, listaId) => {
   if (!listaId) return 0;
   return (items || []).filter((i) => precioEnLista(i?.precios, listaId) == null).length;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VENDER SOLO CON LISTAS (opt-in POR SEDE — `listas_precios_solo_sucursales`)
+//
+// En las sedes elegidas, los productos POR CANTIDAD dejan de usar su precio
+// predeterminado: todo se cobra por las listas. La **lista principal**
+// (`listas_precios_principal`) ocupa el lugar del «precio normal» donde solo
+// cabe un número: el carrito sin lista elegida, la tarjeta del producto, y el
+// producto que la lista elegida no menciona.
+//
+// Ausente (o a medio configurar) = apagado, y apagado nada de esto corre: los
+// demás negocios, y las demás sedes del mismo, siguen exactamente igual.
+// Los equipos con IMEI NO entran (decisión del negocio): conservan su precio.
+//
+// Copia a mano de `backend/src/utils/soloListas.util.js` (`leerDeMapa`); la
+// suite 76 corre las dos sobre los mismos casos.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Ids de sucursal del JSON guardado. Nunca lanza. */
+export const parsearSedesSoloListas = (raw) => {
+  let lista = raw;
+  if (typeof lista === 'string') {
+    try { lista = JSON.parse(lista || '[]'); } catch { return []; }
+  }
+  if (!Array.isArray(lista)) return [];
+  const ids = new Set();
+  for (const v of lista) {
+    const n = Number(v);
+    if (Number.isInteger(n) && n > 0) ids.add(n);
+  }
+  return [...ids];
+};
+
+/**
+ * La regla para UNA sede. `activo: false` es «como siempre».
+ * `principal` es la lista completa ({ id, nombre, color }), no solo el id.
+ */
+export const leerConfigSoloListas = (config, sucursalId) => {
+  const apagado = { activo: false, principal: null };
+  const cfg = config || {};
+  if (cfg.listas_precios_activo !== '1') return apagado;
+  const sede = Number(sucursalId);
+  if (!Number.isInteger(sede) || sede <= 0) return apagado;
+  if (!parsearSedesSoloListas(cfg.listas_precios_solo_sucursales).includes(sede)) return apagado;
+  const id = String(cfg.listas_precios_principal || '').trim();
+  const principal = id ? buscarLista(parsearListas(cfg.listas_precios_lista), id) : null;
+  return principal ? { activo: true, principal } : apagado;
+};
+
+/** ¿A este ítem le aplica? Solo a los productos por cantidad. */
+export const esItemSoloListas = (item) => item?.tipo === 'cantidad';
+
+/**
+ * El precio BASE de un nodo por cantidad en una sede que vende solo con listas:
+ * el de la lista principal, o 0 si no lo tiene. Nunca el predeterminado y
+ * nunca el costo — 0 es «sin precio», y el carrito lo dice y no deja cobrarlo.
+ */
+export const precioBaseSoloListas = (precios, principalId) =>
+  precioEnLista(precios, principalId) ?? 0;
+
+/**
+ * ¿Este ítem del carrito está SIN PRECIO? Solo pasa en una sede que vende solo
+ * con listas, con un producto que ninguna lista menciona: entra en 0 y hay que
+ * escribirle el precio antes de cobrar.
+ *
+ * Se DERIVA, no se guarda: en cuanto alguien escribe un precio deja de serlo.
+ * Y un 0 escrito A MANO no cuenta: sin el precio mínimo activo, teclear 0 es la
+ * forma de regalar un producto, y eso tiene que seguir funcionando.
+ */
+export const sinPrecioSoloListas = (item) =>
+  !!item?.solo_listas && !item.obsequio && item.origen_precio !== 'manual'
+  && !(Number(item.precioFinal) > 0);
+
+/**
+ * El precio que se MUESTRA de un producto por cantidad (tarjetas, árbol).
+ *
+ *   modo apagado → `precioNormal`, lo de siempre.
+ *   modo activo  → el de la lista que el carrito tiene elegida y, si esa no lo
+ *                  menciona (o no hay ninguna), el de la principal. null = sin
+ *                  precio.
+ */
+export const precioVisible = ({ precioNormal, precios, modo, listaActivaId = null }) => {
+  if (!modo?.activo) return precioNormal ?? null;
+  return precioEnLista(precios, listaActivaId)
+    ?? precioEnLista(precios, modo.principal.id)
+    ?? null;
+};

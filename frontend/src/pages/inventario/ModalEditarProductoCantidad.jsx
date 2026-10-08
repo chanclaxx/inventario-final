@@ -17,12 +17,18 @@ import { usePuedeVerCostos, usePuedeVerCostoInventario } from '../../hooks/usePu
 import { ModalEliminarProducto, TIPO_PRODUCTO_CANTIDAD } from './ModalEliminarProducto';
 import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
 import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
+import { useSoloListas } from '../../hooks/useSoloListas';
+import { AvisoSoloListas } from '../../components/ui/AvisoSoloListas';
 
 export function ModalEditarProductoCantidad({ producto, pinEliminacion, variantesActivo, codigoActivo, ubicacionActiva, garantiaActiva, onClose }) {
   const [verProcedencia, setVerProcedencia] = useState(false);
   const { esAdminNegocio, puedeEditarProductos, camposEdicionProductos } = useAuth();
   const puedeVerCostos = usePuedeVerCostos();
   const puedeVerCostoInv = usePuedeVerCostoInventario();
+  // Solo con listas (opt-in por sede): «Precio de venta» no se cobra y no se
+  // pide. El valor que el producto tuviera sigue en `form.precio` y se guarda
+  // tal cual: apagar la función lo devuelve intacto.
+  const soloListas = useSoloListas().activo;
   const esAdmin    = esAdminNegocio();
   const campos     = camposEdicionProductos(); // null = todos, array = permitidos
   const tiene      = (c) => campos === null || campos.includes(c);
@@ -228,7 +234,8 @@ export function ModalEditarProductoCantidad({ producto, pinEliminacion, variante
                 />
               )}
 
-              {tiene('precio') && (
+              {tiene('precio') && soloListas && <AvisoSoloListas className="self-end pb-2.5" />}
+              {tiene('precio') && !soloListas && (
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700">Precio de venta</label>
                   <InputMoneda

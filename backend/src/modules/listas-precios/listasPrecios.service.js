@@ -4,6 +4,7 @@ const config = require('../config/config.repository');
 const { hayListasPrecios } = require('../../config/columnas');
 const { generarPlantillaBuffer } = require('./listasPrecios.plantilla');
 const { resolverLibro } = require('./listasPrecios.excel');
+const soloListas = require('../../utils/soloListas.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LISTAS DE PRECIOS — guardar los N precios de venta de uno o varios nodos.
@@ -187,16 +188,24 @@ const generarPlantilla = async (usuario, { sucursales, incluirVariantes } = {}) 
     ? cfg.variantes_activo === '1'
     : !!incluirVariantes;
 
+  // Sedes que venden solo con listas (opt-in por sede; null = ninguna): su
+  // hoja sale sin «Precio actual» en los productos por cantidad.
+  const regla = soloListas.leerDeMapa(cfg);
+
   const datos = [];
   for (const sucursal of sedes) {
     datos.push({
       sucursal,
+      soloListas: soloListas.aplica(regla, sucursal.id),
       nodos: await repo.leerNodosSucursal(sucursal.id, usuario.negocio_id, {
         incluirVariantes: conVariantes,
       }),
     });
   }
-  return { buffer: generarPlantillaBuffer(datos, listas), sedes };
+  return {
+    buffer: generarPlantillaBuffer(datos, listas, { principal: regla?.principal ?? null }),
+    sedes,
+  };
 };
 
 /**

@@ -114,7 +114,7 @@ function agruparPorLinea(nodos) {
 // termina cada producto — si no, tarifar una talla es buscarla.
 const SANGRIA = { producto: '', serial: '', atributo: '    ', variante: '        ' };
 
-function hojaSucursal(nodos, listas) {
+function hojaSucursal(nodos, listas, { soloListas = false } = {}) {
   const ws = {};
   const encabezados = [...COLUMNAS_FIJAS, ...listas.map((l) => l.nombre)];
   const filasInfo = [{}];   // !rows: la cabecera va sin nivel de esquema
@@ -163,7 +163,10 @@ function hojaSucursal(nodos, listas) {
       // El precio de siempre viaja como REFERENCIA, no se importa: es lo que se
       // cobra cuando la lista elegida no menciona el producto, y verlo al lado
       // es lo que deja decidir si hace falta tarifarlo.
-      const precio = Number(nodo.precio);
+      // En una sede que vende SOLO con listas (opt-in por sede) el precio de
+      // siempre de un producto por cantidad no se usa: mostrarlo aquí haría
+      // creer que sigue siendo el respaldo. Los equipos con IMEI sí lo conservan.
+      const precio = soloListas && nodo.nivel !== 'serial' ? NaN : Number(nodo.precio);
       if (Number.isFinite(precio) && precio > 0) put(ws, r, COL['Precio actual'], 'n', precio, sTexto(fondo));
       else put(ws, r, COL['Precio actual'], 's', '', sTexto(fondo));
 
@@ -200,7 +203,7 @@ function hojaSucursal(nodos, listas) {
   return ws;
 }
 
-function hojaInstrucciones(listas, sucursales) {
+function hojaInstrucciones(listas, sucursales, { soloListas = [], principal = '' } = {}) {
   const ws = {};
   let r = 0;
   const linea = (texto, estilo) => { put(ws, r, 0, 's', texto, estilo); r++; };
@@ -247,6 +250,16 @@ function hojaInstrucciones(listas, sucursales) {
   normal('');
   sucursales.forEach((s) => normal(`· ${s.nombre}`));
   normal('');
+  if (soloListas.length) {
+    titulo('SEDES QUE VENDEN SOLO CON LISTAS');
+    normal('');
+    soloListas.forEach((s) => normal(`· ${s.nombre}`));
+    normal('');
+    normal('En estas sedes los productos por cantidad NO usan el "Precio actual" (va vacío):');
+    normal(`sin lista elegida se cobra «${principal}», y lo que tampoco tenga precio ahí hay`);
+    normal('que escribirlo al vender. Los equipos con IMEI siguen con su precio de siempre.');
+    normal('');
+  }
   normal('Cada sucursal tiene sus propios precios. Si quieres que sean iguales en todas,');
   normal('copia y pega la columna de una hoja a la otra.');
 
@@ -261,14 +274,22 @@ function hojaInstrucciones(listas, sucursales) {
  *
  * `datos` = [{ sucursal: {id, nombre}, nodos: [...] }]
  */
-function generarPlantillaBuffer(datos, listas) {
+function generarPlantillaBuffer(datos, listas, { principal = null } = {}) {
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(
-    wb, hojaInstrucciones(listas, datos.map((d) => d.sucursal)), 'Instrucciones');
+  // `soloListas` en una sede (opt-in, ausente = como siempre) cambia DOS cosas
+  // de su hoja y ninguna de las demás: «Precio actual» vacío en los productos
+  // por cantidad, y un bloque en las instrucciones que lo explica.
+  const nombrePrincipal = listas.find((l) => l.id === principal)?.nombre || '';
+  XLSX.utils.book_append_sheet(wb, hojaInstrucciones(listas, datos.map((d) => d.sucursal), {
+    soloListas: nombrePrincipal ? datos.filter((d) => d.soloListas).map((d) => d.sucursal) : [],
+    principal:  nombrePrincipal,
+  }), 'Instrucciones');
 
   const usados = new Set(['instrucciones']);
-  for (const { sucursal, nodos } of datos) {
-    XLSX.utils.book_append_sheet(wb, hojaSucursal(nodos, listas), nombreHoja(sucursal.nombre, usados));
+  for (const { sucursal, nodos, soloListas } of datos) {
+    XLSX.utils.book_append_sheet(
+      wb, hojaSucursal(nodos, listas, { soloListas: !!soloListas && !!nombrePrincipal }),
+      nombreHoja(sucursal.nombre, usados));
   }
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
 }

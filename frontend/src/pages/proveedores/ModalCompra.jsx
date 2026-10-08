@@ -23,6 +23,7 @@ import api from '../../api/axios.config';
 import { getArbol } from '../../api/variantesProductoApi';
 import { useAuth } from '../../context/useAuth';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
+import { useSoloListas } from '../../hooks/useSoloListas';
 import { EditorVariantesNuevas } from '../inventario/EditorVariantesNuevas';
 import { estadoVariantesVacio, armarVariantesPayload, errorVariantes } from '../../utils/variantesNuevas';
 import {
@@ -1019,6 +1020,8 @@ function PasoCantidad({
 }) {
   const { esAdminNegocio } = useAuth();
   const puedeVerCosto = usePuedeVerCostos();
+  // Solo con listas (opt-in por sede): no se pide «Precio venta» al crear.
+  const soloListas = useSoloListas().activo;
   // Las variantes nacen con el producto, en la misma petición (solo el admin,
   // igual que crear una variante suelta; el backend lo vuelve a verificar).
   const puedeCrearVariantes = variantesActivo && esAdminNegocio();
@@ -1176,15 +1179,18 @@ function PasoCantidad({
               <InputMoneda value={nuevoProducto.costo_unitario} onChange={(val) => setNuevoProducto({ ...nuevoProducto, costo_unitario: val })} placeholder="0"
                 className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
+            {!soloListas && (
             <div className="flex-1 flex flex-col gap-1">
               <label className="text-xs text-gray-600 font-medium">Precio venta</label>
               <InputMoneda value={nuevoProducto.precio} onChange={(val) => setNuevoProducto({ ...nuevoProducto, precio: val })} placeholder="0"
                 className="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
+            )}
           </div>
           <SelectLinea value={nuevoProducto.linea_id} onChange={(val) => setNuevoProducto({ ...nuevoProducto, linea_id: val })} />
           {puedeCrearVariantes && (
             <EditorVariantesNuevas
+              ocultarPrecio={soloListas}
               estado={variantesNuevas}
               onChange={setVariantesNuevas}
               puedeVerCosto={puedeVerCosto}

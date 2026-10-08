@@ -12,6 +12,10 @@
 //   · con las listas de precios activas, el de cada lista configurada (mezclado
 //     clave por clave hacia abajo, la misma herencia del escaneo).
 //
+// En una sede que vende SOLO con listas (`soloListas.util`, opt-in por sede) el
+// predeterminado de un producto POR CANTIDAD no entra: ahí no es un precio
+// vigente. Los equipos con IMEI no cambian.
+//
 // ¿Por qué el MENOR y no el de la lista que eligió el vendedor? Porque la
 // factura no guarda qué lista se usó (decisión de 20260912_listas_precios) y
 // el vendedor puede elegir la más barata con un toque: exigir la del chip no
@@ -32,6 +36,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const { hayListasPrecios } = require('../config/columnas');
 const { parsearListas } = require('./listasPrecios.util');
+const soloListas = require('./soloListas.util');
 
 const CLAVE = 'precio_minimo_activo';
 
@@ -77,7 +82,7 @@ const leerRegla = async (db, negocioId) => {
   const { rows } = await db.query(
     `SELECT clave, valor FROM config_negocio
      WHERE negocio_id = $1 AND clave = ANY($2::text[])`,
-    [negocioId, [CLAVE, 'listas_precios_activo', 'listas_precios_lista']]
+    [negocioId, [CLAVE, ...soloListas.CLAVES]]
   );
   const cfg = Object.fromEntries(rows.map((r) => [r.clave, r.valor]));
   if (cfg[CLAVE] !== '1') return null;
@@ -85,6 +90,11 @@ const leerRegla = async (db, negocioId) => {
   const conListas = hayListasPrecios() && cfg.listas_precios_activo === '1';
   return {
     listaIds: conListas ? parsearListas(cfg.listas_precios_lista).map((l) => l.id) : [],
+    // Sedes que venden SOLO con listas (opt-in, null = ninguna): ahí el precio
+    // predeterminado de un producto por cantidad no es un precio vigente —la
+    // pantalla ni lo muestra—, así que no puede ser el piso. Sin esto, un
+    // predeterminado viejo y barato dejaría vender por debajo de toda lista.
+    soloListas: conListas ? soloListas.leerDeMapa(cfg) : null,
   };
 };
 
@@ -117,7 +127,7 @@ const pisoCantidad = async (db, regla, { productoId, atributoId = null, variante
   let sql;
   let params;
   if (varianteId) {
-    sql = `SELECT COALESCE(v.precio, ap.precio, pc.precio) AS precio,
+    sql = `SELECT COALESCE(v.precio, ap.precio, pc.precio) AS precio, pc.sucursal_id,
              ${_selPrecios(`COALESCE(pc.precios, '{}'::jsonb) || COALESCE(ap.precios, '{}'::jsonb)
                             || COALESCE(v.precios, '{}'::jsonb)`)}
            FROM variantes_atributo v
@@ -126,20 +136,22 @@ const pisoCantidad = async (db, regla, { productoId, atributoId = null, variante
            WHERE v.id = $1 AND pc.id = $2`;
     params = [varianteId, productoId];
   } else if (atributoId) {
-    sql = `SELECT COALESCE(ap.precio, pc.precio) AS precio,
+    sql = `SELECT COALESCE(ap.precio, pc.precio) AS precio, pc.sucursal_id,
              ${_selPrecios(`COALESCE(pc.precios, '{}'::jsonb) || COALESCE(ap.precios, '{}'::jsonb)`)}
            FROM atributos_producto ap
            JOIN productos_cantidad pc ON pc.id = ap.producto_id
            WHERE ap.id = $1 AND pc.id = $2`;
     params = [atributoId, productoId];
   } else {
-    sql = `SELECT pc.precio, ${_selPrecios('pc.precios')}
+    sql = `SELECT pc.precio, pc.sucursal_id, ${_selPrecios('pc.precios')}
            FROM productos_cantidad pc WHERE pc.id = $1`;
     params = [productoId];
   }
   const { rows } = await db.query(sql, params);
   if (!rows.length) return null;
-  return pisoDePrecios({ ...rows[0], listaIds: regla.listaIds });
+  const { sucursal_id: sede, ...nodo } = rows[0];
+  if (soloListas.aplica(regla.soloListas, sede)) nodo.precio = null;
+  return pisoDePrecios({ ...nodo, listaIds: regla.listaIds });
 };
 
 const _fmt = (n) => `$${Math.round(n).toLocaleString('es-CO')}`;

@@ -19,6 +19,7 @@ import { ModalEditarProductoCantidad }                   from './ModalEditarProd
 import { ModalEtiquetas }                                from './ModalEtiquetas';
 import { ModalPreciosLista }                            from './ModalPreciosLista';
 import { useListasPrecios }                             from '../../hooks/useListasPrecios';
+import { usePrecioVisible }                            from '../../hooks/useSoloListas';
 import { UltimaVentaBadge }                               from './AntiguedadInventario';
 import { NotaStrip }                                     from './PostItNota';
 import { UbicacionChip }                                 from '../../components/ui/InputUbicacion';
@@ -35,6 +36,9 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
   // Unidades que van en un envío de la red sin recibir: siguen en el stock,
   // pero bloqueadas hasta que se reciban o se anule el envío.
   const enCamino = useEnTransito().get(`cant-${p.id}`);
+  // Solo con listas (opt-in por sede): el precio es el de la lista, no `p.precio`.
+  const precioVis = usePrecioVisible();
+  const precioTarjeta = precioVis.de(p.precio, p);
   const sinStock  = p.stock === 0;
   const stockBajo = !sinStock && p.stock_bajo;
 
@@ -155,7 +159,9 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
               {sinStock ? 'sin stock' : stockBajo ? 'bajo mín.' : 'en stock'}
             </span>
           </div>
-          <span className="text-sm font-semibold text-gray-700">{formatCOP(p.precio || 0)}</span>
+          <span className="text-sm font-semibold text-gray-700">
+            {precioVis.activo && precioTarjeta == null ? 'Sin precio' : formatCOP(precioTarjeta || 0)}
+          </span>
         </div>
 
         {p.stock_minimo > 0 && (

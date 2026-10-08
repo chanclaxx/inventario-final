@@ -94,7 +94,9 @@ function EditorCaracteristica({ titulo, dim, tipos, onChange, onQuitar }) {
   );
 }
 
-export function EditorVariantesNuevas({ estado, onChange, puedeVerCosto = false, codigoActivo = false, codigoAuto = false }) {
+// `ocultarPrecio`: en una sede que vende solo con listas (opt-in por sede) el
+// precio propio de una variante no se cobra, así que no se pide.
+export function EditorVariantesNuevas({ estado, onChange, puedeVerCosto = false, codigoActivo = false, codigoAuto = false, ocultarPrecio = false }) {
   const { data: tiposData } = useQuery({
     queryKey: ['tipos-caracteristica'],
     queryFn:  () => getTipos().then((r) => r.data.data),
@@ -151,7 +153,7 @@ export function EditorVariantesNuevas({ estado, onChange, puedeVerCosto = false,
             <div className="flex flex-col gap-1">
               <p className="text-xs text-gray-500">
                 Se crearán <strong>{hojas.length}</strong> {hojas.length === 1 ? 'variante' : 'variantes'}.
-                Precio vacío = el del producto.{codigoAuto ? ' Cada una nace con su código.' : ''}
+                {ocultarPrecio ? 'El precio se pone en «Precios por lista».' : 'Precio vacío = el del producto.'}{codigoAuto ? ' Cada una nace con su código.' : ''}
               </p>
               <div className="max-h-56 overflow-y-auto flex flex-col gap-1 pr-0.5">
                 {hojas.map((h) => {
@@ -159,10 +161,12 @@ export function EditorVariantesNuevas({ estado, onChange, puedeVerCosto = false,
                   return (
                     <div key={h.clave} className="flex flex-wrap items-center gap-1.5 bg-white border border-gray-100 rounded-lg px-2 py-1.5">
                       <span className="text-xs font-medium text-gray-800 w-full sm:w-28 sm:flex-shrink-0 break-words">{h.label}</span>
+                      {!ocultarPrecio && (
                       <div className="flex-1 min-w-[5.5rem]">
                         <InputMoneda value={f.precio ?? ''} onChange={(val) => setFila(h.clave, 'precio', val)}
                           placeholder="Precio" className={claseCampo} />
                       </div>
+                      )}
                       {puedeVerCosto && (
                         <div className="flex-1 min-w-[5.5rem]">
                           <InputMoneda value={f.costo ?? ''} onChange={(val) => setFila(h.clave, 'costo', val)}

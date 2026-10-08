@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { calcularPrecioTarifa, ORIGEN_LISTA, ORIGEN_TARIFA, ORIGEN_MANUAL } from '../utils/tarifas';
 import { choca, mismasReservas } from '../utils/reservas';
-import { resolverPrecioItem, ORIGEN_LISTA_PRECIO } from '../utils/listasPrecios';
+import {
+  resolverPrecioItem, ORIGEN_LISTA_PRECIO, esItemSoloListas, precioBaseSoloListas,
+} from '../utils/listasPrecios';
 import { ORIGEN_OBSEQUIO } from '../utils/obsequios';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,8 +25,57 @@ import { ORIGEN_OBSEQUIO } from '../utils/obsequios';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VENDER SOLO CON LISTAS (opt-in por sede; `solo` null = como siempre)
+//
+// En una sede que lo encendió, un producto POR CANTIDAD no usa su precio
+// predeterminado: su `precio` base pasa a ser el de la LISTA PRINCIPAL (o 0 =
+// «sin precio»). Se cambia AQUÍ, en el `precio` del ítem, y no en cada cálculo:
+// todo lo que cae al «precio de siempre» —quitar la lista, la lista que no lo
+// menciona, desmarcar un obsequio, el piso del precio mínimo, el valor que
+// viaja al despacho— lee ese campo, así que lo hereda sin tocarse. Y las doce
+// pantallas que agregan al carrito siguen mandando lo que mandaban: varias
+// caían a `precio || costo`, y eso aquí deja de llegar al cliente.
+//
+// El predeterminado original se guarda en `precio_normal` para poder devolverlo
+// si la sede apaga la función con el carrito lleno.
+//
+// `precios === undefined` es «no sé» (un borrador cargado no trae el mapa) y
+// ese ítem no se toca: rebajarlo a 0 sería borrar el precio que se negoció.
+// Los equipos con IMEI nunca entran (decisión del negocio).
+// ─────────────────────────────────────────────────────────────────────────────
+const _conBase = (item, solo) => {
+  if (!solo || !esItemSoloListas(item) || item.precios === undefined) {
+    if (!item.solo_listas) return item;
+    const { solo_listas: _marca, precio_normal: normal, ...resto } = item;
+    return { ...resto, precio: normal ?? resto.precio };
+  }
+  const base = precioBaseSoloListas(item.precios, solo.principalId);
+  if (item.solo_listas && item.precio === base) return item;
+  return {
+    ...item,
+    precio_normal: item.solo_listas ? item.precio_normal : item.precio,
+    precio:        base,
+    solo_listas:   true,
+  };
+};
+
+/**
+ * Reacomoda un ítem que YA estaba en el carrito cuando cambia la regla de la
+ * sede (la config terminó de cargar, o el admin la encendió). Lo escrito a
+ * mano y los obsequios conservan lo que cobran: solo se les corrige la base.
+ */
+const _reubicar = (item, solo) => {
+  const base = _conBase(item, solo);
+  if (base === item) return item;
+  if (item.obsequio || item.origen_precio === ORIGEN_MANUAL || item.tarifa_id) return base;
+  return _conLista(base, item.lista_precio_id ? { id: item.lista_precio_id } : null);
+};
+
 /** Normaliza un ítem recién agregado. `costo` es opcional. */
-const _itemNuevo = (item, listaActiva = null) => ({
+const _itemNuevo = (crudo, listaActiva = null, solo = null) => _itemNormalizado(_conBase(crudo, solo), listaActiva);
+
+const _itemNormalizado = (item, listaActiva) => ({
   ...item,
   precioFinal:   item.precio,
   costo:         item.costo != null && Number.isFinite(Number(item.costo)) && Number(item.costo) > 0
@@ -158,7 +209,7 @@ const useCarritoStore = create(
         const reserva = get().reservas[item.key];
         if (choca(item, reserva, 1)) return set({ conflicto: { item, reserva } });
 
-        set({ items: [...items, _itemNuevo(item, get().listaPrecioActiva)] });
+        set({ items: [...items, _itemNuevo(item, get().listaPrecioActiva, get().soloListas)] });
       },
 
       // Agrega saltándose el chequeo de reservas. Solo lo llama el modal de
@@ -173,7 +224,7 @@ const useCarritoStore = create(
             ? items.map((i) =>
                 i.key === item.key ? { ...i, cantidad: (i.cantidad || 1) + 1 } : i
               )
-            : [...items, _itemNuevo(item, get().listaPrecioActiva)],
+            : [...items, _itemNuevo(item, get().listaPrecioActiva, get().soloListas)],
         });
       },
 
@@ -195,7 +246,7 @@ const useCarritoStore = create(
         }
 
         if (!existe) {
-          set({ items: [...items, _itemNuevo(item, get().listaPrecioActiva)] });
+          set({ items: [...items, _itemNuevo(item, get().listaPrecioActiva, get().soloListas)] });
           return 'agregado';
         }
         const tope = existe.stock != null ? Number(existe.stock) : Infinity;
@@ -220,6 +271,20 @@ const useCarritoStore = create(
       // dispositivo nuevo arranca en `null`, que es el precio de siempre: el
       // caso sin configurar nunca cobra de menos.
       listaPrecioActiva: null,
+
+      // ── Vender solo con listas (opt-in POR SEDE) ──────────────────────────
+      // `{ principalId }` cuando la sede abierta vende sus productos por
+      // cantidad solo con listas; null = como siempre. Lo vuelca
+      // `useSincronizarSoloListas` desde el query ['config'], igual que las
+      // reservas: así la regla vive dentro de agregarItem. NO se persiste: es
+      // una foto del servidor y de la sede elegida, y se repone al montar.
+      soloListas: null,
+
+      setSoloListas: (principalId) => {
+        const nuevo = principalId ? { principalId } : null;
+        if ((get().soloListas?.principalId ?? null) === (nuevo?.principalId ?? null)) return;
+        set({ soloListas: nuevo, items: get().items.map((i) => _reubicar(i, nuevo)) });
+      },
 
       aplicarListaPrecio: (key, lista) => {
         set({

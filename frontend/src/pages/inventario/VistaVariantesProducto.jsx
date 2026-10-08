@@ -25,6 +25,8 @@ import useCarritoStore from '../../store/carritoStore';
 import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ModalPreciosLista } from './ModalPreciosLista';
 import { useListasPrecios } from '../../hooks/useListasPrecios';
+import { usePrecioVisible } from '../../hooks/useSoloListas';
+import { AvisoSoloListas } from '../../components/ui/AvisoSoloListas';
 import { ChipApartado } from './ChipApartado';
 import { ChipEnCamino } from './ChipEnCamino';
 import { useEnTransito } from '../../hooks/useEnTransito';
@@ -68,7 +70,7 @@ function colorBarra(stock, minimo) {
 }
 
 // ─── Modal crear/editar nodo ──────────────────────────────────────────────────
-function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false, codigoAuto = false, puedeVerCosto = false }) {
+function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, isPending, error, onEliminar, ocultarCosto = false, codigoActivo = false, codigoAuto = false, puedeVerCosto = false, ocultarPrecio = false }) {
   const [valor,         setValor]         = useState(datoInicial?.valor || '');
   const [stockMin,      setStockMin]      = useState(datoInicial?.stock_minimo ?? 0);
   const [precio,        setPrecio]        = useState(datoInicial?.precio || '');
@@ -179,6 +181,9 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           onChange={(e) => setStockMin(Number(e.target.value))}
         />
 
+        {/* Solo con listas (opt-in por sede): el precio propio de la talla no
+            se cobra, así que no se pide. El que tuviera se conserva al guardar. */}
+        {ocultarPrecio ? <AvisoSoloListas /> : (
         <Input
           label="Precio (opcional — sobreescribe el del producto)"
           type="number" min="0"
@@ -186,6 +191,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
           onChange={(e) => setPrecio(e.target.value)}
           placeholder="Dejar vacío para usar el precio del producto"
         />
+        )}
 
         {mostrarCosto && (
           <div className="flex flex-col gap-1">
@@ -242,6 +248,9 @@ function TarjetaNodo({
   // cosa que exista en el estante.
   onEtiquetar,
   precioPadre,
+  // Solo con listas (opt-in por sede): el precio ya resuelto por lista.
+  // `undefined` = función apagada, y la tarjeta pinta lo de siempre.
+  precioLista,
   // La tarjeta sirve tanto para atributos como para variantes, y cada uno arma
   // su clave de carrito distinto. La manda quien la usa, que es el único que
   // sabe en qué nivel está.
@@ -268,7 +277,7 @@ function TarjetaNodo({
     ? Math.min(nodo.stock / (nodo.stock_minimo * 2), 1)
     : nodo.stock > 0 ? 1 : 0;
 
-  const precioMostrar = nodo.precio || precioPadre;
+  const precioMostrar = precioLista !== undefined ? precioLista : (nodo.precio || precioPadre);
   const clickable     = tieneHijos || (esAdmin && !tieneHijos);
 
   return (
@@ -410,6 +419,10 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
   });
   const agregarItem = useCarritoStore((s) => s.agregarItem);
   const listasCfg  = useListasPrecios();
+  // Solo con listas (opt-in por sede): los precios del árbol son los de la
+  // lista, y el formulario de una talla no pide precio. Apagado, lo de siempre.
+  const precioVis  = usePrecioVisible();
+  const precioCabecera = precioVis.de(producto.precio, producto);
   const [verPrecios, setVerPrecios] = useState(false);
 
   // `esAdmin` aquí significa "puede administrar el catálogo", que NO es lo mismo
@@ -686,6 +699,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 esAdmin={esAdmin}
                 puedeVerCosto={puedeVerCostoInv}
                 precioPadre={atributoActualizado?.precio || producto.precio}
+                precioLista={precioVis.activo ? precioVis.de(null, producto, atributoActualizado, v) : undefined}
                 onDrillDown={() => {}}
                 onAgregar={() => handleAgregarVariante(v)}
                 onEditar={() => { setErrorM(''); setModalNodo({ modo: 'editar-var', dato: v }); }}
@@ -722,6 +736,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             codigoActivo={codigoActivo}
             codigoAuto={codigoAuto}
             puedeVerCosto={puedeVerCosto}
+            ocultarPrecio={precioVis.activo}
           />
         )}
         {modalNodo?.modo === 'editar-var' && (
@@ -737,6 +752,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
             codigoActivo={codigoActivo}
             codigoAuto={codigoAuto}
             puedeVerCosto={puedeVerCosto}
+            ocultarPrecio={precioVis.activo}
             onEliminar={() => { mutEliminarVar.mutate(modalNodo.dato.id); cerrarModal(); }}
           />
         )}
@@ -820,8 +836,8 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
               {stockTotal}
             </span>
             <span className="text-xs text-gray-400">unidades totales</span>
-            {producto.precio && (
-              <span className="text-xs font-semibold text-gray-500 ml-1">{formatCOP(producto.precio)}</span>
+            {precioCabecera && (
+              <span className="text-xs font-semibold text-gray-500 ml-1">{formatCOP(precioCabecera)}</span>
             )}
           </div>
         </div>
@@ -938,6 +954,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
                 esAdmin={esAdmin}
                 puedeVerCosto={puedeVerCostoInv}
                 precioPadre={producto.precio}
+                precioLista={precioVis.activo ? precioVis.de(null, producto, atributo) : undefined}
                 pista={pistaHijos}
                 onDrillDown={() => entrarEnAtributo(atributo)}
                 onAgregar={() => handleAgregarAtributo(atributo)}
@@ -976,6 +993,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           codigoActivo={codigoActivo}
           codigoAuto={codigoAuto}
           puedeVerCosto={puedeVerCosto}
+          ocultarPrecio={precioVis.activo}
         />
       )}
       {modalNodo?.modo === 'editar-atr' && (
@@ -991,6 +1009,7 @@ export function VistaVariantesProducto({ producto, sucursalId, esAdmin, onClose,
           codigoActivo={codigoActivo}
           codigoAuto={codigoAuto}
           puedeVerCosto={puedeVerCosto}
+          ocultarPrecio={precioVis.activo}
           onEliminar={() => { mutEliminarAtr.mutate(modalNodo.dato.id); cerrarModal(); }}
           ocultarCosto={modalNodo.dato.variantes?.length > 0}
         />

@@ -9,6 +9,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP } from '../../utils/formatters';
 import { guardarPreciosNodos } from '../../api/listasPrecios.api';
 import { normalizarPrecios, precioEnLista } from '../../utils/listasPrecios';
+import { useSoloListas } from '../../hooks/useSoloListas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Poner los precios de un producto en cada lista.
@@ -65,6 +66,10 @@ const _filasDelProducto = (producto, arbol) => {
 };
 
 function EditorPrecios({ producto, arbol = [], listas, tipo = 'cantidad', onCerrar }) {
+  // Solo con listas (opt-in por sede): un producto por cantidad sin precio en
+  // ninguna lista NO cae a su precio normal. El texto de abajo lo dice.
+  const solo = useSoloListas();
+  const sinRespaldo = solo.activo && tipo !== 'serial';
   const queryClient = useQueryClient();
 
   // Las filas se calculan UNA vez al montar. El modal se remonta por `key`
@@ -152,8 +157,17 @@ function EditorPrecios({ producto, arbol = [], listas, tipo = 'cantidad', onCerr
           <Info size={14} className="flex-shrink-0 mt-0.5 text-gray-400" />
           <span>
             Deja una casilla vacía para que <b>herede</b> el precio del nivel de arriba.
-            Lo que quede sin precio en ninguna lista se vende a su precio normal
-            ({formatCOP(Number(producto.precio) || 0)}).
+            {sinRespaldo ? (
+              <>
+                {' '}Sin lista elegida se cobra <b>{solo.principal.nombre}</b>. Lo que quede sin
+                precio en ninguna lista entra al carrito <b>sin precio</b> y hay que escribirlo.
+              </>
+            ) : (
+              <>
+                {' '}Lo que quede sin precio en ninguna lista se vende a su precio normal
+                ({formatCOP(Number(producto.precio) || 0)}).
+              </>
+            )}
           </span>
         </div>
 

@@ -21,6 +21,12 @@
 //
 //   cd backend && node scripts/subir-precios-lista-tesla.js            (en seco)
 //   cd backend && node scripts/subir-precios-lista-tesla.js --aplicar
+//
+// `--solo-nodos=<archivo>` (7-oct): después de igualar el catálogo de la sede 48
+// al de la bodega (`sincronizar-catalogo-tesla-48.js`), carga los precios SOLO a
+// los nodos que ese script creó o renombró —los que el 6-oct no tenían par—. No
+// toca la bodega ni vuelve a escribir lo ya cargado: si alguien corrigió un
+// precio en pantalla desde entonces, se respeta.
 require('dotenv').config();
 const { Pool } = require('pg');
 const fs = require('fs');
@@ -43,6 +49,10 @@ const util = require('../src/utils/listasPrecios.util');
 
 const APLICAR = process.argv.includes('--aplicar');
 const VERBOSO = process.argv.includes('--detalle');
+const ARG_NODOS = process.argv.find((a) => a.startsWith('--solo-nodos='));
+const SOLO_NODOS = ARG_NODOS
+  ? JSON.parse(fs.readFileSync(path.resolve(__dirname, ARG_NODOS.split('=')[1]), 'utf8'))
+  : null;
 const NEGOCIO = 33, BODEGA = 40, TESLA = 48;
 const RAIZ = path.join(__dirname, '..', '..');
 const ARCHIVO_BODEGA = path.join(RAIZ, 'precios-por-lista-AMERICAS.xlsx');
@@ -227,6 +237,14 @@ const aplicarSede = async (c, sucursalId, escrituras, anteriores, respaldo) => {
   muestra('bodega', resB.escrituras, porTokenBodega);
   muestra('Tesla', resT.escrituras, porTokenTesla);
 
+  if (SOLO_NODOS) {
+    const permitido = new Set(Object.entries(SOLO_NODOS).flatMap(([nivel, ids]) => ids.map((id) => `${nivel}:${id}`)));
+    const antes = resT.escrituras.length;
+    resT.escrituras = resT.escrituras.filter((e) => permitido.has(`${e.nivel}:${e.id}`));
+    resB.escrituras = [];
+    console.log(`\n--solo-nodos: la bodega no se toca · Tesla: ${resT.escrituras.length} de ${antes} escrituras son de los ${permitido.size} nodos nuevos`);
+  }
+
   const niveles = (es) => JSON.stringify(es.reduce((m, e) => ({ ...m, [e.nivel]: (m[e.nivel] || 0) + 1 }), {}));
   console.log(`\nEscrituras — bodega: ${resB.escrituras.length} ${niveles(resB.escrituras)} · Tesla: ${resT.escrituras.length} ${niveles(resT.escrituras)}`);
   const ajenos = [...resB.escrituras, ...resT.escrituras].filter((e) => !TABLA[e.nivel]);
@@ -254,6 +272,8 @@ const aplicarSede = async (c, sucursalId, escrituras, anteriores, respaldo) => {
     process.exitCode = 1;
     return;
   } finally { c.release(); }
+
+  if (SOLO_NODOS) { await pool.end(); return; }
 
   // ── 5. Comprobar: el mismo libro, vuelto a leer, ya no cambia nada ──────────
   const vB = resolverLibro(libro(nombreDe[BODEGA], filasB),

@@ -3,6 +3,7 @@ const repo   = require('./config.repository');
 const { pool } = require('../../config/db');
 
 const SALT_ROUNDS = 10;
+const soloListas = require('../../utils/soloListas.util');
 
 // ── Claves que requieren hasheo antes de guardarse ────────────────────────────
 // Añadir aquí cualquier clave futura que deba hashearse.
@@ -473,6 +474,21 @@ const saveConfig = async (negocioId, datos) => {
         + 'las dos deciden el precio de venta en el carrito. '
         + 'Apaga primero las listas de precios.',
     };
+  }
+
+  // ── Sedes que venden SOLO con listas de precios (opt-in, por sede) ────────
+  //
+  // En esas sedes los productos por cantidad dejan de usar su precio
+  // predeterminado, así que no pueden quedarse sin de dónde cobrar: se exige
+  // que las listas estén activas y que la lista principal exista. Se mira el
+  // estado FINAL (lo que llega más lo guardado) porque apagar las listas o
+  // borrar la principal en otra petición dejaría esas sedes sin precio.
+  // Sin sedes elegidas —los 28 negocios— no valida nada.
+  if (soloListas.CLAVES.some((k) => datosProcesados[k] !== undefined)) {
+    const { rows: sedes } = await pool.query(
+      'SELECT id FROM sucursales WHERE negocio_id = $1', [negocioId]);
+    Object.assign(datosProcesados, soloListas.validarGuardado(
+      datosProcesados, await repo.getMap(negocioId), sedes.map((r) => r.id)));
   }
 
   // ── El precio mínimo y las tarifas porcentuales también son EXCLUYENTES ───

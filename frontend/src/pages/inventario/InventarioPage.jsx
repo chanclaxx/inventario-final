@@ -20,6 +20,7 @@ import { TabCatalogo }             from './TabCatalogo';
 import { TabUbicaciones }          from './TabUbicaciones';
 import { formatCOP }               from '../../utils/formatters';
 import { useBorradores, useSincronizarReservas } from '../../hooks/useBorradores';
+import { useSincronizarSoloListas } from '../../hooks/useSoloListas';
 import { ModalConflictoBorrador }  from './ModalConflictoBorrador';
 import { ModalEtiquetas }          from './ModalEtiquetas';
 import { ModalPreciosExcel }      from './ModalPreciosExcel';
@@ -80,6 +81,11 @@ export default function InventarioPage() {
   // agregarItem, así que lo heredan los nueve sitios que agregan al carrito
   // —incluidos traslado, despacho y devolución— sin tocar ninguno.
   useSincronizarReservas();
+
+  // Mismo patrón para «vender solo con listas» (opt-in por sede): la regla se
+  // vuelca al store y agregarItem la aplica a los productos por cantidad. En el
+  // negocio o la sede que no lo encendió vuelca null y nada cambia.
+  useSincronizarSoloListas();
 
   // Las etiquetas solo existen si el negocio encendió el código único: sin
   // código no hay nada que imprimir. Mismo interruptor que ya usa la barra de

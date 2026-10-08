@@ -160,6 +160,49 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > La ÚNICA excepción al piso es un **obsequio** (abajo).
 > Prueba: `56-precio-minimo` (55; la sección 1 es la de apagada).
 
+> **Vender SOLO con listas — por SEDE** (`utils/soloListas.util.js`,
+> `hooks/useSoloListas.js`, `carritoStore._conBase`; opt-in
+> `listas_precios_solo_sucursales` —arreglo JSON de ids de sucursal, **ausente o
+> vacío = ninguna**— más `listas_precios_principal`; Ajustes → Precios → «Vender
+> solo con listas»; pedido de Tesla, 7-oct-2026). En sus locales el «precio de
+> venta» ya casi no existía (30 de 1.956 productos) y sin lista elegida el
+> carrito caía a $0 o al **costo** (`precio || costo_unitario`, que mandan
+> varias pantallas). En las sedes elegidas, los productos **POR CANTIDAD** dejan
+> de usar su precio predeterminado y la **lista principal** ocupa su lugar: el
+> carrito sin lista elegida, la tarjeta, la etiqueta, y el producto que la
+> lista elegida no menciona. **Por sede y no por negocio** (decisión del
+> usuario: solo «TESLA SMARTPHONESHOP»; la bodega, Bunny y Camilo siguen igual).
+> **Los equipos con IMEI NO entran** (decisión del usuario): conservan el precio
+> de la referencia y el de cada unidad.
+> **La regla vive en el `precio` del ítem, no en cada cálculo**: el store cambia
+> la base del ítem por el precio de la lista principal (0 = sin precio; el
+> predeterminado queda en `precio_normal`), y todo lo que cae al «precio de
+> siempre» —quitar la lista, desmarcar un obsequio, el piso del precio mínimo,
+> el valor que viaja al despacho— lo hereda sin tocarse, igual que las doce
+> pantallas que agregan al carrito. La vuelca `useSincronizarSoloListas`
+> (montado en `InventarioPage`, como las reservas) y **no se persiste**.
+> `precios === undefined` es «no sé» (un borrador cargado) y ese ítem no se toca.
+> **Sin precio en ninguna lista**: entra en 0, se marca (`sinPrecioSoloListas`,
+> DERIVADO) y no se deja facturar ni prestar hasta escribirlo. Un 0 tecleado a
+> mano no cuenta: sin precio mínimo, así se regala. Es guarda de pantalla: el
+> backend no rechaza el $0.
+> A medio configurar (listas apagadas, principal borrada) la regla se APAGA
+> —`leerDeMapa` devuelve null— y `saveConfig` no deja llegar ahí: con sedes
+> elegidas no se apagan las listas ni se borra la principal. **`precio` no se
+> borra ni se reescribe**: los formularios esconden el campo y siguen mandando
+> el valor que había; quitar la sede devuelve todo.
+> Backend: el precio mínimo ignora el predeterminado de un nodo por cantidad en
+> esas sedes; las etiquetas imprimen la lista principal (`_conPrecioDeLista`,
+> DESPUÉS de la consulta: el SQL de los demás no cambia); la plantilla de
+> precios deja «Precio actual» vacío en su hoja. **Pendiente, a propósito**:
+> `BusquedaPage`, reportes (inventario a precio de venta, asesoría), export e
+> importación de inventario, catálogo web y despacho siguen leyendo `precio`
+> —ninguno pesa en un local sin catálogo web—; hacerlo por negocio entero
+> exigiría cubrirlos.
+> Prueba: `76-solo-listas` (80; la sección 1 es la de apagado y sedes no
+> elegidas, la 2 el guardado, la 7 backend == navegador) y
+> `frontend/scripts/prueba-solo-listas.mjs` (41; compila el store REAL con Vite).
+
 > **Obsequios — se regala, se factura en $0 y el COSTO sigue contando**
 > (`utils/obsequios.util.js`, `lineas_factura.obsequio`,
 > `20260920_obsequios.sql`; botón «Marcar como obsequio» en el CARRITO, que es
