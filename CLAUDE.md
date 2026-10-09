@@ -834,6 +834,24 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > la sede y los créditos — activos de una sede == los de la pestaña Créditos,
 > ids y total a pagar).
 
+> **Las personas se buscan SIN TILDES — y no se crean dos veces**
+> (`utils/textoBusqueda.util.js`, `frontend/src/utils/texto.js`; reportado por
+> un cliente, oct-2026): el teclado del celular pone «María» y quien busca
+> escribe «maria» (o al revés). `GET /clientes?filtro=` y los selectores de
+> `ModalPrestamo` comparaban exacto, la persona «no existía» y se creaba otra.
+> Ahora término y columna pasan por la MISMA normalización (`normalizarTexto` /
+> `sqlSinTildes`: minúsculas, sin tildes —también mayúsculas con tilde y marcas
+> combinantes— y espacios colapsados). Un **compañero** o un **empleado** suyo
+> solo tiene nombre, así que el mismo nombre normalizado responde 409
+> `PRESTATARIO_EXISTE` / `EMPLEADO_EXISTE` (también al renombrar); un
+> **cliente** se identifica por cédula (409 `CLIENTE_EXISTE`) y un homónimo con
+> otra cédula SÍ se crea — la pantalla solo lo muestra antes de guardar. Los
+> tres 409 traen `detalle.existente` y el modal lo selecciona solo. Fuera, a
+> propósito: los duplicados que YA existen no se fusionan, y las facturas a
+> crédito sin cédula siguen agrupándose por el nombre exacto
+> (`COALESCE(cedula, nombre)`). Prueba: `77-clientes-sin-tildes` (43; la 1 es
+> la de lo que ya funcionaba y la 4 compara SQL contra JS).
+
 > **La lista de módulos está DUPLICADA a mano** (`backend/src/config/modulos.js`
 > y `MODULOS`/`PERMISOS_BASE` en `UsuariosConfig.jsx`): el frontend no puede
 > importar del backend y las dos copias se separaron. Al frontend le faltaba

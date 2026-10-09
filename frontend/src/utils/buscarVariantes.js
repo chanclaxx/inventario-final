@@ -10,6 +10,7 @@
 // busquen igual; el estado está en `hooks/useBuscadorVariantes.js` y el cuadro
 // en `components/ui/BuscadorVariantes.jsx`.
 // ─────────────────────────────────────────────────────────────────────────────
+import { normalizarTexto } from './texto.js';
 
 // Con ESTAS variantes o más aparece el buscador. Por debajo la lista se abarca
 // de un vistazo y un cuadro de más solo estorba: ahí ningún selector cambia.
@@ -22,13 +23,7 @@
 export const MIN_VARIANTES_BUSCADOR = 6;
 
 /** Minúsculas, sin tildes y sin espacios repetidos: «Café » y «cafe» son lo mismo. */
-export const normalizarBusqueda = (texto) =>
-  String(texto ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+export const normalizarBusqueda = normalizarTexto;
 
 // Por dónde se encuentra una hoja: su valor, el de su padre («Talla: 38MM»
 // cuando la hoja es el color) y su código — así también sirve leer la

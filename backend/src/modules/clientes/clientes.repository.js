@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { sqlSinTildes, patronLike } = require('../../utils/textoBusqueda.util');
 
 const findAll = async (negocioId, filtro) => {
   let query = `
@@ -18,15 +19,14 @@ const findAll = async (negocioId, filtro) => {
   `;
   const params = [negocioId];
 
-  if (filtro) {
-    // ── Mismo escape que aplicamos en acreedores ──
-    const filtroSeguro = filtro
-      .toLowerCase()
-      .replace(/[%_\\]/g, '\\$&')
-      .slice(0, 100);
-
+  // Sin tildes en las DOS orillas (textoBusqueda.util): «maria» encuentra a
+  // «María» y «María» a «Maria». Comparando exacto, el vendedor no encontraba
+  // al cliente y lo creaba otra vez.
+  const filtroSeguro = patronLike(filtro);
+  if (filtroSeguro) {
     params.push(`%${filtroSeguro}%`);
-    query += ` AND (LOWER(c.nombre) LIKE $2 ESCAPE '\\' OR c.cedula LIKE $2 ESCAPE '\\' OR c.celular LIKE $2 ESCAPE '\\')`;
+    query += ` AND (${sqlSinTildes('c.nombre')} LIKE $2 ESCAPE '\\'`
+           + ` OR LOWER(c.cedula) LIKE $2 ESCAPE '\\' OR LOWER(c.celular) LIKE $2 ESCAPE '\\')`;
   }
 
   query += ` GROUP BY c.id ORDER BY c.nombre`;
@@ -46,24 +46,18 @@ const findAll = async (negocioId, filtro) => {
 const BUSQUEDA_MIN = 2;
 const BUSQUEDA_LIMITE = 12;
 
-// Acentos: la columna se normaliza con TRANSLATE (no requiere la extensión
-// unaccent, que puede no estar instalada) y el término se normaliza en JS con
-// el mismo criterio, para que "maria" encuentre a "María".
-const NOMBRE_NORMALIZADO = `TRANSLATE(LOWER(nombre), 'áéíóúüñ', 'aeiouun')`;
+// Acentos: la columna y el término se normalizan con la MISMA regla
+// (textoBusqueda.util), para que "maria" encuentre a "María" y al revés.
+const NOMBRE_NORMALIZADO = sqlSinTildes('nombre');
 
 const buscar = async (negocioId, termino) => {
   const q = (termino || '').trim();
   if (q.length < BUSQUEDA_MIN) return [];
 
   // Mismo escape que findAll/acreedores + normalización de acentos.
-  // El recorte va ANTES del escape: cortar después podría partir un `\`
+  // `patronLike` recorta ANTES del escape: cortar después podría partir un `\`
   // introducido por el escape y dejar un patrón LIKE inválido.
-  const filtroSeguro = q
-    .slice(0, 100)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[%_\\]/g, '\\$&');
+  const filtroSeguro = patronLike(q);
 
   const { rows } = await pool.query(`
     SELECT id, nombre, cedula, celular, email, direccion

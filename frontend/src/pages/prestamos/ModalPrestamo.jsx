@@ -25,6 +25,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { usePrecioMinimo } from '../../hooks/usePrecioMinimo';
 import { pisoItemCarrito, bajoMinimo, itemsBajoMinimo } from '../../utils/precioMinimo';
 import { esObsequio } from '../../utils/obsequios';
+import { contieneTexto, buscarHomonimo, normalizarTexto } from '../../utils/texto';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -32,6 +33,14 @@ const TIPOS_CLIENTE = [
   { id: 'companero', label: 'Compañero', Icn: User  },
   { id: 'cliente',   label: 'Cliente',   Icn: Users },
 ];
+
+// El backend rechaza un duplicado (cédula repetida, o el mismo nombre con
+// otras tildes) devolviendo el que ya existe: ese es el que se usa.
+const CODIGOS_YA_EXISTE = ['CLIENTE_EXISTE', 'PRESTATARIO_EXISTE', 'EMPLEADO_EXISTE'];
+const existenteDe = (err) => {
+  const data = err?.response?.data;
+  return CODIGOS_YA_EXISTE.includes(data?.code) ? data?.detalle?.existente ?? null : null;
+};
 
 // ─── SelectorOCrear ───────────────────────────────────────────────────────────
 
@@ -43,6 +52,9 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
   if (loading) return <Spinner className="py-4" />;
 
   if (modo === 'crear') {
+    // Ya existe con otras tildes o mayúsculas: se ofrece ESE en vez de crear
+    // otro. El backend lo rechaza igual (PRESTATARIO_EXISTE / EMPLEADO_EXISTE).
+    const homonimo = buscarHomonimo(items, nombre);
     return (
       <div className="flex flex-col gap-2">
         <button
@@ -58,19 +70,34 @@ function SelectorOCrear({ items, onSeleccionar, onCrear, placeholder, labelCrear
           onChange={(e) => setNombre(e.target.value)}
           autoFocus
         />
-        <Button
-          size="sm"
-          disabled={!nombre.trim()}
-          onClick={() => { onCrear(nombre.trim()); setNombre(''); setModo('seleccionar'); }}
-        >
-          Guardar
-        </Button>
+        {homonimo ? (
+          <div className="flex flex-col gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+            <p className="text-xs text-amber-800">
+              Ya existe <span className="font-semibold">«{homonimo.nombre}»</span>. Usa ese para no duplicarlo.
+            </p>
+            <Button
+              size="sm"
+              onClick={() => { onSeleccionar(homonimo); setNombre(''); setModo('seleccionar'); }}
+            >
+              Usar «{homonimo.nombre}»
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            disabled={!nombre.trim()}
+            onClick={() => { onCrear(nombre.trim()); setNombre(''); setModo('seleccionar'); }}
+          >
+            Guardar
+          </Button>
+        )}
       </div>
     );
   }
 
+  // Sin tildes ni mayúsculas: «maria» encuentra a «María» y al revés.
   const filtrados = busqueda.trim()
-    ? items.filter((item) => item.nombre?.toLowerCase().includes(busqueda.toLowerCase()))
+    ? items.filter((item) => contieneTexto(item.nombre, busqueda))
     : items;
 
   return (
@@ -129,11 +156,21 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
   });
 
   const mostrarResultados = busqueda.trim().length > 0;
+  // Sin tildes ni mayúsculas: «maria» encuentra a «María» y al revés.
   const clientesFiltrados = mostrarResultados
-    ? items.filter((c) => {
-        const q = busqueda.toLowerCase();
-        return c.nombre?.toLowerCase().includes(q) || c.cedula?.toLowerCase().includes(q);
-      })
+    ? items.filter((c) => contieneTexto(c.nombre, busqueda) || contieneTexto(c.cedula, busqueda))
+    : [];
+
+  // Al crear: la misma cédula ES el mismo cliente (el backend la rechaza), y
+  // el mismo nombre con otras tildes PROBABLEMENTE lo es — se muestra para que
+  // se elija en vez de duplicarlo, sin impedir crear a un homónimo de verdad.
+  const cedulaNueva = form.cedula.trim();
+  const mismaCedula = cedulaNueva
+    ? items.find((c) => String(c.cedula ?? '').trim() === cedulaNueva) ?? null
+    : null;
+  const nombreNuevo = normalizarTexto(form.nombre);
+  const mismoNombre = nombreNuevo && !mismaCedula
+    ? items.filter((c) => normalizarTexto(c.nombre) === nombreNuevo).slice(0, 3)
     : [];
 
   const handleCrear = () => {
@@ -170,9 +207,37 @@ function SelectorOCrearCliente({ items, onSeleccionar, onCrear, loading }) {
           value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} />
         <Input label="Notas" placeholder="Observaciones opcionales..."
           value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} />
-        <Button size="sm" disabled={!form.nombre.trim() || !form.cedula.trim()} onClick={handleCrear}>
-          Guardar cliente
-        </Button>
+        {mismaCedula ? (
+          <div className="flex flex-col gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+            <p className="text-xs text-amber-800">
+              Esa cédula ya es de <span className="font-semibold">{mismaCedula.nombre}</span>.
+            </p>
+            <Button size="sm" onClick={() => onSeleccionar(mismaCedula)}>
+              Usar «{mismaCedula.nombre}»
+            </Button>
+          </div>
+        ) : (
+          <>
+            {mismoNombre.length > 0 && (
+              <div className="flex flex-col gap-1.5 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <p className="text-xs text-amber-800">
+                  Ya hay {mismoNombre.length === 1 ? 'un cliente' : 'clientes'} con ese nombre. ¿Es alguno de estos?
+                </p>
+                {mismoNombre.map((c) => (
+                  <button key={c.id} type="button" onClick={() => onSeleccionar(c)}
+                    className="text-left text-xs px-2 py-1.5 rounded-lg bg-white border border-amber-100
+                      hover:border-amber-300 transition-colors">
+                    <span className="font-medium text-gray-800">{c.nombre}</span>
+                    <span className="text-gray-400"> · CC {c.cedula}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Button size="sm" disabled={!form.nombre.trim() || !form.cedula.trim()} onClick={handleCrear}>
+              {mismoNombre.length > 0 ? 'No, es otra persona: guardar' : 'Guardar cliente'}
+            </Button>
+          </>
+        )}
       </div>
     );
   }
@@ -371,6 +436,11 @@ export function ModalPrestamo({ open, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['prestatarios'], exact: false });
       setPrestatarioSel(res.data.data);
     },
+    onError: (err) => {
+      const existente = existenteDe(err);
+      if (existente) setPrestatarioSel(existente);
+      else setError(err.response?.data?.error || 'No se pudo crear el compañero');
+    },
   });
 
   const mutCrearEmpleado = useMutation({
@@ -378,6 +448,11 @@ export function ModalPrestamo({ open, onClose }) {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['empleados', prestatarioSel.id], exact: false });
       setEmpleadoSel(res.data.data);
+    },
+    onError: (err) => {
+      const existente = existenteDe(err);
+      if (existente) setEmpleadoSel(existente);
+      else setError(err.response?.data?.error || 'No se pudo crear el empleado');
     },
   });
 
@@ -392,6 +467,12 @@ export function ModalPrestamo({ open, onClose }) {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['clientes-prestamo'], exact: false });
       setClienteSel(res.data.data);
+    },
+    // Antes el error se perdía en silencio y el formulario se vaciaba igual.
+    onError: (err) => {
+      const existente = existenteDe(err);
+      if (existente) setClienteSel(existente);
+      else setError(err.response?.data?.error || 'No se pudo crear el cliente');
     },
   });
 

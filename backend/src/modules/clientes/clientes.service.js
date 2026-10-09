@@ -18,7 +18,16 @@ const buscarPorCedula = (negocioId, cedula) => repo.findByCedula(negocioId, cedu
 
 const crearCliente = async (negocioId, datos) => {
   const existe = await repo.findByCedula(negocioId, datos.cedula);
-  if (existe) throw { status: 409, message: 'Ya existe un cliente con esa cédula' };
+  // Viaja el cliente que ya existe: la pantalla lo selecciona en vez de dejar
+  // al vendedor con un error y la tentación de inventarle otra cédula.
+  if (existe) {
+    throw {
+      status: 409, code: 'CLIENTE_EXISTE',
+      message: `Ya existe un cliente con esa cédula: ${existe.nombre}`,
+      detalle: { existente: { id: existe.id, nombre: existe.nombre, cedula: existe.cedula,
+        celular: existe.celular, email: existe.email, direccion: existe.direccion } },
+    };
+  }
   return repo.create(negocioId, datos);
 };
 

@@ -484,7 +484,14 @@ function BuscadorCliente({ clienteSeleccionado, onClienteSeleccionado }) {
       onClienteSeleccionado(res.data.data);
       setCreandoNuevo(false); setNuevoCliente({ nombre: '', cedula: '', celular: '' }); setBusqueda(''); setError('');
     },
-    onError: (e) => setError(e.response?.data?.error || 'Error al crear el cliente'),
+    onError: (e) => {
+      // La cédula ya era de alguien: ese es el cliente, no uno nuevo.
+      const existente = e.response?.data?.code === 'CLIENTE_EXISTE' ? e.response.data.detalle?.existente : null;
+      if (existente) {
+        onClienteSeleccionado(existente);
+        setCreandoNuevo(false); setNuevoCliente({ nombre: '', cedula: '', celular: '' }); setBusqueda(''); setError('');
+      } else setError(e.response?.data?.error || 'Error al crear el cliente');
+    },
   });
 
   const handleCrear = () => {

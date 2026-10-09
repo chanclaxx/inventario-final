@@ -51,6 +51,7 @@ import { ModalExportarPdfPrestamos }             from './ModalExportarPdfPrestam
 import { ModalReporteEmpleado }                  from './ModalReporteEmpleado';
 import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
+import { contieneTexto }                        from '../../utils/texto';
 import { useAuth }                              from '../../context/useAuth';
 import {
   getProductosSerial, getProductosCantidad,
@@ -3520,7 +3521,7 @@ export default function PrestamosPage() {
   const gruposEntries = Object.entries(gruposRaw);
 
   const gruposBuscados = busquedaPersonas.trim()
-    ? gruposEntries.filter(([, g]) => g.nombre.toLowerCase().includes(busquedaPersonas.trim().toLowerCase()))
+    ? gruposEntries.filter(([, g]) => contieneTexto(g.nombre, busquedaPersonas))
     : gruposEntries;
 
   // Cuántas personas tienen algo vencido en cada sub-pestaña: va en el botón de

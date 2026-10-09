@@ -32,6 +32,7 @@ import api             from '../../api/axios.config';
 import { TabTecnicos }        from './tecnicos/TabTecnicos';
 import { ModalEnviarTecnico } from './tecnicos/ModalEnviarTecnico';
 import { puedeTecnicos }      from '../../utils/permisosTecnicos';
+import { contieneTexto }      from '../../utils/texto';
 import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
@@ -683,7 +684,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
 
                 <div className={`flex flex-wrap gap-1.5 ${frecuentes.length > 12 ? 'max-h-28 overflow-y-auto' : ''}`}>
                   {frecuentes
-                    .filter((c) => !busquedaFrec.trim() || c.nombre.toLowerCase().includes(busquedaFrec.toLowerCase()))
+                    .filter((c) => !busquedaFrec.trim() || contieneTexto(c.nombre, busquedaFrec))
                     .map((cliente) => (
                       <button key={cliente.id}
                         onClick={() => {
@@ -714,7 +715,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
                         </div>
                       </button>
                     ))}
-                  {busquedaFrec.trim() && frecuentes.filter((c) => c.nombre.toLowerCase().includes(busquedaFrec.toLowerCase())).length === 0 && (
+                  {busquedaFrec.trim() && frecuentes.filter((c) => contieneTexto(c.nombre, busquedaFrec)).length === 0 && (
                     <p className="text-xs text-gray-400 py-1">Sin coincidencias</p>
                   )}
                 </div>

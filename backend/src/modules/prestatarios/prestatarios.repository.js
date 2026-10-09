@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { sqlSinTildes, normalizarTexto } = require('../../utils/textoBusqueda.util');
 
 const findAll = async (negocioId) => {
   const { rows } = await pool.query(`
@@ -62,6 +63,29 @@ const update = async (id, negocioId, { nombre, telefono }) => {
   return rows[0] || null;
 };
 
+// El homónimo SIN TILDES: «Maria Lopez» choca con «María López». Así se
+// detectan los duplicados que crea el teclado del celular al ponerle tildes a
+// un nombre que otro escribió sin ellas (o al revés).
+const findHomonimo = async (negocioId, nombre, excluirId = null) => {
+  const { rows } = await pool.query(`
+    SELECT id, nombre, telefono FROM prestatarios
+    WHERE negocio_id = $1 AND ${sqlSinTildes('nombre')} = $2
+      AND ($3::int IS NULL OR id <> $3)
+    ORDER BY id LIMIT 1
+  `, [negocioId, normalizarTexto(nombre), excluirId]);
+  return rows[0] || null;
+};
+
+const findEmpleadoHomonimo = async (prestatarioId, nombre) => {
+  const { rows } = await pool.query(`
+    SELECT id, nombre FROM empleados_prestatario
+    WHERE prestatario_id = $1 AND ${sqlSinTildes('nombre')} = $2
+    ORDER BY id LIMIT 1
+  `, [prestatarioId, normalizarTexto(nombre)]);
+  return rows[0] || null;
+};
+
 module.exports = {
   findAll, findById, create, update, getEmpleados, createEmpleado,
+  findHomonimo, findEmpleadoHomonimo,
 };
