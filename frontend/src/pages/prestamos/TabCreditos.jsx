@@ -36,6 +36,7 @@ import { BadgeVencidosPersona } from './BadgeVencidosPersona';
 import {
   CreditCard, Plus, CheckCircle, XCircle, AlertTriangle, LayoutList, FileDown,
   ChevronLeft, ChevronDown, ChevronUp, RotateCcw, ChevronRight, Loader2, Printer, Layers,
+  Search, X,
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -67,6 +68,26 @@ function vencidosDe(creditos) {
     diasMax = Math.max(diasMax, Math.round((Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86400000));
   }
   return { cuantos, diasMax };
+}
+
+// Sin tildes ni mayúsculas: «Martinez» encuentra «Martínez».
+function normalizarTexto(texto) {
+  return String(texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+// ¿La persona coincide con la búsqueda? Cada PALABRA tiene que aparecer en
+// algún dato —nombre, cédula, celular, número de factura, producto o IMEI de
+// cualquiera de sus créditos—, en cualquier orden: «juan 4567» encuentra a Juan
+// por los últimos dígitos de su celular.
+function coincideBusqueda(persona, palabras) {
+  if (palabras.length === 0) return true;
+  const partes = [persona.nombre_cliente, persona.cedula, persona.celular];
+  for (const c of persona.creditos) {
+    partes.push(c.factura_numero ?? c.factura_id);
+    for (const p of c.productos || []) partes.push(p.nombre, p.imei);
+  }
+  const texto = normalizarTexto(partes.filter(Boolean).join(' '));
+  return palabras.every((w) => texto.includes(w));
 }
 
 // ─── Modal Abono ──────────────────────────────────────────────────────────────
@@ -1176,8 +1197,10 @@ function CardPersonaCredito({ persona, onSeleccionar }) {
 
 // ─── Sección: personas con solo créditos cerrados ────────────────────────────
 
-function SeccionPersonasSinDeuda({ personas, onSeleccionar }) {
-  const [abierto, setAbierto] = useState(false);
+function SeccionPersonasSinDeuda({ personas, onSeleccionar, forzarAbierto = false }) {
+  const [abiertoManual, setAbierto] = useState(false);
+  // Buscando, lo encontrado se muestra sin tener que desplegar la sección.
+  const abierto = abiertoManual || forzarAbierto;
   const total = personas.reduce((s, p) => s + p.creditos.length, 0);
 
   return (
@@ -1233,6 +1256,7 @@ export function TabCreditos({ personaInicial = null, filtroInicial = null }) {
   const [personaSeleccionada, setPersonaSeleccionada] = useState(null);
   // 'vencidos' cuando se llega desde el aviso de cobros vencidos.
   const [filtro,              setFiltro]              = useState(filtroInicial === 'vencidos' ? 'vencidos' : 'todos');
+  const [busqueda,            setBusqueda]            = useState('');
   // Marca que el usuario ya cerró la ficha que abrió la notificación.
   const [cerroInicial,        setCerroInicial]        = useState(false);
   const [creditoAbono,        setCreditoAbono]        = useState(null);
@@ -1269,13 +1293,20 @@ export function TabCreditos({ personaInicial = null, filtroInicial = null }) {
     return Array.from(mapa.values()).map((p) => ({ ...p, vencidos: vencidosDe(p.creditos) }));
   }, [creditosData]);
 
+  const palabras         = normalizarTexto(busqueda).split(/\s+/).filter(Boolean);
+  const buscando         = palabras.length > 0;
   const personasConDeuda = creditosPorPersona.filter((p) => p.creditos.some((c) => c.estado === 'Activo'));
+  // El contador del botón «Vencidos» no depende de la búsqueda: sigue diciendo
+  // cuántos hay en la sede, igual que el aviso.
   const conVencidos      = personasConDeuda.filter((p) => p.vencidos.cuantos > 0);
   // Mirando vencidos, el más atrasado arriba: es a quien hay que llamar primero.
-  const personasActivas  = filtro === 'vencidos'
+  const personasActivas  = (filtro === 'vencidos'
     ? [...conVencidos].sort((a, b) => b.vencidos.diasMax - a.vencidos.diasMax)
-    : personasConDeuda;
-  const personasCerradas = creditosPorPersona.filter((p) => p.creditos.every((c) => c.estado !== 'Activo'));
+    : personasConDeuda
+  ).filter((p) => coincideBusqueda(p, palabras));
+  const personasCerradas = creditosPorPersona
+    .filter((p) => p.creditos.every((c) => c.estado !== 'Activo'))
+    .filter((p) => coincideBusqueda(p, palabras));
 
   // Apertura automática desde una notificación de cobro.
   //
@@ -1348,6 +1379,27 @@ export function TabCreditos({ personaInicial = null, filtroInicial = null }) {
   return (
     <>
       <div className="flex flex-col gap-3">
+        {creditosPorPersona.length > 0 && (
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, cédula, celular, factura, producto o IMEI…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setBusqueda(''); }}
+              className="w-full pl-8 pr-8 py-2 bg-white border border-gray-200 rounded-xl text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
+            />
+            {busqueda && (
+              <button type="button" onClick={() => setBusqueda('')} aria-label="Borrar búsqueda"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Solo aparece si hay algún crédito vencido (o si se llegó filtrando). */}
         {(conVencidos.length > 0 || filtro === 'vencidos') && (
           <div className="flex items-center gap-1 flex-wrap">
@@ -1368,7 +1420,23 @@ export function TabCreditos({ personaInicial = null, filtroInicial = null }) {
         )}
 
         {personasActivas.length === 0 ? (
-          filtro === 'vencidos' ? (
+          buscando ? (
+            // Si la persona solo tiene créditos cerrados, sale abajo; aquí no
+            // se dice «sin resultados» cuando sí los hay.
+            personasCerradas.length === 0 || filtro === 'vencidos' ? (
+              <EmptyState
+                icon={Search}
+                titulo="Sin resultados para tu búsqueda"
+                descripcion={filtro === 'vencidos'
+                  ? 'Nadie con créditos vencidos coincide. Prueba en «Todos».'
+                  : 'Prueba con otro nombre, la cédula, el número de factura o el IMEI'}
+              />
+            ) : (
+              <p className="text-xs text-gray-400 px-1">
+                Nadie con deuda activa coincide. Estas personas ya pagaron:
+              </p>
+            )
+          ) : filtro === 'vencidos' ? (
             <EmptyState
               icon={CheckCircle}
               titulo="Nadie con créditos vencidos"
@@ -1395,6 +1463,7 @@ export function TabCreditos({ personaInicial = null, filtroInicial = null }) {
           <SeccionPersonasSinDeuda
             personas={personasCerradas}
             onSeleccionar={setPersonaSeleccionada}
+            forzarAbierto={buscando}
           />
         )}
       </div>
