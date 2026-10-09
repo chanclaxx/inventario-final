@@ -245,6 +245,20 @@ const aplicarSede = async (c, sucursalId, escrituras, anteriores, respaldo) => {
     console.log(`\n--solo-nodos: la bodega no se toca · Tesla: ${resT.escrituras.length} de ${antes} escrituras son de los ${permitido.size} nodos nuevos`);
   }
 
+  // `--sin-bodega`: solo la sede 48. Lista aparte lo que cambia en nodos que YA
+  // tenían precios, para leerlo antes de aplicar (podría ser una corrección
+  // hecha en pantalla).
+  if (process.argv.includes('--sin-bodega')) {
+    resB.escrituras = [];
+    const conPrecios = resT.escrituras.filter((e) => porTokenTesla.get(`${e.nivel[0]}${e.id}`)?.precios);
+    console.log(`
+--sin-bodega: la bodega no se toca · Tesla: ${resT.escrituras.length} escrituras, ${conPrecios.length} sobre nodos que ya tenían precios:`);
+    for (const e of conPrecios) {
+      const n = porTokenTesla.get(`${e.nivel[0]}${e.id}`);
+      console.log(`     ${n.nombre}${n.detalle ? ' · ' + n.detalle : ''}: ${JSON.stringify(n.precios)} → ${JSON.stringify(e.precios)}`);
+    }
+  }
+
   const niveles = (es) => JSON.stringify(es.reduce((m, e) => ({ ...m, [e.nivel]: (m[e.nivel] || 0) + 1 }), {}));
   console.log(`\nEscrituras — bodega: ${resB.escrituras.length} ${niveles(resB.escrituras)} · Tesla: ${resT.escrituras.length} ${niveles(resT.escrituras)}`);
   const ajenos = [...resB.escrituras, ...resT.escrituras].filter((e) => !TABLA[e.nivel]);
@@ -273,7 +287,13 @@ const aplicarSede = async (c, sucursalId, escrituras, anteriores, respaldo) => {
     return;
   } finally { c.release(); }
 
-  if (SOLO_NODOS) { await pool.end(); return; }
+  if (SOLO_NODOS || process.argv.includes('--sin-bodega')) {
+    const vT = resolverLibro(libro(nombreDe[TESLA], filasT),
+      { listas, porSucursal: new Map([[TESLA, { nombre: nombreDe[TESLA], nodos: await leerNodos(TESLA) }]]) });
+    console.log(`Comprobación — Tesla: quedan ${vT.informe.con_cambio} por cambiar`);
+    await pool.end();
+    return;
+  }
 
   // ── 5. Comprobar: el mismo libro, vuelto a leer, ya no cambia nada ──────────
   const vB = resolverLibro(libro(nombreDe[BODEGA], filasB),

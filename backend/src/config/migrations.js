@@ -1733,6 +1733,16 @@ const aplicarMigraciones = async (client) => {
     if (sqlArchivos) await migrar(client, 'Archivos de compra', sqlArchivos);
   }
 
+  // Cupo extra de sucursales por negocio, que la renovación del plan no pisa.
+  // Ver migrations/20261009_sucursales_extra.sql. Bloque PROPIO: si fallara,
+  // crear sucursal lee la columna con to_jsonb y cuenta solo el plan.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Cupo extra de sucursales', `
+    ALTER TABLE IF EXISTS negocios
+      ADD COLUMN IF NOT EXISTS sucursales_extra INTEGER NOT NULL DEFAULT 0;
+  `);
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

@@ -117,18 +117,23 @@ router.post('/', requireNivel('admin_negocio'), async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'El nombre es requerido' });
     }
 
+    // Límite = el del plan + el cupo extra concedido al negocio
+    // (`sucursales_extra`, que renovar el plan no pisa). Se lee con to_jsonb
+    // para que crear sucursales no dependa de la migración 20261009.
     const { rows: [negocio] } = await pool.query(
-      'SELECT max_sucursales FROM negocios WHERE id = $1',
+      `SELECT n.max_sucursales
+              + COALESCE((to_jsonb(n) ->> 'sucursales_extra')::int, 0) AS limite
+         FROM negocios n WHERE n.id = $1`,
       [req.user.negocio_id]
     );
     const { rows: [conteo] } = await pool.query(
       'SELECT COUNT(*) AS total FROM sucursales WHERE negocio_id = $1 AND activa = true',
       [req.user.negocio_id]
     );
-    if (parseInt(conteo.total) >= negocio.max_sucursales) {
+    if (parseInt(conteo.total) >= negocio.limite) {
       return res.status(400).json({
         ok: false,
-        error: `Tu plan permite máximo ${negocio.max_sucursales} sucursal(es)`,
+        error: `Tu plan permite máximo ${negocio.limite} sucursal(es)`,
       });
     }
 
