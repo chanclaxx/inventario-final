@@ -115,6 +115,9 @@ const findRecientes = async (sucursalId, negocioId, { cursor, dias = 5 }) => {
   return {
     items:           rows,
     siguienteCursor: hayMas.length > 0 ? siguienteCursor : null,
+    // La ventana exacta de esta página: el service la reusa para traer los
+    // despachos del mismo tramo sin volver a calcular fechas.
+    ventana:         { desde: fechaDesde, hasta: fechaHasta },
   };
 };
 

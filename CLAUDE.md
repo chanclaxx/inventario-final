@@ -2509,6 +2509,23 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > fabrica a propósito el estado roto del #21 y con los triggers ya no se puede
 > producir: esa suite no carga esta migración.
 
+> **Los despachos salen en el historial de FACTURAS — sin ser facturas**
+> (`facturas/facturas.despachos.js`, `FilaDespacho` en `FacturarPage`; pedido
+> del usuario, 9-oct-2026): para la bodega un despacho es una salida más y se
+> buscaba ahí. **Solo se LEE `remisiones`**: no se crea fila en `facturas` ni en
+> `lineas_factura`, porque todos los reportes suman esas tablas y el despacho ya
+> se cuenta aparte (grupo «Red interna» de Ventas, utilidad al cobrar); una
+> factura espejo lo contaría dos veces. `/facturas/recientes` trae los del MISMO
+> tramo de fechas en una clave aparte, `despachos` (`items` sigue siendo solo
+> facturas: un frontend viejo no los ve), y `GET /facturas/despachos` los busca
+> (destino, número, producto, IMEI, fechas). Solo entregas y solo en la sede que
+> DESPACHA; exige el módulo `red_interna` y la red encendida con bodega (si no,
+> la respuesta es la de siempre). `valor_total` sigue la lista
+> `red_interna_valores_usuarios` (null para el resto, recortado en el backend).
+> En pantalla no suman al total del día, no se editan ni cancelan, y el ojo abre
+> `ModalDocumentoEnvio`. Prueba: `78-despachos-en-facturas` (41; la 2 —★— que
+> despachar y recibir no escriben en las tablas de ventas).
+
 > **El despacho SALE AL PRECIO DEL CARRITO** (decisión del negocio, sep-2026;
 > `ModalDespachar.conValorInicial`, `valorSegunLista`): el valor de cada línea
 > se pregraba en este orden — **`precio_carrito`** (el precio con el que el ítem

@@ -1,5 +1,6 @@
 const { pool } = require('../../config/db');
 const facturasRepo = require('./facturas.repository');
+const despachosRepo = require('./facturas.despachos');
 const serialRepo   = require('../productos/productosSerial.repository');
 const cantidadRepo = require('../productos/productosCantidad.repository');
 const clientesRepo = require('../clientes/clientes.repository');
@@ -141,11 +142,36 @@ const _leerStockYCosto = async (client, productoId) => {
 const getFacturas = (sucursalId, negocioId) =>
   facturasRepo.findAll(sucursalId, negocioId);
 
-const getFacturasRecientes = (sucursalId, negocioId, { cursor, dias }) =>
-  facturasRepo.findRecientes(sucursalId, negocioId, { cursor, dias });
+// `ctxDespachos` (de facturas.despachos.contextoDespachos) agrega los despachos
+// de la red interna del MISMO tramo de fechas en una clave aparte, `despachos`:
+// `items` sigue siendo solo facturas, así que un frontend viejo no los ve y
+// nada que sume `items` los cuenta como venta.
+const getFacturasRecientes = async (sucursalId, negocioId, { cursor, dias, ctxDespachos = null }) => {
+  const { ventana, ...pagina } = await facturasRepo.findRecientes(sucursalId, negocioId, { cursor, dias });
+  if (!ctxDespachos) return pagina;
+
+  let despachos = [];
+  try {
+    despachos = await despachosRepo.listarDespachos(ctxDespachos, {
+      desde: ventana.desde, hasta: ventana.hasta, limit: 500,
+    });
+    // Sin facturas más viejas el scroll se cortaba aunque quedaran despachos.
+    if (!pagina.siguienteCursor
+        && await despachosRepo.hayDespachosAntes(ctxDespachos, ventana.desde)) {
+      pagina.siguienteCursor = ventana.desde.toISOString();
+    }
+  } catch (err) {
+    // El historial de facturas no puede caerse por la red interna.
+    console.error('[facturas] despachos en el historial:', err.message);
+  }
+  return { ...pagina, despachos };
+};
 
 const buscarFacturas = (sucursalId, negocioId, { q, desde, hasta, limit, offset }) =>
   facturasRepo.buscar(sucursalId, negocioId, { q, desde, hasta, limit, offset });
+
+const buscarDespachos = (ctxDespachos, { q, desde, hasta, limit }) =>
+  despachosRepo.listarDespachos(ctxDespachos, { q, desde, hasta, limit });
 
 const getFacturaById = async (negocioId, id) => {
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
@@ -1185,7 +1211,7 @@ const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
 };
 
 module.exports = {
-  getFacturas, getFacturasRecientes, buscarFacturas,
+  getFacturas, getFacturasRecientes, buscarFacturas, buscarDespachos,
   getFacturaById, crearFactura, cancelarFactura, editarFactura,
   devolverLineasCredito,
 };

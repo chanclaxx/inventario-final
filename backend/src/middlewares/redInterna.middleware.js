@@ -203,4 +203,7 @@ const requireRedInterna = async (req, res, next) => {
 module.exports = {
   requireRedInterna, requirePedidos,
   getConfigRed, invalidarCache, CLAVES, DEFAULTS,
+  // Lo usa el historial de Facturas para saber si puede listar despachos sin
+  // pasar por el router de la red (allí no hay `req.red`).
+  hayInfraRed: _hayInfra,
 };

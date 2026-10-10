@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useInfiniteQuery }       from '@tanstack/react-query';
-import { getFacturaById, getFacturasRecientes, buscarFacturas } from '../../api/facturas.api';
+import { getFacturaById, getFacturasRecientes, buscarFacturas, buscarDespachos } from '../../api/facturas.api';
 import { getGarantiasPorFactura }                 from '../../api/garantias.api';
 import { getEntregas }                            from '../../api/domiciliarios.api';
 import { formatCOP, formatFecha, formatFechaHora } from '../../utils/formatters';
@@ -16,16 +16,19 @@ import { ModalEditarFactura }   from './ModalEditarFactura';
 import { ModalCancelarFactura } from './ModalCancelarFactura';
 import { useSucursalKey }       from '../../hooks/useSucursalKey';
 import { ModalImprimirFactura }   from '../../components/ui/ModalImprimirFactura';
+import { ModalDocumentoEnvio }    from '../red-interna/documentos/ModalDocumentoEnvio';
 import useSucursalStore         from '../../store/sucursalStore';
 import api                      from '../../api/axios.config';
 
 import {
   FileText, ChevronDown, ChevronUp,
-  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2, Bike, FileDown,
+  Printer, XCircle, Eye, Search, X, Pencil, Package, Building2, Bike, FileDown, Truck,
 } from 'lucide-react';
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 
+// Agrupa facturas y despachos juntos: los dos traen `fecha`. Los despachos se
+// distinguen por `_despacho` y NUNCA entran en el total del día (ver GrupoDia).
 function agruparPorDia(facturas) {
   const grupos = {};
   facturas.forEach((f) => {
@@ -281,8 +284,51 @@ function FilaFactura({ factura, onVerDetalle, onInactivar, onEditar, onAbrirPdf,
   );
 }
 
-function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, onAbrirPdf, mostrarSucursal }) {
+// ─── Despacho a un local (red interna) ────────────────────────────────────────
+//
+// Se muestra aquí porque para la bodega es una salida más, pero NO es una
+// factura: no se edita ni se cancela desde aquí (eso vive en Bodega) y su valor
+// no suma al total del día — se le cobra al local por su cuenta, y Reportes lo
+// cuenta aparte (grupo «Red interna» de Ventas). `valor_total` llega en null a
+// quien no está autorizado a ver el precio de los despachos.
+
+const ESTADO_DESPACHO = {
+  'En transito': { texto: 'En camino',        variant: 'yellow' },
+  Recibida:      { texto: 'Recibido',         variant: 'green' },
+  Parcial:       { texto: 'Recibido parcial', variant: 'blue' },
+  Anulada:       { texto: 'Anulado',          variant: 'red' },
+};
+
+function FilaDespacho({ despacho, onVer }) {
+  const est = ESTADO_DESPACHO[despacho.estado] || { texto: despacho.estado, variant: 'gray' };
+  const anulado = despacho.estado === 'Anulada';
+  const unidades = Number(despacho.unidades || 0);
+  return (
+    <div className={`bg-indigo-50/40 border border-indigo-100 rounded-xl p-3 flex items-center justify-between gap-3 ${anulado ? 'opacity-50' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-indigo-700 bg-indigo-100 rounded-full px-2 py-0.5"><Truck size={10} />Despacho</span>
+          <span className="text-sm font-semibold text-gray-800">#{despacho.numero ?? despacho.id}</span>
+          <Badge variant={est.variant}>{est.texto}</Badge>
+        </div>
+        <p className="text-sm text-gray-600 truncate mt-0.5">Para {despacho.sucursal_destino_nombre}</p>
+        {despacho.productos_nombres && <p className="text-xs text-gray-400 truncate">{unidades > 0 && `${unidades} ud${unidades !== 1 ? 's' : ''} · `}{despacho.productos_nombres}</p>}
+        <p className="text-xs text-gray-400">{formatFechaHora(despacho.fecha)}{despacho.usuario_nombre && <span className="ml-2 text-gray-300">· {despacho.usuario_nombre}</span>}</p>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {despacho.valor_total != null && <span className={`text-sm font-bold ${anulado ? 'text-gray-400 line-through' : 'text-indigo-700'}`}>{formatCOP(despacho.valor_total)}</span>}
+        <button onClick={() => onVer(despacho.id)} title="Ver e imprimir el envío" className="p-1.5 rounded-lg hover:bg-indigo-100 text-gray-400 hover:text-indigo-600 transition-colors"><Eye size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
+function GrupoDia({ fecha, facturas: registros, onVerDetalle, onInactivar, onEditar, onAbrirPdf, onVerDespacho, mostrarSucursal }) {
   const [expandido, setExpandido] = useState(true);
+  const facturas  = registros.filter((r) => !r._despacho);
+  const despachos = registros.filter((r) => r._despacho);
+  // Solo facturas: un despacho no es una venta facturada y sumarlo aquí haría
+  // que el total del día dejara de cuadrar con Reportes y con caja.
   const totalDia = facturas.filter((f) => f.estado !== 'Cancelada').reduce((s, f) => s + Number(f.total || 0) - Number(f.total_retoma || 0), 0);
 
   return (
@@ -291,11 +337,13 @@ function GrupoDia({ fecha, facturas, onVerDetalle, onInactivar, onEditar, onAbri
         <div className="flex items-center gap-3">
           {expandido ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
           <span className="text-sm font-semibold text-gray-700">{fecha}</span>
-          <span className="text-xs text-gray-400">{facturas.length} factura(s)</span>
+          <span className="text-xs text-gray-400">{facturas.length} factura(s){despachos.length > 0 && ` · ${despachos.length} despacho(s)`}</span>
         </div>
         <span className="text-sm font-bold text-green-600">{formatCOP(totalDia)}</span>
       </button>
-      {expandido && <div className="flex flex-col gap-2 pl-2">{facturas.map((f) => <FilaFactura key={f.id} factura={f} onVerDetalle={onVerDetalle} onInactivar={onInactivar} onEditar={onEditar} onAbrirPdf={onAbrirPdf} mostrarSucursal={mostrarSucursal} />)}</div>}
+      {expandido && <div className="flex flex-col gap-2 pl-2">{registros.map((r) => (r._despacho
+        ? <FilaDespacho key={`d-${r.id}`} despacho={r} onVer={onVerDespacho} />
+        : <FilaFactura key={r.id} factura={r} onVerDetalle={onVerDetalle} onInactivar={onInactivar} onEditar={onEditar} onAbrirPdf={onAbrirPdf} mostrarSucursal={mostrarSucursal} />))}</div>}
     </div>
   );
 }
@@ -365,6 +413,7 @@ export default function FacturarPage() {
   const [facturaImprimir,  setFacturaImprimir]  = useState(null);
   const [pdfRapido, setPdfRapido] = useState(null);
   const [facturaEditar,    setFacturaEditar]    = useState(null);
+  const [despachoVer,      setDespachoVer]      = useState(null);
   const [filtros,          setFiltros]          = useState(FILTROS_INICIALES);
   const [debouncedTexto,   setDebouncedTexto]   = useState('');
 
@@ -424,11 +473,42 @@ const { data: garantiasRapidas = [] } = useQuery({
 
   const facturasBusqueda = busquedaData || [];
 
+  // Despachos a locales (red interna). En el scroll vienen dentro de cada
+  // página (`despachos`, mismo tramo de fechas); al buscar, de su propia ruta.
+  // Un backend sin esto no manda la clave o responde error: queda en [].
+  const despachosRecientes = useMemo(
+    () => infiniteQuery.data?.pages?.flatMap((p) => p.despachos || []) || [],
+    [infiniteQuery.data]
+  );
+  const { data: despachosBusquedaData } = useQuery({
+    queryKey: ['facturas-despachos-busqueda', ...sucursalKey, debouncedTexto, filtros.desde, filtros.hasta],
+    queryFn:  () => buscarDespachos({
+      q:     debouncedTexto.trim(),
+      desde: filtros.desde || undefined,
+      hasta: filtros.hasta || undefined,
+      limit: 200,
+    }).then((r) => r.data.data),
+    enabled: sucursalLista && hayBusqueda,
+    staleTime: 0,
+    retry: false,
+  });
+
   // ── Facturas a mostrar según modo ───────────────────────────────────────
-  const facturas = hayBusqueda ? facturasBusqueda : facturasRecientes;
+  const facturas  = hayBusqueda ? facturasBusqueda : facturasRecientes;
+  const despachos = useMemo(
+    () => (hayBusqueda
+      ? (Array.isArray(despachosBusquedaData) ? despachosBusquedaData : [])
+      : despachosRecientes),
+    [hayBusqueda, despachosBusquedaData, despachosRecientes]
+  );
   const isLoading = hayBusqueda ? loadingBusqueda : infiniteQuery.isLoading;
 
-  const grupos = useMemo(() => agruparPorDia(facturas), [facturas]);
+  const registros = useMemo(
+    () => [...facturas, ...despachos.map((d) => ({ ...d, _despacho: true }))]
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha)),
+    [facturas, despachos]
+  );
+  const grupos = useMemo(() => agruparPorDia(registros), [registros]);
 
   const facturaParaModalRapido = pdfRapido && facturaRapidaData
   ? { ...facturaRapidaData, config: configData }
@@ -469,6 +549,7 @@ const handleAbrirPdfRapido = (facturaId) => {
           {hayBusqueda
             ? `${facturas.length} resultado(s)`
             : `Mostrando ${facturas.length} factura(s) recientes`}
+          {despachos.length > 0 && ` · ${despachos.length} despacho(s) a locales`}
         </p>
       </div>
 
@@ -482,7 +563,7 @@ const handleAbrirPdfRapido = (facturaId) => {
 
       {isLoading ? (
         <Spinner className="py-20" />
-      ) : facturas.length === 0 ? (
+      ) : registros.length === 0 ? (
         <EmptyState icon={FileText}
           titulo={hayBusqueda ? 'Sin resultados' : 'Sin facturas recientes'}
           descripcion={hayBusqueda ? 'Intenta con otros términos de búsqueda' : 'Las facturas aparecerán aquí una vez realizadas'} />
@@ -494,6 +575,7 @@ const handleAbrirPdfRapido = (facturaId) => {
               onInactivar={(f) => setFacturaInactivar(f)}
               onEditar={handleEditar}
               onAbrirPdf={handleAbrirPdfRapido}
+              onVerDespacho={(id) => setDespachoVer(id)}
               mostrarSucursal={esVistaGlobal} />
           ))}
 
@@ -501,7 +583,7 @@ const handleAbrirPdfRapido = (facturaId) => {
           {!hayBusqueda && (
             <div ref={sentinelRef} className="py-4 flex justify-center">
               {infiniteQuery.isFetchingNextPage && <Spinner className="py-0 scale-75" />}
-              {!infiniteQuery.hasNextPage && facturas.length > 0 && (
+              {!infiniteQuery.hasNextPage && registros.length > 0 && (
                 <p className="text-xs text-gray-300">No hay más facturas</p>
               )}
             </div>
@@ -514,6 +596,7 @@ const handleAbrirPdfRapido = (facturaId) => {
           onAbrirImprimir={handleAbrirImprimir}
           onEditar={handleEditar} />
       )}
+      {despachoVer && <ModalDocumentoEnvio remisionId={despachoVer} onClose={() => setDespachoVer(null)} />}
       {facturaInactivar && <ModalCancelarFactura factura={facturaInactivar} onClose={() => setFacturaInactivar(null)} onSuccess={() => setFacturaInactivar(null)} />}
       {facturaEditar && <ModalEditarFactura facturaId={facturaEditar} onClose={() => setFacturaEditar(null)} onGuardado={() => setFacturaEditar(null)} />}
       {facturaImprimir && !facturaImprimir._posMode && (

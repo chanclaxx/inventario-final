@@ -25,6 +25,8 @@ const validarFactura = [
 // Rutas estáticas ANTES de /:id
 router.get('/recientes', requireModulo('facturar'), ctrl.getFacturasRecientes);
 router.get('/buscar',    requireModulo('facturar'), ctrl.buscarFacturas);
+// Antes de `/:id`: si no, Express la resuelve como la factura id="despachos".
+router.get('/despachos', requireModulo('facturar'), ctrl.buscarDespachos);
 
 router.get('/',            requireModulo('facturar'),                              ctrl.getFacturas);
 router.get('/:id/pdf',     requireModulo('facturar'),                              getPdfFactura);

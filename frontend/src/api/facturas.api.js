@@ -18,5 +18,10 @@ export const getFacturasRecientes = (cursor = null, dias = 5) =>
 export const buscarFacturas = ({ q, desde, hasta, limit = 100, offset = 0 }) =>
   api.get('/facturas/buscar', { params: { q, desde, hasta, limit, offset } });
 
+// Despachos de la red interna con los mismos filtros del buscador. Solo LECTURA
+// de `remisiones`: no son facturas y ningún reporte los suma desde aquí.
+export const buscarDespachos = ({ q, desde, hasta, limit = 100 }) =>
+  api.get('/facturas/despachos', { params: { q, desde, hasta, limit } });
+
 export const devolverLineasCredito = (facturaId, lineas) =>
   api.patch(`/facturas/${facturaId}/devolucion-parcial`, { lineas });

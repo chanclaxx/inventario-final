@@ -1,4 +1,5 @@
 const service  = require('./facturas.service');
+const { contextoDespachos } = require('./facturas.despachos');
 const audit    = require('../../utils/auditoria.util');
 
 const getFacturas = async (req, res, next) => {
@@ -14,7 +15,8 @@ const getFacturasRecientes = async (req, res, next) => {
     const sucursalId = req.todasSucursales ? null : req.sucursal_id;
     const cursor     = req.query.cursor || null;
     const dias       = req.query.dias ? Number(req.query.dias) : 5;
-    const data = await service.getFacturasRecientes(sucursalId, req.user.negocio_id, { cursor, dias });
+    const ctxDespachos = await contextoDespachos(req);
+    const data = await service.getFacturasRecientes(sucursalId, req.user.negocio_id, { cursor, dias, ctxDespachos });
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -26,6 +28,19 @@ const buscarFacturas = async (req, res, next) => {
     const limit  = req.query.limit  ? Math.min(Number(req.query.limit), 200) : 100;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
     const data = await service.buscarFacturas(sucursalId, req.user.negocio_id, { q, desde, hasta, limit, offset });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// Mismos filtros que `buscarFacturas`, sobre los despachos de la red interna.
+// Sin acceso a la red (o con la red apagada) responde [] y no 403: para ese
+// usuario simplemente no hay despachos que mostrar.
+const buscarDespachos = async (req, res, next) => {
+  try {
+    const { q, desde, hasta } = req.query;
+    const limit = req.query.limit ? Math.min(Number(req.query.limit), 200) : 100;
+    const ctx   = await contextoDespachos(req);
+    const data  = ctx ? await service.buscarDespachos(ctx, { q, desde, hasta, limit }) : [];
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
@@ -128,7 +143,7 @@ const devolverLineasCredito = async (req, res, next) => {
 };
 
 module.exports = {
-  getFacturas, getFacturasRecientes, buscarFacturas,
+  getFacturas, getFacturasRecientes, buscarFacturas, buscarDespachos,
   getFacturaById, crearFactura, cancelarFactura, editarFactura,
   devolverLineasCredito,
 };
