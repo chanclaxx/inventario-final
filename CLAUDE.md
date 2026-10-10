@@ -2841,8 +2841,21 @@ R2_BUCKET_DOCUMENTOS, SUPABASE_BUCKET_DOCUMENTOS, ARCHIVOS_CUPO_MB_NEGOCIO
 > salió cada abono y a qué se repartió, productos de la factura con cantidad,
 > precio y devueltas. El estado de cuenta agrega renglones `detalles` por
 > movimiento en el PDF, NO en el SQL de la pantalla (concepto y saldo siguen
-> siendo los del service). Prueba: `79-pdf-prestamos-creditos` (88; la sección
-> 1 —★— falla contra el código anterior con las hojas vacías).
+> siendo los del service).
+> **Abren con una TABLA DE RESUMEN** (`utils/resumenDeuda.pdf.js`, pedido del
+> mismo día): préstamos activos y los dos estados de cuenta empiezan, en la
+> primera hoja, con subtotal · abonado · interés y mora · **VALOR A COBRAR** y
+> una fila por producto (fecha y hora, cant., producto, variante —el color si
+> es un equipo—, línea, V. unitario, total, debe). Solo lo ACTIVO: lo saldado y
+> lo devuelto está en el extracto. Las cifras salen del mismo `resumirObligacion`
+> / regla del service que cada tarjeta. En créditos la deuda es de la FACTURA:
+> va una sola vez, en su última línea; `separarVariante` saca a su columna la
+> talla que el carrito pega al nombre. Si el saldo del extracto no coincide con
+> lo que deben los documentos activos (un pago que quedó de saldo a favor), la
+> tabla lo dice en una nota. El «Resumen general» del final de préstamos activos
+> se quitó: ahora está arriba.
+> Prueba: `79-pdf-prestamos-creditos` (113; la sección 1 —★— falla contra el
+> código anterior con las hojas vacías, la 7 es la de la tabla y sus sumas).
 - **Email**: Multiple providers in use — Nodemailer (Gmail), Brevo SDK, and Resend — configured per environment.
 - **Backup**: Automated cron jobs via `node-cron` in the `backup` module.
 - **Superadmin JWT**: Uses a separate secret (`JWT_SA_SECRET`) and separate middleware from regular user auth.

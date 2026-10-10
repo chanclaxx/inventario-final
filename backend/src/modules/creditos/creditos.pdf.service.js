@@ -16,6 +16,7 @@ const { generarAvisoMora, generarPazYSalvo } = require('../../utils/obligacion.p
 const service = require('./creditos.service');
 const { formatCOP } = require('../../utils/pdf.base');
 const { sqlVarianteTexto, nombreConVariante } = require('../../utils/varianteTexto.util');
+const { separarVariante } = require('../../utils/resumenDeuda.pdf');
 
 // Mismos colores que los badges de la pantalla (EstadoCuentaCredito.jsx).
 const TIPO_LABEL = {
@@ -65,11 +66,125 @@ const generarPdfEstadoCuenta = async ({ clave, negocioId, negocioNombre, logoNeg
     subtitulo: 'Cliente · Facturas a crédito',
     movimientos: await _detallesEstadoCuenta(movsPdf),
     saldoFinal,
+    resumenDeuda: await _resumenDeudaCreditos(negocioId, clave, sucursalId, saldoFinal),
     config: { ...config, nombre_negocio: negocioNombre || config.nombre_negocio },
     logoNegocio,
     tipoLabels: TIPO_LABEL,
     negocioNombre,
   });
+};
+
+// Misma clave de persona que la pantalla y que el estado de cuenta
+// (creditos.repository: COALESCE(cédula, nombre)).
+const CLAVE_CLIENTE = `COALESCE(NULLIF(f.cedula, ''), f.nombre_cliente)`;
+
+/**
+ * La tabla con que abre el estado de cuenta: cada producto de cada factura a
+ * crédito ACTIVA, y la deuda de la factura en su última línea —la deuda es de
+ * la factura, no de cada producto: repartirla sería inventar una cifra—.
+ * Saldo = valor − cuota inicial − abonado, la regla del service; mora e
+ * interés pendientes por `mora.service.anotarLista`, los de la pantalla.
+ */
+const _resumenDeudaCreditos = async (negocioId, clave, sucursalId, saldoExtracto) => {
+  const params = [negocioId, clave];
+  let filtro = '';
+  if (sucursalId) { params.push(sucursalId); filtro = 'AND c.sucursal_id = $3'; }
+  let creditos;
+  try {
+    ({ rows: creditos } = await pool.query(`
+      SELECT c.*, COALESCE(f.numero, f.id) AS factura_numero
+        FROM creditos c
+        JOIN facturas   f  ON f.id  = c.factura_id
+        JOIN sucursales su ON su.id = c.sucursal_id
+       WHERE su.negocio_id = $1 AND ${CLAVE_CLIENTE} = $2 AND c.estado = 'Activo' ${filtro}
+       ORDER BY c.creado_en, c.id`, params));
+  } catch (err) {
+    console.warn('[pdf-estado-cuenta-credito] Resumen no incluido:', err.message);
+    return null;
+  }
+
+  try {
+    const moraService = require('../mora/mora.service');
+    creditos = await moraService.anotarLista(creditos, 'credito');
+  } catch (err) {
+    console.warn('[pdf-estado-cuenta-credito] Cargos no incluidos:', err.message);
+  }
+
+  let lineas = [];
+  if (creditos.length) {
+    ({ rows: lineas } = await pool.query(`
+      SELECT c.id AS credito_id, lf.id, lf.nombre_producto, lf.imei, lf.cantidad, lf.precio,
+             COALESCE(lf.cantidad_devuelta, 0) AS cantidad_devuelta,
+             ${sqlVarianteTexto('lf')} AS variante,
+             COALESCE(
+               (SELECT lp.nombre FROM seriales s
+                  JOIN productos_serial ps ON ps.id = s.producto_id
+                  JOIN lineas_producto  lp ON lp.id = ps.linea_id
+                 WHERE lf.imei IS NOT NULL AND s.imei = lf.imei
+                 ORDER BY (ps.sucursal_id = c.sucursal_id) DESC NULLS LAST, s.id LIMIT 1),
+               (SELECT lp.nombre FROM productos_cantidad pc
+                  JOIN lineas_producto lp ON lp.id = pc.linea_id
+                 WHERE pc.id = lf.producto_id)
+             ) AS linea_nombre,
+             (SELECT s.color FROM seriales s WHERE lf.imei IS NOT NULL AND s.imei = lf.imei
+               ORDER BY s.id LIMIT 1) AS serial_color
+        FROM creditos c
+        JOIN lineas_factura lf ON lf.factura_id = c.factura_id
+       WHERE c.id = ANY($1::int[])
+       ORDER BY lf.id`, [creditos.map((c) => c.id)]));
+  }
+  const lineasDe = new Map();
+  for (const l of lineas) {
+    if (!lineasDe.has(Number(l.credito_id))) lineasDe.set(Number(l.credito_id), []);
+    lineasDe.get(Number(l.credito_id)).push(l);
+  }
+
+  const num = (v) => Number(v || 0);
+  const filas = [];
+  const tot = { cantidad: 0, subtotal: 0, abonado: 0, cargos: 0, debeCapital: 0, cobrar: 0 };
+  for (const c of creditos) {
+    const saldo  = Math.max(0, num(c.valor_total) - num(c.cuota_inicial) - num(c.total_abonado));
+    const cargos = num(c.mora?.pendiente) + num(c.interes?.pendiente);
+    const vigentes = (lineasDe.get(Number(c.id)) || [])
+      .map((l) => ({ l, cant: num(l.cantidad) - num(l.cantidad_devuelta) }))
+      .filter(({ cant }) => cant > 0);
+    const ref = `Fact. #${String(c.factura_numero).padStart(6, '0')}`;
+    vigentes.forEach(({ l, cant }, i) => {
+      const { producto, variante } = separarVariante(l.nombre_producto, l.variante);
+      filas.push({
+        fecha: c.creado_en, referencia: ref, cantidad: cant,
+        producto, detalle: l.imei ? `IMEI ${l.imei}` : null,
+        variante: variante || (l.serial_color ? `Color: ${l.serial_color}` : null),
+        linea: l.linea_nombre || null,
+        unitario: num(l.precio), total: cant * num(l.precio),
+        debe: i === vigentes.length - 1 ? saldo : null,
+      });
+      tot.cantidad += cant;
+    });
+    if (!vigentes.length) {
+      filas.push({ fecha: c.creado_en, referencia: ref, cantidad: 0, producto: 'Factura a crédito',
+        variante: null, linea: null, unitario: null, total: num(c.valor_total), debe: saldo });
+    }
+    tot.subtotal    += num(c.valor_total);
+    tot.abonado     += num(c.cuota_inicial) + num(c.total_abonado);
+    tot.cargos      += cargos;
+    tot.debeCapital += saldo;
+    tot.cobrar      += saldo + cargos;
+  }
+
+  const notas = [];
+  if (!creditos.length) notas.push('No tiene facturas a crédito activas: no hay nada por cobrar.');
+  else if (Math.abs(num(saldoExtracto) - tot.debeCapital) > 1) {
+    notas.push(`El saldo del extracto (${formatCOP(saldoExtracto)}) no coincide con lo que deben las facturas activas `
+      + `(${formatCOP(tot.debeCapital)}): la diferencia son movimientos de facturas que ya no están activas.`);
+  }
+
+  return {
+    titulo: `Resumen · ${creditos.length} factura${creditos.length !== 1 ? 's' : ''} a crédito activa${creditos.length !== 1 ? 's' : ''}`,
+    filas,
+    totales: { ...tot, abonadoLabel: 'Cuota inicial y abonos' },
+    nota: notas.filter(Boolean).join(' ') || null,
+  };
 };
 
 const _fechaDate = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : null);

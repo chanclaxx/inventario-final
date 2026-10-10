@@ -34,6 +34,7 @@ const {
   encabezado, pieDocumento, asegurarEspacio, encabezadoContinuo,
   medirTexto, textoAcotado, tablaPaginada,
 } = require('./pdf.base');
+const { tablaResumenDeuda } = require('./resumenDeuda.pdf');
 
 const HEADER_CONT_H = 40;
 const CUERPO_TOP    = HEADER_CONT_H + 22;
@@ -225,11 +226,14 @@ const _resumen = (doc, movimientos, saldoFinal, y) => {
  * @param {string}   [opts.logoNegocio]
  * @param {object}   opts.tipoLabels   — tipo → { label, bg, text }
  * @param {string}   [opts.negocioNombre]
+ * @param {object}   [opts.resumenDeuda] — tabla de apertura (utils/resumenDeuda.pdf):
+ *                   { titulo, filas, totales, nota }. Sin ella, el PDF de siempre.
  * @returns {PDFDocument} stream ya finalizado (doc.end() incluido)
  */
 const construirPdfEstadoCuenta = ({
   persona, subtitulo, movimientos, saldoFinal,
   config, logoNegocio, tipoLabels, negocioNombre,
+  resumenDeuda = null,
 }) => {
   // Los márgenes son parte del contrato (ver pdf.base): `top` = alto del
   // encabezado de continuación y `bottom` = la franja del pie. Con `margin: 0`
@@ -252,6 +256,13 @@ const construirPdfEstadoCuenta = ({
 
   y += 16;
   y  = _infoPersona(doc, persona, subtitulo, saldoFinal, y);
+
+  // La tabla que lo resume todo —qué debe, de qué, y el valor a cobrar— va
+  // antes del extracto: es lo que se busca primero y queda en la primera hoja.
+  if (resumenDeuda) {
+    y = tablaResumenDeuda(doc, y, resumenDeuda);
+    y = asegurarEspacio(doc, y, 80);
+  }
 
   if (movimientos.length === 0) {
     textoAcotado(doc, 'Sin movimientos registrados.', MARGIN, y + 20, CONTENT_W,

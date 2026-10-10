@@ -25,6 +25,7 @@ const { configDocumento, encabezadoPara, aplicarDatosSucursal } = require('../..
 const { pool }    = require('../../config/db');
 const repo        = require('./prestamos.repository');
 const { sqlVarianteTexto, nombreConVariante } = require('../../utils/varianteTexto.util');
+const { tablaResumenDeuda } = require('../../utils/resumenDeuda.pdf');
 
 // Núcleo compartido con los créditos: mismo cálculo del estado de la deuda y
 // mismos bloques de dibujo, para que préstamo y crédito produzcan documentos
@@ -173,11 +174,11 @@ const _totalesPrestamo = (doc, resumen, y) => {
   return y + H;
 };
 
-const _tarjetaPrestamo = (doc, p, abonos, y) => {
-  const resumen = resumirObligacion({
-    tipo: 'prestamo', documento: p, abonos, mora: p.mora || null, interes: p.interes || null,
-  });
+const _resumenPrestamo = (p, abonos) => resumirObligacion({
+  tipo: 'prestamo', documento: p, abonos, mora: p.mora || null, interes: p.interes || null,
+});
 
+const _tarjetaPrestamo = (doc, p, resumen, y) => {
   // Barra del título: número + producto con variante a la izquierda, fecha y
   // hora y estado a la derecha. Reserva la grilla para no quedar huérfana.
   const titulo = `Préstamo ${_numero(p)} · ${_producto(p)}`;
@@ -203,35 +204,43 @@ const _tarjetaPrestamo = (doc, p, abonos, y) => {
   y = tablaAbonos(doc, resumen, y, { titulo: `Abonos del préstamo ${_numero(p)}` });
   // tablaAbonos deja 20 de aire; los totales van pegados a la tabla.
   y = _totalesPrestamo(doc, resumen, y - 12);
-  return { y: y + 22, resumen };
+  return y + 22;
 };
 
-const _resumenGeneral = (doc, resumenes, y) => {
-  const suma = (k) => resumenes.reduce((s, r) => s + Number(r[k] || 0), 0);
-  const stats = [
-    ['Préstamos', String(resumenes.length), C.blanco],
-    ['Total prestado', formatCOP(suma('valor_actual')), C.blanco],
-    ['Total abonado', formatCOP(suma('total_abonado')), '#6EE7B7'],
-    ['Saldo capital', formatCOP(suma('saldo')), '#FCA5A5'],
-  ];
-  const cargos = suma('cargos_pendientes');
-  if (cargos > 0) {
-    stats.push(['Interés + mora', formatCOP(cargos), '#FCA5A5']);
-    stats.push(['Total a pagar', formatCOP(suma('total_a_pagar')), '#FCA5A5']);
-  }
-
-  const H = 56;
-  y = asegurarEspacio(doc, y, H);
-  rectFill(doc, MARGIN, y, CONTENT_W, H, C.negro, 8);
-  textoAcotado(doc, 'RESUMEN GENERAL', MARGIN + 12, y + 8, CONTENT_W - 24,
-    { font: FONT.bold, size: 8.5, color: C.blanco, characterSpacing: 0.8 });
-  const w = (CONTENT_W - 24) / stats.length;
-  stats.forEach(([label, valor, color], i) => {
-    const x = MARGIN + 12 + i * w;
-    textoAcotado(doc, label.toUpperCase(), x, y + 24, w - 6, { size: 6.5, color: C.headerSub });
-    textoAcotado(doc, valor, x, y + 35, w - 6, { font: FONT.bold, size: 9.5, color });
+/**
+ * Filas y totales de la tabla con que abre el PDF: un renglón por préstamo con
+ * lo que hace falta para leerlo de un vistazo, y la suma de todo. Las cifras
+ * salen del MISMO resumen que dibuja cada tarjeta, así que no pueden diferir.
+ */
+const _resumenTabla = (items) => {
+  const filas = items.map(({ p, resumen }) => {
+    const cant = p.imei ? 1 : (Number(p.cantidad_prestada) || 1);
+    return {
+      fecha:      p.fecha,
+      referencia: _numero(p),
+      cantidad:   cant,
+      producto:   p.nombre_producto || '—',
+      detalle:    p.imei ? `IMEI ${p.imei}` : null,
+      // Un equipo con IMEI no tiene talla: su «variante» es el color.
+      variante:   p.variante_texto || (p.serial_color ? `Color: ${p.serial_color}` : null),
+      linea:      p.linea_nombre || null,
+      unitario:   Number(p.valor_prestamo) / cant,
+      total:      resumen.valor_actual,
+      debe:       resumen.saldo,
+    };
   });
-  return y + H;
+  const suma = (k) => items.reduce((s, { resumen }) => s + Number(resumen[k] || 0), 0);
+  return {
+    filas,
+    totales: {
+      cantidad:    filas.reduce((s, f) => s + f.cantidad, 0),
+      subtotal:    suma('valor_actual'),
+      abonado:     suma('total_abonado'),
+      cargos:      suma('cargos_pendientes'),
+      debeCapital: suma('saldo'),
+      cobrar:      suma('total_a_pagar'),
+    },
+  };
 };
 
 const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {
@@ -274,19 +283,17 @@ const generarPdfPrestamosActivos = async ({ tipo, personaId, negocioId, negocioN
   y += 20;
   y = bloquePersona(doc, persona, y, { titulo: tipo === 'prestatario' ? 'Prestatario' : 'Cliente' });
 
-  textoAcotado(doc,
-    `${prestamos.length} préstamo${prestamos.length !== 1 ? 's' : ''} activo${prestamos.length !== 1 ? 's' : ''}`
-      + ' · del más antiguo al más reciente',
-    MARGIN, y - 8, CONTENT_W, { size: 8, color: C.gris });
-  y += 8;
+  // Primero la tabla que lo resume todo (y el valor a cobrar, en la primera
+  // hoja); después el detalle de cada préstamo con sus abonos.
+  const items = prestamos.map((p) => ({ p, resumen: _resumenPrestamo(p, abonosPorPrestamo[p.id] || []) }));
+  const { filas, totales } = _resumenTabla(items);
+  y = tablaResumenDeuda(doc, y, {
+    titulo: `Resumen · ${prestamos.length} préstamo${prestamos.length !== 1 ? 's' : ''} activo${prestamos.length !== 1 ? 's' : ''}`,
+    filas, totales,
+  });
 
-  const resumenes = [];
-  for (const p of prestamos) {
-    const r = _tarjetaPrestamo(doc, p, abonosPorPrestamo[p.id] || [], y);
-    y = r.y;
-    resumenes.push(r.resumen);
-  }
-  _resumenGeneral(doc, resumenes, y);
+  y = labelSeccion(doc, y, 'Detalle de cada préstamo · del más antiguo al más reciente', { reservar: 80 });
+  for (const { p, resumen } of items) y = _tarjetaPrestamo(doc, p, resumen, y);
 
   pieDocumento(doc, { texto: `${config.nombre_negocio} · Préstamos activos de ${persona.nombre || ''} · Generado el ${generado}` });
   doc.end();
@@ -606,6 +613,44 @@ const _detallesEstadoCuenta = async (movimientos) => {
   });
 };
 
+/**
+ * La tabla con que abre el estado de cuenta: los préstamos ACTIVOS de la
+ * persona —en la sede del extracto— con lo que debe de cada uno. Es la misma
+ * tabla del PDF de préstamos activos: lo saldado y lo devuelto ya no se cobra,
+ * y su historia está en el extracto de abajo.
+ */
+const _resumenDeudaPersona = async (tipo, personaId, negocioId, sucursalId, saldoExtracto) => {
+  let activos = tipo === 'prestatario'
+    ? await repo.findActivosPorPrestatario(personaId, negocioId)
+    : await repo.findActivosPorCliente(personaId, negocioId);
+  if (sucursalId) activos = activos.filter((p) => Number(p.sucursal_id) === Number(sucursalId));
+  activos = await _anotarCargos([...activos].reverse());
+
+  const abonos = await repo.findAbonosPorPrestamos(activos.map((p) => p.id));
+  const abonosDe = {};
+  for (const a of abonos) (abonosDe[a.prestamo_id] ||= []).push(a);
+
+  const items = activos.map((p) => ({ p, resumen: _resumenPrestamo(p, abonosDe[p.id] || []) }));
+  const { filas, totales } = _resumenTabla(items);
+
+  // El extracto cierra en una cifra y la tabla suma otra cuando hay plata que
+  // no quedó aplicada a ningún préstamo activo (un pago que se volvió saldo a
+  // favor, un préstamo devuelto con abonos). Se dice, para que nadie crea que
+  // una de las dos está mal.
+  const notas = [];
+  if (!activos.length) notas.push('No tiene préstamos activos: no hay nada por cobrar.');
+  else if (Math.abs(Number(saldoExtracto || 0) - totales.debeCapital) > 1) {
+    notas.push(`El saldo del extracto (${formatCOP(saldoExtracto)}) no coincide con lo que deben los préstamos activos `
+      + `(${formatCOP(totales.debeCapital)}): la diferencia son movimientos que no quedaron aplicados a ningún préstamo activo, `
+      + 'como un pago que quedó de saldo a favor.');
+  }
+
+  return {
+    titulo: `Resumen · ${activos.length} préstamo${activos.length !== 1 ? 's' : ''} activo${activos.length !== 1 ? 's' : ''}`,
+    filas, totales, nota: notas.join(' ') || null,
+  };
+};
+
 const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombre, logoNegocio, sucursalId = null }) => {
   // Encabezado de la sede de quien lo imprime (sin sede elegida, el negocio).
   const enc = await encabezadoPara(negocioId, sucursalId, { nombre: negocioNombre, logo: logoNegocio });
@@ -663,6 +708,7 @@ const generarPdfEstadoCuenta = async ({ tipo, personaId, negocioId, negocioNombr
     subtitulo: tipo === 'prestatario' ? 'Prestatario' : 'Cliente',
     movimientos,
     saldoFinal,
+    resumenDeuda: await _resumenDeudaPersona(tipo, personaId, negocioId, sucursalId, saldoFinal),
     config: { ...aplicarDatosSucursal(config, enc.datos), nombre_negocio: negocioNombre },
     logoNegocio,
     tipoLabels: TIPO_LABEL,

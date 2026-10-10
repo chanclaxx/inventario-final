@@ -33,7 +33,7 @@
 // Requiere PGlite (npm install --no-save @electric-sql/pglite).
 // ─────────────────────────────────────────────────────────────────────────────
 import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -106,11 +106,12 @@ const seccion = (t) => console.log(`\n═══ ${t} ═══`);
 const leerPdf = async (fn) => {
   trazos = []; saltosPdfkit = 0;
   const doc = await fn();
-  await new Promise((res) => { doc.on('data', () => {}); doc.on('end', res); });
+  const partes = [];
+  await new Promise((res) => { doc.on('data', (c) => partes.push(c)); doc.on('end', res); });
   const t = trazos; trazos = null;
   const nPaginas = Math.max(0, ...t.map((x) => x.n)) + 1;
   const texto = t.map((x) => x.t).join(' ').replace(/\s+/g, ' ');
-  return { trazos: t, paginas: nPaginas, automaticos: saltosPdfkit, texto };
+  return { trazos: t, paginas: nPaginas, automaticos: saltosPdfkit, texto, buffer: Buffer.concat(partes) };
 };
 
 // Una hoja tiene CUERPO si algo se escribió entre el encabezado de
@@ -270,7 +271,8 @@ seccion('3. La VARIANTE');
   await db.exec(`UPDATE prestamos SET atributo_id = NULL, variante_id = NULL, atributo_label = NULL, variante_label = NULL;
                  UPDATE lineas_factura SET atributo_id = NULL, nombre_producto = 'Correa reloj'`);
   const sin = await leerPdf(documentos['Préstamos activos']);
-  ok('sin variantes: el PDF no inventa ninguna', !/talla|variante/i.test(sin.texto) && !sin.texto.includes('()'));
+  // La columna «Variante» existe siempre (con «—»); lo que no puede aparecer es una talla.
+  ok('sin variantes: el PDF no inventa ninguna', !/talla/i.test(sin.texto) && !sin.texto.includes('()'));
   const sinC = await leerPdf(documentos['Estado de cuenta (créditos)']);
   ok('sin variantes: la factura sale con el nombre tal cual', sinC.texto.includes('Correa reloj') && !/talla/i.test(sinC.texto));
   await sembrar(3);
@@ -332,6 +334,82 @@ seccion('6. El navegador no revoca el PDF antes de abrirlo');
     const src = leer(FRONT, f);
     ok(`${f}: usa descargarBlob y no revoca en el acto`, src.includes('descargarBlob') && !src.includes('revokeObjectURL'));
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('7. La tabla de resumen abre el PDF y sus sumas cuadran');
+{
+  await sembrar(3);
+  // formatCOP separa con espacio duro; el texto de la hoja ya va normalizado.
+  const plano = (t) => String(t).replace(/\s+/g, ' ');
+  const fmt = (v) => plano(base.formatCOP(v));
+  const hoja1 = (r) => plano(r.trazos.filter((x) => x.n === 0).map((x) => x.t).join(' '));
+  const fragmentos = (r) => new Set(r.trazos.map((x) => plano(x.t).trim()));
+
+  // Lo que la pantalla da por cada préstamo, calculado aparte con el MISMO
+  // motor de cargos: la tabla tiene que dar lo mismo.
+  const moraService = require(path.join(RAIZ, 'src/modules/mora/mora.service.js'));
+  const { rows: activos } = await db.query(`SELECT * FROM prestamos WHERE estado = 'Activo' ORDER BY id`);
+  const anotados = await moraService.anotarLista(activos, 'prestamo');
+  const capital = activos.reduce((s, p) => s + Number(p.valor_prestamo) - Number(p.total_abonado), 0);
+  const cargos  = anotados.reduce((s, p) => s + Number(p.mora?.pendiente || 0) + Number(p.interes?.pendiente || 0), 0);
+  const subtotal = activos.reduce((s, p) => s + Number(p.valor_prestamo), 0);
+
+  for (const nombre of ['Préstamos activos', 'Estado de cuenta (préstamos)']) {
+    const r = await leerPdf(documentos[nombre]);
+    if (process.env.GUARDAR_PDF) writeFileSync(path.join(process.env.GUARDAR_PDF, `79-${nombre.replace(/\W+/g, '-')}.pdf`), r.buffer);
+    const h1 = hoja1(r);
+    ok(`${nombre}: la tabla de resumen y el VALOR A COBRAR están en la primera hoja`,
+      h1.includes('VALOR A COBRAR') && h1.includes('V. unitario') && h1.includes('Variante'));
+    ok(`${nombre}: subtotal = suma de los préstamos activos (${fmt(subtotal)})`, h1.includes(fmt(subtotal)));
+    ok(`${nombre}: total «Debe» = capital pendiente (${fmt(capital)})`, h1.includes(fmt(capital)));
+    ok(`${nombre}: valor a cobrar = capital + interés y mora (${fmt(capital + cargos)})`,
+      cargos > 0 && h1.includes(fmt(capital + cargos)));
+    const fr = fragmentos(r);
+    // La variante larga se parte en dos renglones dentro de su celda.
+    ok(`${nombre}: la variante va en su columna`, h1.includes('Talla: 38MM / Color: Negro') && fr.has('Talla: 42MM'));
+    ok(`${nombre}: el equipo muestra su color como variante e IMEI bajo el producto`,
+      fr.has('Color: Azul Sierra') && fr.has('IMEI 356789012345678'));
+    ok(`${nombre}: línea y precio unitario`, fr.has('Accesorios') && fr.has('iPhones') && fr.has(fmt(30000)));
+  }
+  {
+    const r = await leerPdf(documentos['Estado de cuenta (préstamos)']);
+    ok('estado de cuenta: sin pagos sueltos, la tabla y el extracto cierran igual (sin nota de diferencia)',
+      !r.texto.includes('no coincide'));
+  }
+
+  const rc = await leerPdf(documentos['Estado de cuenta (créditos)']);
+  if (process.env.GUARDAR_PDF) writeFileSync(path.join(process.env.GUARDAR_PDF, '79-estado-cuenta-creditos.pdf'), rc.buffer);
+  const h1 = hoja1(rc);
+  const fr = fragmentos(rc);
+  ok('créditos: tabla y valor a cobrar en la primera hoja', h1.includes('VALOR A COBRAR'));
+  ok('créditos: subtotal = valor de la factura ($ 3.530.000)', h1.includes(fmt(3530000)));
+  ok('créditos: abonado = cuota inicial + abonos ($ 1.500.000)', h1.includes(fmt(1500000)) && h1.includes('CUOTA INICIAL Y ABONOS'));
+  ok('créditos: debe = valor − cuota − abonos ($ 2.030.000)', h1.includes(fmt(2030000)));
+  ok('créditos: la talla sale del nombre y va en su columna', fr.has('Correa reloj') && fr.has('Talla: 42MM'));
+  ok('créditos: la cantidad es la vigente (2 vendidas − 1 devuelta)', rc.trazos.some((x) => x.n === 0 && x.t.trim() === '1'));
+  // La deuda es de la FACTURA: va en su última línea (el iPhone) y la línea de
+  // la correa deja la celda «Debe» vacía. Se mira la columna por posición.
+  {
+    const X_DEBE = base.MARGIN + 58 + 30 + 104 + 74 + 52 + 56 + 58;
+    const filaDe = (txt) => rc.trazos.find((x) => x.n === 0 && plano(x.t).trim() === txt);
+    const debeEn = (fila) => rc.trazos.filter((x) => x.n === 0 && x.x >= X_DEBE - 1
+      && Math.abs(x.y - fila.y) < 3 && plano(x.t).trim().startsWith('$')).map((x) => plano(x.t).trim());
+    const correa = filaDe('Correa reloj');
+    const iphone = filaDe('iPhone 13');
+    ok('créditos: la deuda va UNA vez por factura, en su última línea',
+      correa && iphone && debeEn(correa).length === 0 && debeEn(iphone).join() === fmt(2030000),
+      `correa: [${correa ? debeEn(correa) : '?'}] · iphone: [${iphone ? debeEn(iphone) : '?'}]`);
+  }
+  ok('créditos: número de factura en la fila', fr.has('Fact. #006681'));
+
+  // Persona sin nada activo: la tabla lo dice y cobra 0.
+  await db.exec(`UPDATE creditos SET estado = 'Saldado', total_abonado = 3030000; UPDATE abonos_credito SET valor = 3030000`);
+  const vacio = await leerPdf(documentos['Estado de cuenta (créditos)']);
+  ok('sin créditos activos: «no hay nada por cobrar» y valor a cobrar $ 0',
+    vacio.texto.includes('no hay nada por cobrar') && hoja1(vacio).includes(fmt(0)));
+  ok('  y sigue sin hojas vacías ni saltos de PDFKit', vacio.automaticos === 0 && hojasSinCuerpo(vacio).length === 0);
+  await sembrar(3);
 }
 
 // ── Resultado ───────────────────────────────────────────────────────────────
