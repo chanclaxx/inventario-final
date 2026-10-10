@@ -2818,6 +2818,31 @@ R2_BUCKET_DOCUMENTOS, SUPABASE_BUCKET_DOCUMENTOS, ARCHIVOS_CUPO_MB_NEGOCIO
 > que mirar primero —la factura de todos los días sigue en una hoja—, y la
 > invariante que de verdad protege es **«ningún salto lo decide PDFKit»**:
 > cada uno de esos era una hoja que nadie midió).
+> **PDF de préstamos y créditos: HORA, VARIANTE, detalle y cero hojas en blanco**
+> (`prestamos.pdf.service.js`, `utils/estadoCuenta.pdf.js`,
+> `utils/obligacion.pdf.js`, `utils/varianteTexto.util.js`,
+> `frontend/src/utils/descargarArchivo.js`; pedido del usuario, 10-oct-2026).
+> **Las hojas en blanco** eran de «Préstamos activos»: escribía el pie en
+> y = 825 con margen inferior 52 y PDFKit abría una hoja POR CADA PIE (3
+> préstamos → 3 hojas, 2 vacías; 25 → 18, 12 vacías). Ese PDF, el comprobante y
+> el estado de cuenta (préstamos, créditos y cuenta del local) se rehicieron
+> sobre `pdf.base` con los márgenes de contrato. En el navegador, revocar la URL
+> del blob en la misma línea del clic hace que el iPhone/PWA abra el PDF en
+> blanco: toda descarga de préstamos y créditos pasa por `descargarBlob`, que
+> la libera al minuto (y `mensajeDeErrorBlob` lee el error que llega como blob).
+> **Toda fecha lleva hora** (`formatFechaHora`), también la de cada abono, la
+> cuota inicial y los cobros de mora. **La variante**: el préstamo la guarda
+> congelada en `atributo_label`/`variante_label` y los PDF la leen por
+> `sqlVarianteTexto` (etiqueta primero; por id para préstamos viejos sin
+> etiqueta); la factura ya la trae en el nombre (`nombreConVariante` del
+> carrito) y `nombreConVariante` del util no la repite. Sin variante no se
+> imprime nada extra. **Detalle**: número, IMEI, color, empleado, quién
+> registró (préstamo, abono, pago total, mora), método, nota, de qué pago total
+> salió cada abono y a qué se repartió, productos de la factura con cantidad,
+> precio y devueltas. El estado de cuenta agrega renglones `detalles` por
+> movimiento en el PDF, NO en el SQL de la pantalla (concepto y saldo siguen
+> siendo los del service). Prueba: `79-pdf-prestamos-creditos` (88; la sección
+> 1 —★— falla contra el código anterior con las hojas vacías).
 - **Email**: Multiple providers in use — Nodemailer (Gmail), Brevo SDK, and Resend — configured per environment.
 - **Backup**: Automated cron jobs via `node-cron` in the `backup` module.
 - **Superadmin JWT**: Uses a separate secret (`JWT_SA_SECRET`) and separate middleware from regular user auth.

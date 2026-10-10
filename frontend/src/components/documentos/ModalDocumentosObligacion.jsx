@@ -7,6 +7,7 @@ import { Printer, FileDown, Loader2, AlertTriangle, CheckCircle, FileText } from
 import { AvisoMoraTermico }  from './AvisoMoraTermico';
 import { PazYSalvoTermico }  from './PazYSalvoTermico';
 import { formatCOP } from '../../utils/formatters';
+import { descargarBlob, mensajeDeErrorBlob } from '../../utils/descargarArchivo';
 
 /**
  * Selector de documentos de una obligación (crédito o préstamo).
@@ -48,15 +49,10 @@ export function ModalDocumentosObligacion({ api, id, config: configNegocio = {},
     try {
       const fn  = tipo === 'mora' ? api.pdfAvisoMora : api.pdfPazYSalvo;
       const res = await fn(id);
-      const url = URL.createObjectURL(res.data);
-      const a   = document.createElement('a');
-      a.href = url;
-      a.download = `${tipo === 'mora' ? 'aviso-mora' : 'paz-y-salvo'}-${resumen?.numero ?? id}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      descargarBlob(res.data, `${tipo === 'mora' ? 'aviso-mora' : 'paz-y-salvo'}-${resumen?.numero ?? id}.pdf`);
       onClose();
     } catch (err) {
-      setError(err.response?.data?.error || 'No se pudo generar el documento.');
+      setError(await mensajeDeErrorBlob(err, 'No se pudo generar el documento.'));
     } finally {
       setCargando(null);
     }

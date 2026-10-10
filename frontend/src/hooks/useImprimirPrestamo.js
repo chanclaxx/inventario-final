@@ -1,6 +1,7 @@
 // src/hooks/useImprimirPrestamo.js
 import { useState } from 'react';
 import api from '../api/axios.config';
+import { descargarBlob } from '../utils/descargarArchivo';
 
 export default function useImprimirPrestamo() {
   const [descargando, setDescargando] = useState(false);
@@ -11,15 +12,7 @@ export default function useImprimirPrestamo() {
       const response = await api.get(`/prestamos/${prestamoId}/pdf`, {
         responseType: 'blob',
       });
-
-      const url      = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-      const link     = document.createElement('a');
-      link.href      = url;
-      link.download  = `prestamo-${numeroMostrar ?? prestamoId}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      descargarBlob(response.data, `prestamo-${numeroMostrar ?? prestamoId}.pdf`);
     } finally {
       setDescargando(false);
     }
@@ -42,14 +35,7 @@ export default function useImprimirPrestamo() {
         await navigator.share({ files: [file], title: `Préstamo #${numeroMostrar ?? prestamoId}` });
       } else {
         // Fallback a descarga directa
-        const url  = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
-        link.href  = url;
-        link.download = `prestamo-${numeroMostrar ?? prestamoId}.pdf`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
+        descargarBlob(response.data, `prestamo-${numeroMostrar ?? prestamoId}.pdf`);
       }
     } finally {
       setDescargando(false);

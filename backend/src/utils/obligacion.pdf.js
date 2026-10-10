@@ -13,10 +13,10 @@
 const PDFDocument = require('pdfkit');
 const {
   PAGE_W, PAGE_H, MARGIN, CONTENT_W, FONT, C, TONOS,
-  formatCOP, formatFecha, formatFechaHora,
+  formatCOP, formatFechaHora,
   rectFill, rectFillStroke, hLine,
   labelSeccion, fila, encabezado, badgeEstado, bloqueFirma, pieDocumento, asegurarEspacio,
-  textoAcotado, tablaPaginada,
+  textoAcotado, tablaPaginada, medirTexto,
 } = require('./pdf.base');
 const { describirCondicion } = require('./obligacion');
 const { describirPlanInteres } = require('./interes.util');
@@ -139,7 +139,9 @@ const bloqueEstadoObligacion = (doc, resumen, y, { titulo = 'Estado de la obliga
 // ─── Bloque: fechas y plazo ──────────────────────────────────────────────────
 
 const bloqueFechas = (doc, resumen, y) => {
-  const filas = [['Fecha de emisión', formatFecha(resumen.fecha_emision)]];
+  // Con HORA: dos préstamos del mismo día a la misma persona solo se distinguen
+  // por ella, y es lo primero que se pregunta al revisar un documento.
+  const filas = [['Fecha y hora de emisión', formatFechaHora(resumen.fecha_emision)]];
 
   if (resumen.fecha_limite) {
     filas.push(['Fecha de vencimiento', resumen.fecha_limite_txt]);
@@ -151,7 +153,7 @@ const bloqueFechas = (doc, resumen, y) => {
     }
   }
   if (resumen.fecha_ultimo_abono) {
-    filas.push(['Último abono', formatFecha(resumen.fecha_ultimo_abono)]);
+    filas.push(['Último abono', formatFechaHora(resumen.fecha_ultimo_abono)]);
   }
 
   const H = filas.length * 16 + 20;
@@ -168,8 +170,23 @@ const bloqueFechas = (doc, resumen, y) => {
 // ─── Bloque: historial de abonos con saldo corrido ───────────────────────────
 
 /**
- * Cuatro columnas: fecha, método, valor y el saldo que quedó después. La última
- * es la que convierte la factura en un historial de pagos utilizable.
+ * Detalle de un abono en una línea: de qué pago total salió, la nota y quién lo
+ * registró. Es lo que el cliente pregunta cuando no reconoce una cifra.
+ */
+const detalleAbono = (ab) => [
+  ab.pago_total
+    ? `Parte de un pago total${ab.pago_total.valor ? ` de ${formatCOP(ab.pago_total.valor)}` : ''}`
+      + `${ab.pago_total.documentos > 1 ? ` repartido entre ${ab.pago_total.documentos} documentos` : ''}`
+      + `${ab.pago_total.descripcion ? ` (${ab.pago_total.descripcion})` : ''}`
+    : null,
+  ab.notas ? `Nota: ${ab.notas}` : null,
+  ab.usuario_nombre ? `Registró: ${ab.usuario_nombre}` : null,
+].filter(Boolean).join('  ·  ');
+
+/**
+ * Cuatro columnas: fecha y hora, método, valor y el saldo que quedó después.
+ * La última es la que convierte la factura en un historial de pagos utilizable.
+ * Debajo de cada abono va su detalle (pago total, nota, quién lo registró).
  */
 const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) => {
   const abonos = resumen.abonos || [];
@@ -178,42 +195,54 @@ const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) =
   const ROW_H  = 17;
   const hayInicial = resumen.cuota_inicial > 0;
 
-  const COL_F = CONTENT_W * 0.24;   // fecha
+  const COL_F = CONTENT_W * 0.24;   // fecha y hora
   const COL_M = CONTENT_W * 0.28;   // método
   const COL_V = CONTENT_W * 0.22;   // valor
   const COL_S = CONTENT_W - COL_F - COL_M - COL_V; // saldo
+  const DET_W = CONTENT_W - COL_F - 12;            // detalle: de método a saldo
 
   const cabecera = (d, yc) => {
     rectFill(d, MARGIN, yc, CONTENT_W, HEAD_H, C.negro, 8);
     d.rect(MARGIN, yc + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
     const o = { font: FONT.bold, size: 7, color: C.blanco, characterSpacing: 0.4 };
-    textoAcotado(d, 'Fecha',  MARGIN + 12,                    yc + 7.5, COL_F - 12, o);
-    textoAcotado(d, 'Método', MARGIN + COL_F,                 yc + 7.5, COL_M,      o);
-    textoAcotado(d, 'Valor',  MARGIN + COL_F + COL_M,         yc + 7.5, COL_V,      { ...o, align: 'right' });
-    textoAcotado(d, 'Saldo',  MARGIN + COL_F + COL_M + COL_V, yc + 7.5, COL_S - 12, { ...o, align: 'right' });
+    textoAcotado(d, 'Fecha y hora', MARGIN + 12,                    yc + 7.5, COL_F - 12, o);
+    textoAcotado(d, 'Método',       MARGIN + COL_F,                 yc + 7.5, COL_M,      o);
+    textoAcotado(d, 'Valor',        MARGIN + COL_F + COL_M,         yc + 7.5, COL_V,      { ...o, align: 'right' });
+    textoAcotado(d, 'Saldo',        MARGIN + COL_F + COL_M + COL_V, yc + 7.5, COL_S - 12, { ...o, align: 'right' });
   };
 
-  const filaAbono = (fechaTxt, metodo, valor, saldo, { esInicial = false } = {}) => ({
-    alto: ROW_H,
-    dibujar: (d, yf) => {
-      textoAcotado(d, fechaTxt, MARGIN + 12, yf + 5, COL_F - 12,
-        { size: 7.5, color: C.grisOscuro });
-      textoAcotado(d, metodo, MARGIN + COL_F, yf + 5, COL_M,
-        { font: esInicial ? FONT.bold : FONT.normal, size: 7.5,
-          color: esInicial ? C.azul : C.grisOscuro });
-      textoAcotado(d, formatCOP(valor), MARGIN + COL_F + COL_M, yf + 5, COL_V,
-        { font: FONT.bold, size: 8, color: C.verde, align: 'right' });
-      textoAcotado(d, formatCOP(saldo), MARGIN + COL_F + COL_M + COL_V, yf + 5, COL_S - 12,
-        { size: 8, color: saldo > 0 ? C.grisOscuro : C.verde, align: 'right' });
-    },
-  });
+  const OPT_DET = { size: 6.5, lineas: 3 };
+
+  const filaAbono = (fechaTxt, metodo, valor, saldo, { esInicial = false, detalle = '' } = {}) => {
+    // El alto se mide ANTES de dibujar: tablaPaginada necesita saber si la fila
+    // cabe en lo que queda de hoja.
+    const altoDet = detalle ? medirTexto(doc, detalle, DET_W, OPT_DET).alto + 3 : 0;
+    return {
+      alto: ROW_H + altoDet,
+      dibujar: (d, yf) => {
+        textoAcotado(d, fechaTxt, MARGIN + 12, yf + 5, COL_F - 12,
+          { size: 7.5, color: C.grisOscuro });
+        textoAcotado(d, metodo, MARGIN + COL_F, yf + 5, COL_M,
+          { font: esInicial ? FONT.bold : FONT.normal, size: 7.5,
+            color: esInicial ? C.azul : C.grisOscuro });
+        textoAcotado(d, formatCOP(valor), MARGIN + COL_F + COL_M, yf + 5, COL_V,
+          { font: FONT.bold, size: 8, color: C.verde, align: 'right' });
+        textoAcotado(d, formatCOP(saldo), MARGIN + COL_F + COL_M + COL_V, yf + 5, COL_S - 12,
+          { size: 8, color: saldo > 0 ? C.grisOscuro : C.verde, align: 'right' });
+        if (detalle) {
+          textoAcotado(d, detalle, MARGIN + COL_F, yf + ROW_H - 1, DET_W,
+            { ...OPT_DET, color: C.gris });
+        }
+      },
+    };
+  };
 
   const filas = [];
 
   // La cuota inicial es el primer pago de la obligación: va en el historial.
   if (hayInicial) {
-    filas.push(filaAbono(formatFecha(resumen.fecha_emision), 'Cuota inicial',
-      resumen.cuota_inicial, resumen.financiado, { esInicial: true }));
+    filas.push(filaAbono(formatFechaHora(resumen.fecha_emision), 'Cuota inicial',
+      resumen.cuota_inicial, resumen.financiado, { esInicial: true, detalle: 'Pagada el día de la venta' }));
   }
 
   if (!abonos.length && !hayInicial) {
@@ -229,7 +258,8 @@ const tablaAbonos = (doc, resumen, y, { titulo = 'Historial de abonos' } = {}) =
       const metodo = Number(ab.valor_registrado) > Number(ab.valor) + 0.5
         ? `${ab.metodo} · registrado ${formatCOP(ab.valor_registrado)}`
         : ab.metodo;
-      filas.push(filaAbono(formatFecha(ab.fecha), metodo, ab.valor, ab.saldo_despues));
+      filas.push(filaAbono(formatFechaHora(ab.fecha), metodo, ab.valor, ab.saldo_despues,
+        { detalle: detalleAbono(ab) }));
     }
   }
 
@@ -324,17 +354,23 @@ const tablaMovimientosMora = (doc, resumen, y, { titulo = null } = {}) => {
       // Cada renglón dice de qué cargo es: son deudas con causa distinta y el
       // cliente tiene derecho a distinguirlas en su comprobante.
       const cual = m.concepto === 'interes' ? 'interés' : 'mora';
-      const concepto = m.es_cobro
-        ? `Cobro de ${cual}${m.metodo ? ` · ${m.metodo}` : ''}`
-        : `${cual === 'interés' ? 'Interés' : 'Mora'} condonada${m.motivo ? ` · ${m.motivo}` : ''}`;
+      const concepto = [
+        m.es_cobro
+          ? `Cobro de ${cual}${m.metodo ? ` · ${m.metodo}` : ''}`
+          : `${cual === 'interés' ? 'Interés' : 'Mora'} condonada${m.motivo ? ` · ${m.motivo}` : ''}`,
+        m.dias_mora ? `${m.dias_mora} día(s) de atraso` : null,
+        m.usuario_nombre ? `Registró: ${m.usuario_nombre}` : null,
+      ].filter(Boolean).join(' · ');
+      const OPT_C = { size: 7.5, lineas: 3 };
+      const altoC = medirTexto(doc, concepto, COL_C, OPT_C).alto;
 
       filas.push({
-        alto: ROW_H,
+        alto: Math.max(ROW_H, altoC + 8),
         dibujar: (d, yf) => {
-          textoAcotado(d, formatFecha(m.fecha), MARGIN + 12, yf + 5, COL_F - 12,
+          textoAcotado(d, formatFechaHora(m.fecha), MARGIN + 12, yf + 5, COL_F - 12,
             { size: 7.5, color: C.grisOscuro });
           textoAcotado(d, concepto, MARGIN + COL_F, yf + 5, COL_C,
-            { size: 7.5, color: C.grisOscuro });
+            { ...OPT_C, color: C.grisOscuro });
           textoAcotado(d, formatCOP(m.valor), MARGIN + COL_F + COL_C, yf + 5, COL_V - 12,
             { font: FONT.bold, size: 8, color: m.es_cobro ? C.verde : C.grisClaro, align: 'right' });
         },
@@ -440,6 +476,23 @@ const bloqueCondiciones = (doc, resumen, y, { compacto = false } = {}) => {
   return y + 8;
 };
 
+// ─── Bloque: qué es la obligación (productos) ────────────────────────────────
+
+/**
+ * La descripción trae un renglón por producto (con su variante e IMEI). Se mide
+ * antes de dibujar y se escribe con alto fijo: un `doc.text` suelto cerca del
+ * pie dejaba que PDFKit abriera solo una hoja, que es de donde salían las
+ * páginas en blanco.
+ */
+const bloqueDescripcion = (doc, y, titulo, descripcion) => {
+  const OPT = { size: 9, lineas: 40, lineGap: 1.5, color: C.grisOscuro };
+  const alto = medirTexto(doc, descripcion, CONTENT_W, OPT).alto;
+  y = labelSeccion(doc, y, titulo, { reservar: Math.min(alto, 200) });
+  y = asegurarEspacio(doc, y, alto);
+  y += textoAcotado(doc, descripcion, MARGIN, y, CONTENT_W, OPT);
+  return y + 16;
+};
+
 // ─── Bloque: datos de la persona ─────────────────────────────────────────────
 
 const bloquePersona = (doc, persona, y, { titulo = 'Cliente' } = {}) => {
@@ -525,15 +578,9 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
 
   y = bloquePersona(doc, persona, y, { titulo: resumen.tipo === 'credito' ? 'Cliente' : 'Prestatario' });
 
-  if (descripcion) {
-    y = labelSeccion(doc, y, 'Obligación');
-    doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
-      .text(descripcion, MARGIN, y, { width: CONTENT_W });
-    y += doc.heightOfString(descripcion, { width: CONTENT_W }) + 16;
-  }
+  if (descripcion) y = bloqueDescripcion(doc, y, 'Obligación', descripcion);
 
   // ── Desglose de lo adeudado ───────────────────────────────────────────────
-  y = labelSeccion(doc, y, 'Detalle de la deuda');
   // Con una condición de solo aviso no hay intereses de mora: la línea en $0 y el
   // párrafo que explica cómo se liquidan harían creer que se cobra algo.
   const soloAviso = resumen.condicion?.valor != null && Number(resumen.condicion.valor) === 0;
@@ -541,6 +588,7 @@ const generarAvisoMora = ({ config, persona, resumen, descripcion, terminos = []
   if (interesPendiente > 0) detalle.push(['Interés de financiación pendiente', formatCOP(interesPendiente)]);
   if (!soloAviso || moraPendiente > 0) detalle.push(['Intereses de mora causados', formatCOP(moraPendiente)]);
   const H = detalle.length * 16 + 52;
+  y = labelSeccion(doc, y, 'Detalle de la deuda', { reservar: H });
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
   let yd = y + 12;
   for (const [l, v] of detalle) yd = fila(doc, yd, l, v, { x: MARGIN + 14, w: CONTENT_W - 28 });
@@ -635,15 +683,9 @@ const generarPazYSalvo = ({ config, persona, resumen, descripcion, logo = null }
 
   y = bloquePersona(doc, persona, y, { titulo: resumen.tipo === 'credito' ? 'Cliente' : 'Prestatario' });
 
-  if (descripcion) {
-    y = labelSeccion(doc, y, 'Obligación cancelada');
-    doc.font(FONT.normal).fontSize(9).fillColor(C.grisOscuro)
-      .text(descripcion, MARGIN, y, { width: CONTENT_W });
-    y += doc.heightOfString(descripcion, { width: CONTENT_W }) + 16;
-  }
+  if (descripcion) y = bloqueDescripcion(doc, y, 'Obligación cancelada', descripcion);
 
   // ── Cifras finales ────────────────────────────────────────────────────────
-  y = labelSeccion(doc, y, 'Resumen de la obligación');
   const detalle = [
     [resumen.tipo === 'credito' ? 'Valor original de la venta' : 'Valor del préstamo',
       formatCOP(resumen.valor_original)],
@@ -651,12 +693,13 @@ const generarPazYSalvo = ({ config, persona, resumen, descripcion, logo = null }
     ...(resumen.cuota_inicial > 0 ? [['Cuota inicial', formatCOP(resumen.cuota_inicial)]]  : []),
     [`Total abonado (${resumen.num_abonos} abono${resumen.num_abonos === 1 ? '' : 's'})`,
       formatCOP(resumen.total_abonado)],
-    ['Fecha de emisión',    formatFecha(resumen.fecha_emision)],
-    ...(resumen.fecha_ultimo_abono ? [['Fecha del último pago', formatFecha(resumen.fecha_ultimo_abono)]] : []),
-    ['Fecha en que quedó saldada', formatFecha(resumen.fecha_ultimo_abono || new Date())],
+    ['Fecha y hora de emisión', formatFechaHora(resumen.fecha_emision)],
+    ...(resumen.fecha_ultimo_abono ? [['Fecha y hora del último pago', formatFechaHora(resumen.fecha_ultimo_abono)]] : []),
+    ['Quedó saldada', formatFechaHora(resumen.fecha_ultimo_abono || new Date())],
   ];
 
   const H = detalle.length * 16 + 52;
+  y = labelSeccion(doc, y, 'Resumen de la obligación', { reservar: H });
   rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.blanco, C.grisBorde, 8);
   let yd = y + 12;
   for (const [l, v] of detalle) yd = fila(doc, yd, l, v, { x: MARGIN + 14, w: CONTENT_W - 28 });
@@ -675,7 +718,7 @@ const generarPazYSalvo = ({ config, persona, resumen, descripcion, logo = null }
   doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
     .text(
       'Se expide la presente constancia a solicitud del interesado, '
-      + `el ${formatFecha(new Date())}.`,
+      + `el ${formatFechaHora(new Date())}.`,
       MARGIN, y, { width: CONTENT_W },
     );
   y += 40;

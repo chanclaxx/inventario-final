@@ -12,6 +12,7 @@ import { useAuth } from '../../context/useAuth';
 import useSucursalStore from '../../store/sucursalStore';
 import { formatCOP } from '../../utils/formatters';
 import { fechaHoyBogota } from '../../utils/formatters';
+import { descargarBlob } from '../../utils/descargarArchivo';
 
 /**
  * Reporte por empleado: todo lo que vendió, prestó (a clientes y a compañeros)
@@ -46,16 +47,7 @@ async function mensajeDeError(err) {
   return 'No se pudo generar el reporte. Intenta de nuevo.';
 }
 
-function guardar(blob, nombre) {
-  const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-  const a   = document.createElement('a');
-  a.href     = url;
-  a.download = nombre;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+const guardar = (blob, nombre) => descargarBlob(blob, nombre);
 
 const numero = (n) => Number(n || 0).toLocaleString('es-CO');
 const registros = (n) => (n > 0 ? `${numero(n)} registro${n !== 1 ? 's' : ''}` : 'sin movimientos');

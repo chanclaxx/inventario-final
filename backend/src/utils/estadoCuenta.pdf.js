@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * PDF de ESTADO DE CUENTA — compartido por préstamos y créditos.
+ * PDF de ESTADO DE CUENTA — compartido por préstamos, créditos y la cuenta de
+ * un local de la red interna.
  *
  * Este módulo solo DIBUJA. No consulta la base ni calcula saldos: recibe los
  * movimientos ya resueltos por el service del módulo correspondiente, que es la
@@ -9,230 +10,178 @@
  * distinto al de la pantalla.
  *
  * Cada movimiento debe traer:
- *   { fecha, tipo, concepto, cargo, abono, saldo, nota?, atenuado? }
+ *   { fecha, tipo, concepto, cargo, abono, saldo, nota?, atenuado?, detalles? }
  *   · `saldo` en null  → el movimiento no entra al acumulado (se pinta "—").
  *   · `nota`           → sufijo entre paréntesis en el concepto ("Devuelto"…).
  *   · `atenuado`       → se pinta en gris (documento anulado/devuelto).
+ *   · `detalles`       → renglones debajo del concepto: productos con su
+ *                        variante e IMEI, quién registró, a qué se repartió un
+ *                        pago total… Opcional: sin él la fila es la de siempre.
+ *
+ * Paginación: la tabla va por `tablaPaginada` (repite la cabecera en cada hoja)
+ * y todo texto lleva alto fijo, así que PDFKit nunca abre una hoja por su
+ * cuenta. Antes la tabla se dibujaba a mano con el documento en `margin: 0`, el
+ * resumen final no medía si cabía y el marco se trazaba desde la primera hoja
+ * hasta la última `y` — en un extracto largo salían hojas con solo el resumen
+ * o con nada.
  */
 
 const PDFDocument = require('pdfkit');
+const {
+  PAGE_W, PAGE_H, MARGIN, CONTENT_W, BODY_BOTTOM, FONT, C,
+  formatCOP, formatFecha, formatFechaHora,
+  rectFill, rectFillStroke,
+  encabezado, pieDocumento, asegurarEspacio, encabezadoContinuo,
+  medirTexto, textoAcotado, tablaPaginada,
+} = require('./pdf.base');
 
-// ─── Formato ─────────────────────────────────────────────────────────────────
+const HEADER_CONT_H = 40;
+const CUERPO_TOP    = HEADER_CONT_H + 22;
 
-const formatCOP = (valor) =>
-  new Intl.NumberFormat('es-CO', {
-    style: 'currency', currency: 'COP', maximumFractionDigits: 0,
-  }).format(Number(valor) || 0);
-
-const formatFecha = (fecha) => {
-  if (!fecha) return '—';
-  return new Date(fecha).toLocaleDateString('es-CO', {
-    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Bogota',
-  });
-};
-
-const formatFechaHora = (fecha) => {
-  if (!fecha) return '—';
-  return new Date(fecha).toLocaleString('es-CO', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
+const formatHora = (fecha) => {
+  if (!fecha) return '';
+  return new Date(fecha).toLocaleTimeString('es-CO', {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Bogota',
   });
 };
 
-// ─── Layout y paleta (misma que facturas.pdf.js) ─────────────────────────────
-
-const MARGIN     = 52;
-const PAGE_WIDTH = 595.28;
-const PAGE_H     = 841.89;
-const COL_WIDTH  = PAGE_WIDTH - MARGIN * 2;
-
-const FONT = { normal: 'Helvetica', bold: 'Helvetica-Bold' };
-
-const C = {
-  headerBg:   '#111827',
-  headerText: '#FFFFFF',
-  headerSub:  '#9CA3AF',
-  negro:      '#111827',
-  gris:       '#6B7280',
-  grisClaro:  '#9CA3AF',
-  grisFondo:  '#F9FAFB',
-  grisBorde:  '#E5E7EB',
-  blanco:     '#FFFFFF',
-  verde:      '#059669',
-  verdeFondo: '#ECFDF5',
-  rojo:       '#DC2626',
-  rojoFondo:  '#FEF2F2',
-  naranja:    '#D97706',
-};
-
-const rectFill = (doc, x, y, w, h, color, radius = 6) =>
-  doc.roundedRect(x, y, w, h, radius).fill(color);
-
-const rectFillStroke = (doc, x, y, w, h, fillColor, strokeColor, radius = 6, lineWidth = 0.75) => {
-  doc.roundedRect(x, y, w, h, radius).fillAndStroke(fillColor, strokeColor);
-  doc.lineWidth(lineWidth);
-};
-
-const hLine = (doc, y, { x1 = MARGIN, x2 = PAGE_WIDTH - MARGIN, color = C.grisBorde, width = 0.5 } = {}) =>
-  doc.moveTo(x1, y).lineTo(x2, y).strokeColor(color).lineWidth(width).stroke();
-
 // ─── Bloques ─────────────────────────────────────────────────────────────────
 
-const _encabezado = (doc, config, logoNegocio) => {
-  const HEADER_H = 110;
-  doc.roundedRect(0, 0, PAGE_WIDTH, HEADER_H, 0).fill(C.headerBg);
-
-  let logoOffset = 0;
-  if (logoNegocio) {
-    try {
-      const base64 = logoNegocio.replace(/^data:image\/[a-z+]+;base64,/, '');
-      const buf = Buffer.from(base64, 'base64');
-      if (buf.length) {
-        doc.image(buf, MARGIN, Math.round((HEADER_H - 50) / 2), { fit: [50, 50] });
-        logoOffset = 60;
-      }
-    } catch { /* sin logo */ }
-  }
-
-  const textX = MARGIN + logoOffset;
-  const textW = COL_WIDTH - logoOffset;
-
-  doc.font(FONT.bold).fontSize(18).fillColor(C.headerText)
-    .text(config?.nombre_negocio || 'Mi Negocio', textX, 22, { width: textW });
-
-  const sub = [config?.direccion, config?.telefono_negocio].filter(Boolean).join('  ·  ');
-  if (sub) {
-    doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-      .text(sub, textX, 44, { width: textW });
-  }
-
-  doc.font(FONT.bold).fontSize(11).fillColor(C.headerText)
-    .text('ESTADO DE CUENTA', PAGE_WIDTH - MARGIN - 150, 22, { width: 150, align: 'right' });
-  doc.font(FONT.normal).fontSize(8).fillColor(C.headerSub)
-    .text(`Generado: ${formatFechaHora(new Date())}`, PAGE_WIDTH - MARGIN - 150, 38, { width: 150, align: 'right' });
-
-  return HEADER_H;
+const _encabezadoContinuacion = (doc, titulo) => {
+  rectFill(doc, 0, 0, PAGE_W, HEADER_CONT_H, C.headerBg, 0);
+  textoAcotado(doc, titulo, MARGIN, 15, CONTENT_W,
+    { font: FONT.bold, size: 9, color: C.headerText });
 };
 
 const _infoPersona = (doc, persona, subtitulo, saldoFinal, y) => {
   const H = 70;
-  rectFillStroke(doc, MARGIN, y, COL_WIDTH, H, C.grisFondo, C.grisBorde, 8);
+  rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.grisFondo, C.grisBorde, 8);
 
   const avSize = 38;
   const avX = MARGIN + 14;
   const avY = y + (H - avSize) / 2;
   rectFill(doc, avX, avY, avSize, avSize, saldoFinal > 0 ? C.rojoFondo : C.verdeFondo, 10);
-  doc.font(FONT.bold).fontSize(13).fillColor(saldoFinal > 0 ? C.rojo : C.verde)
-    .text((persona.nombre || '?').slice(0, 2).toUpperCase(), avX, avY + 11, { width: avSize, align: 'center' });
+  textoAcotado(doc, (persona.nombre || '?').slice(0, 2).toUpperCase(), avX, avY + 12, avSize,
+    { font: FONT.bold, size: 13, color: saldoFinal > 0 ? C.rojo : C.verde, align: 'center' });
 
   const dataX = avX + avSize + 12;
-  doc.font(FONT.bold).fontSize(11).fillColor(C.negro)
-    .text(persona.nombre || '', dataX, y + 12, { width: 220 });
-  doc.font(FONT.normal).fontSize(8).fillColor(C.gris)
-    .text(subtitulo || '', dataX, y + 27);
+  const dataW = CONTENT_W - (dataX - MARGIN) - 120;
+  textoAcotado(doc, persona.nombre || '', dataX, y + 12, dataW,
+    { font: FONT.bold, size: 11, color: C.negro });
+  textoAcotado(doc, subtitulo || '', dataX, y + 27, dataW, { size: 8, color: C.gris, lineas: 2 });
   if (persona.cedula || persona.celular) {
     const datos = [persona.cedula && `CC: ${persona.cedula}`, persona.celular && `Tel: ${persona.celular}`]
       .filter(Boolean).join('  ·  ');
-    doc.font(FONT.normal).fontSize(8).fillColor(C.gris).text(datos, dataX, y + 38);
+    textoAcotado(doc, datos, dataX, y + 48, dataW, { size: 8, color: C.gris });
   }
 
-  const saldoX = PAGE_WIDTH - MARGIN - 14;
-  doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-    .text('Saldo deuda', saldoX - 90, y + 18, { width: 90, align: 'right' });
-  doc.font(FONT.bold).fontSize(12).fillColor(saldoFinal > 0 ? C.rojo : C.verde)
-    .text(formatCOP(saldoFinal), saldoX - 90, y + 30, { width: 90, align: 'right' });
+  const saldoX = PAGE_W - MARGIN - 14;
+  textoAcotado(doc, 'Saldo deuda', saldoX - 110, y + 18, 110,
+    { size: 7.5, color: C.grisClaro, align: 'right' });
+  textoAcotado(doc, formatCOP(saldoFinal), saldoX - 110, y + 30, 110,
+    { font: FONT.bold, size: 12, color: saldoFinal > 0 ? C.rojo : C.verde, align: 'right' });
 
-  return y + H + 12;
+  return y + H + 16;
 };
 
-const _tabla = (doc, movimientos, tipoLabels, startY) => {
-  // Fecha(62) + Justificación(199) + −(76) + +(76) + Saldo(86) = 499 = COL_WIDTH
-  const cols = [
-    { label: 'Fecha',         x: MARGIN,       w: 62,  align: 'left'  },
-    { label: 'Justificación', x: MARGIN + 62,  w: 199, align: 'left'  },
-    { label: '-',             x: MARGIN + 261, w: 76,  align: 'right' },
-    { label: '+',             x: MARGIN + 337, w: 76,  align: 'right' },
-    { label: 'Saldo',         x: MARGIN + 413, w: 86,  align: 'right' },
-  ];
+// Fecha(62) + Justificación + −(66) + +(66) + Saldo(80) = CONTENT_W
+const COL = (() => {
+  const F = 62, M = 66, P = 66, S = 80;
+  const J = CONTENT_W - F - M - P - S;
+  return {
+    F: { x: MARGIN,                 w: F },
+    J: { x: MARGIN + F,             w: J },
+    M: { x: MARGIN + F + J,         w: M },
+    P: { x: MARGIN + F + J + M,     w: P },
+    S: { x: MARGIN + F + J + M + P, w: S },
+  };
+})();
 
-  const ROW_H       = 24;
-  const HEAD_H      = 26;
-  const PAGE_BOTTOM = PAGE_H - 60;
-  let y = startY;
+const HEAD_H = 24;
+const BADGE_W = 54;
+const BADGE_H = 12;
+const OPT_CONCEPTO = { size: 8, lineas: 6 };
+const OPT_DETALLE  = { size: 6.8, lineas: 30, lineGap: 0.5 };
 
-  const dibujarCabecera = (yy) => {
-    rectFill(doc, MARGIN, yy, COL_WIDTH, HEAD_H, C.negro, 6);
-    cols.forEach((col) => {
-      const color = col.label === '-' ? C.verde : col.label === '+' ? C.naranja : C.blanco;
-      doc.font(FONT.bold).fontSize(8).fillColor(color)
-        .text(col.label, col.x + 4, yy + 9, { width: col.w - 8, align: col.align });
-    });
-    return yy + HEAD_H;
+const _tabla = (doc, movimientos, tipoLabels, y) => {
+  const fallback = Object.values(tipoLabels)[0] || { label: '', bg: C.grisFondo, text: C.gris };
+
+  const cabecera = (d, yc) => {
+    rectFill(d, MARGIN, yc, CONTENT_W, HEAD_H, C.negro, 6);
+    d.rect(MARGIN, yc + 12, CONTENT_W, HEAD_H - 12).fill(C.negro);
+    const o = { font: FONT.bold, size: 7.5, color: C.blanco };
+    textoAcotado(d, 'Fecha y hora',  COL.F.x + 6, yc + 8.5, COL.F.w - 8, o);
+    textoAcotado(d, 'Justificación', COL.J.x + 4, yc + 8.5, COL.J.w - 8, o);
+    textoAcotado(d, '-', COL.M.x + 4, yc + 8.5, COL.M.w - 8, { ...o, color: C.verde, align: 'right' });
+    textoAcotado(d, '+', COL.P.x + 4, yc + 8.5, COL.P.w - 8, { ...o, color: C.naranja, align: 'right' });
+    textoAcotado(d, 'Saldo', COL.S.x + 4, yc + 8.5, COL.S.w - 10, { ...o, align: 'right' });
   };
 
-  y = dibujarCabecera(y);
+  const conceptoW = COL.J.w - BADGE_W - 12;
+  const detalleW  = COL.J.w - 10;
 
-  const fallback = Object.values(tipoLabels)[0];
+  const filas = movimientos.map((mov) => {
+    const tipoCfg  = tipoLabels[mov.tipo] || fallback;
+    const concepto = mov.nota ? `${mov.concepto || ''} (${mov.nota})` : (mov.concepto || '');
+    const detalles = (Array.isArray(mov.detalles) ? mov.detalles : []).filter(Boolean);
+    const textoDet = detalles.join('\n');
 
-  movimientos.forEach((mov, i) => {
-    if (y + ROW_H > PAGE_BOTTOM) {
-      doc.addPage();
-      y = MARGIN;
-      y = dibujarCabecera(y);
-    }
+    // Todo se mide antes de dibujar: tablaPaginada decide con estos altos si la
+    // fila cabe en lo que queda de la hoja.
+    const altoConcepto = medirTexto(doc, concepto, conceptoW, OPT_CONCEPTO).alto;
+    const altoDetalle  = textoDet ? medirTexto(doc, textoDet, detalleW, OPT_DETALLE).alto + 3 : 0;
+    const altoCuerpo   = Math.max(BADGE_H, altoConcepto) + altoDetalle;
+    const alto = Math.max(28, altoCuerpo + 14);
 
-    const rowBg   = i % 2 === 0 ? C.blanco : C.grisFondo;
-    rectFill(doc, MARGIN, y, COL_WIDTH, ROW_H, rowBg, 0);
+    return {
+      alto,
+      dibujar: (d, yf) => {
+        const atenuado = !!mov.atenuado;
+        const esCargo  = !!mov.cargo;
 
-    const esCargo = !!mov.cargo;
-    const tipoCfg = tipoLabels[mov.tipo] || fallback;
-    const badgeW  = 52;
-    const badgeH  = 13;
+        textoAcotado(d, formatFecha(mov.fecha), COL.F.x + 6, yf + 7, COL.F.w - 8,
+          { size: 7.5, color: C.grisOscuro });
+        textoAcotado(d, formatHora(mov.fecha), COL.F.x + 6, yf + 17, COL.F.w - 8,
+          { size: 7, color: C.grisClaro });
 
-    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-      .text(formatFecha(mov.fecha), cols[0].x + 4, y + 8, { width: cols[0].w - 8, align: 'left' });
+        rectFill(d, COL.J.x + 4, yf + 6, BADGE_W, BADGE_H, tipoCfg.bg, 6);
+        textoAcotado(d, tipoCfg.label, COL.J.x + 4, yf + 9, BADGE_W,
+          { font: FONT.bold, size: 6.5, color: tipoCfg.text, align: 'center' });
 
-    rectFill(doc, cols[1].x + 4, y + (ROW_H - badgeH) / 2, badgeW, badgeH, tipoCfg.bg, 6);
-    doc.font(FONT.bold).fontSize(6.5).fillColor(tipoCfg.text)
-      .text(tipoCfg.label, cols[1].x + 4, y + (ROW_H - badgeH) / 2 + 3.5, { width: badgeW, align: 'center' });
+        textoAcotado(d, concepto, COL.J.x + BADGE_W + 8, yf + 7, conceptoW,
+          { ...OPT_CONCEPTO, color: atenuado ? C.grisClaro : C.negro });
+        if (textoDet) {
+          textoAcotado(d, textoDet, COL.J.x + 6, yf + 7 + Math.max(BADGE_H, altoConcepto) + 3, detalleW,
+            { ...OPT_DETALLE, color: atenuado ? C.grisClaro : C.gris });
+        }
 
-    const conceptoTexto = mov.nota ? `${mov.concepto || ''} (${mov.nota})` : (mov.concepto || '');
-    doc.font(FONT.normal).fontSize(8).fillColor(mov.atenuado ? C.grisClaro : C.negro)
-      .text(conceptoTexto, cols[1].x + badgeW + 8, y + 8,
-        { width: cols[1].w - badgeW - 12, align: 'left', ellipsis: true, height: ROW_H - 10 });
+        const monto = (txt, col, color, font = FONT.normal) =>
+          textoAcotado(d, txt, col.x + 4, yf + 7, col.w - 8, { font, size: 8, color, align: 'right' });
 
-    // − abonos (reducen deuda)
-    if (!esCargo) {
-      doc.font(FONT.normal).fontSize(8).fillColor(C.verde)
-        .text(formatCOP(mov.abono), cols[2].x + 4, y + 8, { width: cols[2].w - 8, align: 'right' });
-    } else {
-      doc.font(FONT.normal).fontSize(8).fillColor(C.grisBorde)
-        .text('—', cols[2].x + 4, y + 8, { width: cols[2].w - 8, align: 'right' });
-    }
+        // − abonos (reducen deuda) · + cargos (aumentan deuda)
+        if (!esCargo && mov.abono) monto(formatCOP(mov.abono), COL.M, atenuado ? C.grisClaro : C.verde);
+        else monto('—', COL.M, C.grisBorde);
+        if (esCargo) monto(formatCOP(mov.cargo), COL.P, atenuado ? C.grisClaro : C.naranja);
+        else monto('—', COL.P, C.grisBorde);
 
-    // + cargos (aumentan deuda)
-    if (esCargo) {
-      doc.font(FONT.normal).fontSize(8).fillColor(C.naranja)
-        .text(formatCOP(mov.cargo), cols[3].x + 4, y + 8, { width: cols[3].w - 8, align: 'right' });
-    } else {
-      doc.font(FONT.normal).fontSize(8).fillColor(C.grisBorde)
-        .text('—', cols[3].x + 4, y + 8, { width: cols[3].w - 8, align: 'right' });
-    }
-
-    if (mov.saldo != null) {
-      doc.font(FONT.bold).fontSize(8).fillColor(mov.saldo > 0 ? C.rojo : C.verde)
-        .text(formatCOP(mov.saldo), cols[4].x + 4, y + 8, { width: cols[4].w - 8, align: 'right' });
-    } else {
-      doc.font(FONT.normal).fontSize(8).fillColor(C.grisClaro)
-        .text('—', cols[4].x + 4, y + 8, { width: cols[4].w - 8, align: 'right' });
-    }
-
-    hLine(doc, y + ROW_H, { x1: MARGIN, x2: PAGE_WIDTH - MARGIN, color: C.grisBorde });
-    y += ROW_H;
+        if (mov.saldo != null) {
+          monto(formatCOP(mov.saldo), { x: COL.S.x, w: COL.S.w - 2 },
+            mov.saldo > 0 ? C.rojo : C.verde, FONT.bold);
+        } else {
+          monto('—', { x: COL.S.x, w: COL.S.w - 2 }, C.grisClaro);
+        }
+      },
+    };
   });
 
-  doc.roundedRect(MARGIN, startY, COL_WIDTH, y - startY, 6).strokeColor(C.grisBorde).lineWidth(0.5).stroke();
-  return y;
+  return tablaPaginada(doc, y, {
+    cabeceraAlto: HEAD_H,
+    dibujarCabecera: cabecera,
+    filas,
+    radio: 6,
+    alterna: C.grisFondo,
+    espacioDespues: 14,
+  });
 };
 
 const _resumen = (doc, movimientos, saldoFinal, y) => {
@@ -241,13 +190,13 @@ const _resumen = (doc, movimientos, saldoFinal, y) => {
   const nCargos     = movimientos.filter((m) => m.cargo).length;
   const nAbonos     = movimientos.filter((m) => m.abono).length;
 
-  y += 14;
   const H = 64;
-  rectFillStroke(doc, MARGIN, y, COL_WIDTH, H, C.grisFondo, C.grisBorde, 8);
+  y = asegurarEspacio(doc, y, H);
+  rectFillStroke(doc, MARGIN, y, CONTENT_W, H, C.grisFondo, C.grisBorde, 8);
 
-  doc.font(FONT.bold).fontSize(9).fillColor(C.negro).text('Resumen', MARGIN + 14, y + 10);
+  textoAcotado(doc, 'Resumen', MARGIN + 14, y + 10, 200, { font: FONT.bold, size: 9, color: C.negro });
 
-  const statW = (COL_WIDTH - 28) / 4;
+  const statW = (CONTENT_W - 28) / 4;
   const stats = [
     { label: 'Movimientos',         value: String(movimientos.length), color: C.negro   },
     { label: `Cargos (${nCargos})`, value: formatCOP(totalCargos),     color: C.naranja },
@@ -257,10 +206,8 @@ const _resumen = (doc, movimientos, saldoFinal, y) => {
 
   stats.forEach((s, i) => {
     const sx = MARGIN + 14 + i * statW;
-    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-      .text(s.label, sx, y + 28, { width: statW - 4 });
-    doc.font(FONT.bold).fontSize(9.5).fillColor(s.color)
-      .text(s.value, sx, y + 40, { width: statW - 4 });
+    textoAcotado(doc, s.label, sx, y + 28, statW - 4, { size: 7.5, color: C.grisClaro });
+    textoAcotado(doc, s.value, sx, y + 40, statW - 4, { font: FONT.bold, size: 9.5, color: s.color });
   });
 
   return y + H;
@@ -284,36 +231,44 @@ const construirPdfEstadoCuenta = ({
   persona, subtitulo, movimientos, saldoFinal,
   config, logoNegocio, tipoLabels, negocioNombre,
 }) => {
+  // Los márgenes son parte del contrato (ver pdf.base): `top` = alto del
+  // encabezado de continuación y `bottom` = la franja del pie. Con `margin: 0`
+  // el borde inferior útil era el filo del papel y cualquier texto que cayera
+  // abajo se llevaba una hoja nueva.
   const doc = new PDFDocument({
-    size: 'A4', margin: 0, bufferPages: true,
+    size: 'A4', bufferPages: true,
+    margins: { top: CUERPO_TOP, bottom: PAGE_H - BODY_BOTTOM, left: MARGIN, right: MARGIN },
     info: { Title: `Estado de cuenta — ${persona.nombre}`, Author: negocioNombre || 'Mi Negocio' },
   });
 
-  let y = _encabezado(doc, config, logoNegocio);
+  const generado = formatFechaHora(new Date());
+  const configEnc = { ...(config || {}), nombre_negocio: config?.nombre_negocio || negocioNombre };
+  let y = encabezado(doc, {
+    config: configEnc, logo: logoNegocio || null,
+    titulo: 'Estado de cuenta', subtitulo: `Generado: ${generado}`,
+  });
+  encabezadoContinuo(doc, (d) =>
+    _encabezadoContinuacion(d, `Estado de cuenta · ${persona.nombre || ''}`));
+
   y += 16;
   y  = _infoPersona(doc, persona, subtitulo, saldoFinal, y);
 
   if (movimientos.length === 0) {
-    doc.font(FONT.normal).fontSize(10).fillColor(C.grisClaro)
-      .text('Sin movimientos registrados.', MARGIN, y + 20, { width: COL_WIDTH, align: 'center' });
+    textoAcotado(doc, 'Sin movimientos registrados.', MARGIN, y + 20, CONTENT_W,
+      { size: 10, color: C.grisClaro, align: 'center' });
   } else {
-    y += 4;
-    doc.font(FONT.bold).fontSize(9).fillColor(C.negro).text('Movimientos', MARGIN, y);
+    textoAcotado(doc, `Movimientos (${movimientos.length})`, MARGIN, y, CONTENT_W,
+      { font: FONT.bold, size: 9, color: C.negro });
     y += 14;
     y  = _tabla(doc, movimientos, tipoLabels, y);
-    y  = _resumen(doc, movimientos, saldoFinal, y);
+    _resumen(doc, movimientos, saldoFinal, y);
   }
 
-  const totalPages = doc.bufferedPageRange().count;
-  for (let i = 0; i < totalPages; i++) {
-    doc.switchToPage(i);
-    hLine(doc, PAGE_H - 44, { color: C.grisBorde });
-    doc.font(FONT.normal).fontSize(7.5).fillColor(C.grisClaro)
-      .text(`Página ${i + 1} de ${totalPages}`, MARGIN, PAGE_H - 38, { width: COL_WIDTH, align: 'right' });
-  }
-
+  pieDocumento(doc, {
+    texto: `Estado de cuenta · ${persona.nombre || ''} · Generado el ${generado}`,
+  });
   doc.end();
   return doc;
 };
 
-module.exports = { construirPdfEstadoCuenta };
+module.exports = { construirPdfEstadoCuenta, formatHora };

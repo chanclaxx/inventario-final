@@ -162,6 +162,14 @@ const resumirObligacion = ({
         // Se conserva el nombre original del campo: esta lista ES la que
         // consume el historial de la pantalla, no una copia paralela.
         usuario_nombre: ab.usuario_nombre || null,
+        // Si el abono es un pedazo de un PAGO TOTAL, el documento lo dice: el
+        // cliente pagó una sola cifra y aquí ve solo la parte de este documento.
+        // Créditos y préstamos nombran distinto las mismas columnas.
+        pago_total: (ab.abono_total_id || ab.de_pago_total) ? {
+          valor:       num(ab.pago_total_valor ?? ab.abono_total_valor) || null,
+          descripcion: ab.pago_total_descripcion || ab.abono_total_descripcion || null,
+          documentos:  ab.pago_total_facturas ?? null,
+        } : null,
         saldo_despues: corriendo,
       };
     });

@@ -3,6 +3,7 @@ const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { hayRetomaReingreso } = require('../../config/columnas');
 const { calcularCostoPromedio } = require('../../utils/costoPromedio.util');
 const { hoyBogota } = require('../../utils/mora.util');
+const { sqlVarianteTexto } = require('../../utils/varianteTexto.util');
 
 /**
  * Historial de préstamos.
@@ -590,6 +591,17 @@ const salarSerial = async (client, imei, sucursalId) => {
       AND ps.sucursal_id = $2
   `, [imei, sucursalId]);
 };
+// Lo que el PDF de préstamos activos necesita además de las cifras: el número
+// del documento, la variante, el color del equipo, quién lo registró y el pacto
+// de plazo e interés (sin él mora.anotarLista da los cargos por inexistentes).
+const COLUMNAS_PDF_ACTIVOS = `
+      p.numero, p.sucursal_id, p.usuario_id,
+      p.atributo_id, p.variante_id, p.atributo_label, p.variante_label,
+      ${sqlVarianteTexto('p', { conEtiquetas: true })} AS variante_texto,
+      p.fecha_limite, p.mora_condicion, p.interes_condicion, p.interes_desde,
+      s.color   AS serial_color,
+      u.nombre  AS usuario_nombre`;
+
 const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
   const { rows } = await pool.query(`
     SELECT
@@ -602,6 +614,7 @@ const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
       p.total_abonado,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       p.estado,
+      ${COLUMNAS_PDF_ACTIVOS},
       pr.nombre  AS prestatario_nombre,
       e.nombre   AS empleado_nombre,
       su.nombre  AS sucursal_nombre,
@@ -610,12 +623,13 @@ const findActivosPorPrestatario = async (prestatarioId, negocioId) => {
     JOIN  sucursales               su  ON su.id  = p.sucursal_id
     JOIN  prestatarios             pr  ON pr.id  = p.prestatario_id
     LEFT JOIN empleados_prestatario e  ON e.id   = p.empleado_id
+    LEFT JOIN usuarios              u  ON u.id   = p.usuario_id
     -- Mismo LATERAL que en findAll: escoge UNA fila de serial (prefiriendo la
     -- de la sucursal del préstamo) en vez de unir a ciegas y después descartar.
     -- El filtro que había aquí borraba del PDF préstamos ACTIVOS del cliente:
     -- se le entregaba un documento con menos deuda de la que tiene.
     LEFT JOIN LATERAL (
-      SELECT ps4.linea_id
+      SELECT ps4.linea_id, s4.color
         FROM seriales s4
         LEFT JOIN productos_serial ps4 ON ps4.id = s4.producto_id
        WHERE s4.imei = p.imei
@@ -653,6 +667,8 @@ const findActivosPorCliente = async (clienteId, negocioId) => {
       p.total_abonado,
       (p.valor_prestamo - p.total_abonado) AS saldo_pendiente,
       p.estado,
+      ${COLUMNAS_PDF_ACTIVOS},
+      e.nombre   AS empleado_nombre,
       c.nombre   AS cliente_nombre,
       c.cedula   AS cliente_cedula,
       c.celular  AS cliente_celular,
@@ -661,12 +677,14 @@ const findActivosPorCliente = async (clienteId, negocioId) => {
     FROM prestamos p
     JOIN  sucursales su ON su.id = p.sucursal_id
     JOIN  clientes   c  ON c.id  = p.cliente_id
+    LEFT JOIN empleados_prestatario e ON e.id = p.empleado_id
+    LEFT JOIN usuarios              u ON u.id = p.usuario_id
     -- Mismo LATERAL que en findAll: escoge UNA fila de serial (prefiriendo la
     -- de la sucursal del préstamo) en vez de unir a ciegas y después descartar.
     -- El filtro que había aquí borraba del PDF préstamos ACTIVOS del cliente:
     -- se le entregaba un documento con menos deuda de la que tiene.
     LEFT JOIN LATERAL (
-      SELECT ps4.linea_id
+      SELECT ps4.linea_id, s4.color
         FROM seriales s4
         LEFT JOIN productos_serial ps4 ON ps4.id = s4.producto_id
        WHERE s4.imei = p.imei
@@ -698,10 +716,16 @@ const findAbonosPorPrestamos = async (prestamoIds) => {
   const placeholders = prestamoIds.map((_, i) => `$${i + 1}`).join(',');
  
   const { rows } = await pool.query(`
-    SELECT prestamo_id, fecha, valor
-    FROM abonos_prestamo
-    WHERE prestamo_id IN (${placeholders})
-    ORDER BY prestamo_id, fecha
+    SELECT ap.id, ap.prestamo_id, ap.fecha, ap.valor, ap.metodo,
+           ap.abono_total_id, ap.anulado, ap.valor_anulado, ap.motivo_anulacion,
+           at.valor_total AS abono_total_valor,
+           NULLIF(BTRIM(at.descripcion), '') AS abono_total_descripcion,
+           u.nombre AS usuario_nombre
+    FROM abonos_prestamo ap
+    LEFT JOIN usuarios       u  ON u.id  = ap.usuario_id
+    LEFT JOIN abonos_totales at ON at.id = ap.abono_total_id
+    WHERE ap.prestamo_id IN (${placeholders})
+    ORDER BY ap.prestamo_id, ap.fecha, ap.id
   `, prestamoIds);
  
   return rows;

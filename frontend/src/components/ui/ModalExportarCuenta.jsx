@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
 import { Download, Loader2 } from 'lucide-react';
+import { descargarBlob, mensajeDeErrorBlob } from '../../utils/descargarArchivo';
 
 /**
  * Modal de exportación de cuentas — compartido por Préstamos y Créditos.
@@ -20,14 +21,9 @@ const COLOR_MAP = {
   emerald: { border: 'border-emerald-200', bg: 'bg-emerald-50', text: 'text-emerald-700', icon: 'text-emerald-500' },
 };
 
-function guardar(blob, nombre) {
-  const url = URL.createObjectURL(blob);
-  const a   = document.createElement('a');
-  a.href     = url;
-  a.download = nombre;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+// Con la URL revocada en la misma línea del clic, el iPhone abría el PDF en
+// blanco: ver utils/descargarArchivo.
+const guardar = (blob, nombre) => descargarBlob(blob, nombre);
 
 export function ModalExportarCuenta({
   opciones, personaNombre, titulo = 'Exportar PDF', onClose,
@@ -44,8 +40,8 @@ export function ModalExportarCuenta({
       onClose();
     } catch (err) {
       setError(err.response?.status === 404
-        ? 'No hay información para exportar.'
-        : 'Error al generar el archivo. Intenta de nuevo.');
+        ? await mensajeDeErrorBlob(err, 'No hay información para exportar.')
+        : await mensajeDeErrorBlob(err, 'Error al generar el archivo. Intenta de nuevo.'));
     } finally {
       setCargando(null);
     }

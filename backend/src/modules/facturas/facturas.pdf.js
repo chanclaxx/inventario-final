@@ -36,7 +36,7 @@ const PDFDocument = require('pdfkit');
 // en estadoCuenta.pdf: ahora un cambio de línea gráfica se aplica a los cinco.
 const {
   PAGE_W, PAGE_H, MARGIN, CONTENT_W, BODY_BOTTOM, FONT, C,
-  formatCOP, formatFecha, formatFechaHora,
+  formatCOP, formatFechaHora,
   rectFill, rectFillStroke, hLine,
   labelSeccion, fila, textoUnaLinea, dibujarLogo,
   badgeEstado, asegurarEspacio, inicioCuerpo, encabezadoContinuo,
@@ -588,7 +588,7 @@ function seccionAjustes(doc, ajustes, y) {
   if (!ajustes || ajustes.length === 0) return y;
 
   y = labelSeccion(doc, y, 'Ajustes a esta factura', { reservar: 40 });
-  const texto = ajustes.map((a) => `${formatFecha(a.fecha)} — ${a.texto}`).join('\n\n');
+  const texto = ajustes.map((a) => `${formatFechaHora(a.fecha)} — ${a.texto}`).join('\n\n');
   return bloqueParrafo(doc, y, texto);
 }
 

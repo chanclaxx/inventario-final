@@ -2,6 +2,7 @@ const { pool } = require('../../config/db');
 const repo = require('./creditos.repository');
 const moraService = require('../mora/mora.service');
 const { repartirAbono } = require('../../utils/mora.util');
+const { sqlVarianteTexto, nombreConVariante } = require('../../utils/varianteTexto.util');
 const { bloquearOperacion, VENTANA_DUPLICADO_SEG } = require('../../utils/idempotencia.util');
 
 // ── Listar créditos ──────────────────────────────────────────────────────────
@@ -328,8 +329,10 @@ const getDocumento = async (negocioId, creditoId) => {
   // Productos y devoluciones de la factura: describen la obligación y permiten
   // reconstruir su valor original.
   const { rows: lineas } = await pool.query(`
-    SELECT nombre_producto, imei, cantidad, COALESCE(cantidad_devuelta, 0) AS cantidad_devuelta, precio
-    FROM lineas_factura WHERE factura_id = $1 ORDER BY id
+    SELECT lf.nombre_producto, lf.imei, lf.cantidad,
+           COALESCE(lf.cantidad_devuelta, 0) AS cantidad_devuelta, lf.precio,
+           ${sqlVarianteTexto('lf')} AS variante
+    FROM lineas_factura lf WHERE lf.factura_id = $1 ORDER BY lf.id
   `, [credito.factura_id]);
 
   const devuelto = lineas.reduce(
@@ -347,7 +350,7 @@ const getDocumento = async (negocioId, creditoId) => {
 
   const descripcion = lineas
     .filter((l) => Number(l.cantidad) - Number(l.cantidad_devuelta) > 0)
-    .map((l) => `${l.nombre_producto}${l.imei ? ` (IMEI ${l.imei})` : ''}`)
+    .map((l) => `${nombreConVariante(l.nombre_producto, l.variante)}${l.imei ? ` (IMEI ${l.imei})` : ''}`)
     .join(', ');
 
   return {

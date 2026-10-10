@@ -288,7 +288,10 @@ seccion('8. Cada documento usa la sede del DOCUMENTO');
     ['orden de servicio',    B('modules/servicios/servicios.pdf.controller.js'), 'configDocumento(negocioId, orden.sucursal_id'],
     ['aviso/paz y salvo de crédito', B('modules/creditos/creditos.pdf.service.js'), 'configDocumento(negocioId, credito.sucursal_id'],
     ['estado de cuenta de crédito',  B('modules/creditos/creditos.pdf.service.js'), 'encabezadoPara(negocioId, sucursalId'],
-    ['comprobante de préstamo',      B('modules/prestamos/prestamos.pdf.service.js'), 'encabezadoPara(negocioId, prestamo.sucursal_id'],
+    // Desde oct-2026 el comprobante arma el encabezado con NIT/dirección
+    // (`_configEncabezado`, que llama a encabezadoPara y configDocumento con la
+    // MISMA sede): sigue siendo la sede que prestó.
+    ['comprobante de préstamo',      B('modules/prestamos/prestamos.pdf.service.js'), '_configEncabezado(negocioId, datos.sucursal_id'],
     ['aviso/paz y salvo de préstamo', B('modules/prestamos/prestamos.pdf.service.js'), 'configDocumento(negocioId, datos.sucursal_id)'],
     ['envío de la red',      B('modules/red-interna/redInterna.pdf.js'),  '_config(req.user.negocio_id, r.sucursal_origen_id)'],
     ['etiquetas',            B('modules/etiquetas/etiquetas.repository.js'), 'sucursales_documento'],

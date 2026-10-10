@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import api from '../api/axios.config'; // tu instancia Axios con baseURL y auth
+import { descargarBlob } from '../utils/descargarArchivo';
 
 /**
  * @typedef {'prestatario'|'cliente'} TipoPersona
@@ -25,14 +26,7 @@ const useExportarPdfPrestamos = () => {
         responseType: 'blob',
       });
 
-      const url  = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-      const link = document.createElement('a');
-      link.href     = url;
-      link.download = `${nombreArchivo}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      descargarBlob(response.data, `${nombreArchivo}.pdf`);
     } catch (err) {
       // El blob puede contener el JSON de error del servidor
       if (err.response?.data instanceof Blob) {

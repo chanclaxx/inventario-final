@@ -14,6 +14,8 @@ const { configDocumento, encabezadoPara, aplicarDatosSucursal } = require('../..
 const { construirPdfEstadoCuenta } = require('../../utils/estadoCuenta.pdf');
 const { generarAvisoMora, generarPazYSalvo } = require('../../utils/obligacion.pdf');
 const service = require('./creditos.service');
+const { formatCOP } = require('../../utils/pdf.base');
+const { sqlVarianteTexto, nombreConVariante } = require('../../utils/varianteTexto.util');
 
 // Mismos colores que los badges de la pantalla (EstadoCuentaCredito.jsx).
 const TIPO_LABEL = {
@@ -61,12 +63,138 @@ const generarPdfEstadoCuenta = async ({ clave, negocioId, negocioNombre, logoNeg
   return construirPdfEstadoCuenta({
     persona,
     subtitulo: 'Cliente · Facturas a crédito',
-    movimientos: movsPdf,
+    movimientos: await _detallesEstadoCuenta(movsPdf),
     saldoFinal,
-    config,
+    config: { ...config, nombre_negocio: negocioNombre || config.nombre_negocio },
     logoNegocio,
     tipoLabels: TIPO_LABEL,
     negocioNombre,
+  });
+};
+
+const _fechaDate = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : null);
+
+/**
+ * Lo que la cuadrícula de la pantalla no muestra y el PDF sí: debajo de cada
+ * factura sus productos (cantidad, variante, IMEI, precio y lo devuelto) y
+ * quién vendió; debajo de cada abono quién lo registró, y de un pago total a
+ * qué facturas se repartió. Una consulta por tabla y por ids: los movimientos
+ * ya vienen acotados a la persona y a la sede por el service.
+ */
+const _detallesEstadoCuenta = async (movimientos) => {
+  const idsCredito = new Set();
+  const idsAbono   = new Set();
+  const idsTotal   = new Set();
+  const idsMora    = new Set();
+  for (const m of movimientos) {
+    if (m.credito_id) idsCredito.add(Number(m.credito_id));
+    if (m.tipo === 'abono' && !m.es_pago_total) idsAbono.add(Number(m.referencia_id));
+    if (m.tipo === 'abono' && m.es_pago_total) {
+      idsTotal.add(Number(m.referencia_id));
+      for (const d of (m.detalle || [])) idsCredito.add(Number(d.credito_id));
+    }
+    if (/^(mora|interes)_/.test(m.tipo)) idsMora.add(Number(m.referencia_id));
+  }
+  const arr = (s) => [...s].filter((n) => Number.isInteger(n) && n > 0);
+  const consultar = async (ids, sql) => {
+    if (!ids.length) return [];
+    try {
+      return (await pool.query(sql, [ids])).rows;
+    } catch (err) {
+      // El detalle es un extra: el estado de cuenta sale aunque falte.
+      console.warn('[pdf-estado-cuenta-credito] Detalle no incluido:', err.message);
+      return [];
+    }
+  };
+
+  const [creditos, lineas, abonos, totales, moras] = await Promise.all([
+    consultar(arr(idsCredito), `
+      SELECT c.id, c.fecha_limite, c.cuota_inicial,
+             COALESCE(f.numero, f.id) AS factura_numero,
+             u.nombre AS usuario_nombre, vd.nombre AS vendedor_nombre, su.nombre AS sucursal_nombre
+        FROM creditos c
+        JOIN facturas f   ON f.id  = c.factura_id
+        JOIN sucursales su ON su.id = c.sucursal_id
+        LEFT JOIN usuarios   u  ON u.id  = f.usuario_id
+        LEFT JOIN vendedores vd ON vd.id = f.vendedor_id
+       WHERE c.id = ANY($1::int[])`),
+    consultar(arr(idsCredito), `
+      SELECT c.id AS credito_id, lf.nombre_producto, lf.imei, lf.cantidad, lf.precio,
+             COALESCE(lf.cantidad_devuelta, 0) AS cantidad_devuelta,
+             ${sqlVarianteTexto('lf')} AS variante
+        FROM creditos c
+        JOIN lineas_factura lf ON lf.factura_id = c.factura_id
+       WHERE c.id = ANY($1::int[])
+       ORDER BY lf.id`),
+    consultar(arr(idsAbono), `
+      SELECT ac.id, u.nombre AS usuario_nombre
+        FROM abonos_credito ac LEFT JOIN usuarios u ON u.id = ac.usuario_id
+       WHERE ac.id = ANY($1::int[])`),
+    consultar(arr(idsTotal), `
+      SELECT at.id, at.valor_total, u.nombre AS usuario_nombre
+        FROM abonos_totales at LEFT JOIN usuarios u ON u.id = at.usuario_id
+       WHERE at.id = ANY($1::int[])`),
+    consultar(arr(idsMora), `
+      SELECT mm.id, u.nombre AS usuario_nombre
+        FROM movimientos_mora mm LEFT JOIN usuarios u ON u.id = mm.usuario_id
+       WHERE mm.id = ANY($1::bigint[])`),
+  ]);
+
+  const porId = (rows, k = 'id') => new Map(rows.map((r) => [Number(r[k]), r]));
+  const mCred = porId(creditos);
+  const mAbono = porId(abonos);
+  const mTotal = porId(totales);
+  const mMora = porId(moras);
+  const lineasDe = new Map();
+  for (const l of lineas) {
+    const k = Number(l.credito_id);
+    if (!lineasDe.has(k)) lineasDe.set(k, []);
+    lineasDe.get(k).push(l);
+  }
+
+  return movimientos.map((m) => {
+    const detalles = [];
+    const c = mCred.get(Number(m.credito_id));
+    if (m.tipo === 'credito') {
+      for (const l of (lineasDe.get(Number(m.credito_id)) || [])) {
+        const cant = Number(l.cantidad) || 0;
+        const dev  = Number(l.cantidad_devuelta) || 0;
+        detalles.push([
+          `${cant} × ${nombreConVariante(l.nombre_producto, l.variante)}`,
+          l.imei ? `IMEI ${l.imei}` : null,
+          `${formatCOP(l.precio)} c/u`,
+          dev > 0 ? (dev >= cant ? 'devuelto' : `${dev} devuelta(s)`) : null,
+        ].filter(Boolean).join(' · '));
+      }
+      if (c) {
+        const quien = [
+          c.vendedor_nombre ? `Vendedor: ${c.vendedor_nombre}` : null,
+          c.usuario_nombre ? `Registró: ${c.usuario_nombre}` : null,
+          c.sucursal_nombre ? `Sede: ${c.sucursal_nombre}` : null,
+          c.fecha_limite ? `Vence: ${_fechaDate(c.fecha_limite)}` : null,
+        ].filter(Boolean).join(' · ');
+        if (quien) detalles.push(quien);
+      }
+      // Los productos van uno por renglón debajo: el concepto queda corto.
+      if (detalles.length && m.factura_numero) {
+        m = { ...m, concepto: `Factura #${String(m.factura_numero).padStart(6, '0')} a crédito` };
+      }
+    } else if (m.tipo === 'abono' && !m.es_pago_total) {
+      const ab = mAbono.get(Number(m.referencia_id));
+      if (ab?.usuario_nombre) detalles.push(`Registró: ${ab.usuario_nombre}`);
+    } else if (m.tipo === 'abono' && m.es_pago_total) {
+      const t = mTotal.get(Number(m.referencia_id));
+      if (m.descripcion) detalles.push(`Nota: ${m.descripcion}`);
+      if (t?.usuario_nombre) detalles.push(`Registró: ${t.usuario_nombre}`);
+      for (const d of (m.detalle || [])) {
+        detalles.push(`${formatCOP(d.valor)} a la factura #${String(d.factura).padStart(6, '0')}`
+          + (d.anulado ? ` (anulado${d.motivo_anulacion ? `: ${d.motivo_anulacion}` : ''})` : ''));
+      }
+    } else if (/^(mora|interes)_/.test(m.tipo)) {
+      const mm = mMora.get(Number(m.referencia_id));
+      if (mm?.usuario_nombre) detalles.push(`Registró: ${mm.usuario_nombre}`);
+    }
+    return { ...m, detalles };
   });
 };
 
@@ -83,8 +211,29 @@ const _configNegocio = async (negocioId) => {
   return config;
 };
 
+/**
+ * Un renglón por producto, con cantidad, variante, IMEI, precio y lo devuelto.
+ * La descripción de una línea que trae el service es la del ticket POS (corta);
+ * el PDF tiene espacio para decirlo todo.
+ */
+const _descripcionDetallada = (lineas, descripcion) => {
+  if (!Array.isArray(lineas) || !lineas.length) return descripcion;
+  return lineas.map((l) => {
+    const cant = Number(l.cantidad) || 0;
+    const dev  = Number(l.cantidad_devuelta) || 0;
+    return [
+      `${cant} × ${nombreConVariante(l.nombre_producto, l.variante)}`,
+      l.imei ? `IMEI ${l.imei}` : null,
+      `${formatCOP(l.precio)} c/u`,
+      dev > 0 ? (dev >= cant ? 'devuelto' : `${dev} devuelta(s)`) : null,
+    ].filter(Boolean).join(' · ');
+  }).join('\n');
+};
+
 const generarPdfAvisoMora = async ({ creditoId, negocioId }) => {
-  const { credito, persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
+  const doc = await service.getDocumento(negocioId, creditoId);
+  const { credito, persona, resumen } = doc;
+  const descripcion = _descripcionDetallada(doc.lineas, doc.descripcion);
 
   if (!resumen.vencido) {
     throw { status: 400, message: 'Esta factura no está vencida: no procede un aviso de mora' };
@@ -96,7 +245,9 @@ const generarPdfAvisoMora = async ({ creditoId, negocioId }) => {
 };
 
 const generarPdfPazYSalvo = async ({ creditoId, negocioId }) => {
-  const { credito, persona, resumen, descripcion } = await service.getDocumento(negocioId, creditoId);
+  const doc = await service.getDocumento(negocioId, creditoId);
+  const { credito, persona, resumen } = doc;
+  const descripcion = _descripcionDetallada(doc.lineas, doc.descripcion);
 
   if (!resumen.pagada) {
     throw { status: 400, message: 'La factura aún tiene saldo pendiente: no se puede expedir paz y salvo' };
@@ -109,4 +260,6 @@ const generarPdfPazYSalvo = async ({ creditoId, negocioId }) => {
 
 module.exports = {
   generarPdfEstadoCuenta, generarPdfAvisoMora, generarPdfPazYSalvo, TIPO_LABEL,
+  // Para las pruebas: el detalle y la descripción sin dibujar.
+  _detallesEstadoCuenta, _descripcionDetallada,
 };
