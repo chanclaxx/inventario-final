@@ -2278,17 +2278,20 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Inventario y sección 7 del PDF de gestión; pedido del usuario, 6-oct-2026):
 > cuánto de la mercancía ya es del negocio = inventario en costo − lo que se le
 > debe a los proveedores. Valor A LA FECHA, como el inventario.
-> **Se mide a nivel de NEGOCIO, no de sede**: el inventario es de cada sede pero
-> la cuenta con un proveedor no tiene sede (el acreedor es del negocio y un pago
-> sale de cualquier caja). Restarle toda la deuda al inventario de UNA sede daría
-> un número sin sentido, así que se suma el inventario de TODAS las sedes activas
-> (más la elegida, si está inactiva) y se resta la deuda completa; desde cualquier
-> sede da lo mismo, y con varias la pantalla lista cuánto pone cada una. Con una
-> sola sede es el «Costo total inventario» de la pestaña.
-> **Nada se calcula de nuevo**: el inventario de cada sede es `getValorInventario`
-> (con `{ soloTotales: true }` para las otras sedes: se salta la lista de lo que
-> no tiene costo, que es la consulta pesada; las sedes van en serie porque el
-> pool es de diez) y la deuda vive en `acreedores.repository`, pegada a `findAll`,
+> **Es de la SEDE ELEGIDA** (pedido del usuario, 14-oct-2026: «que salga solo la
+> sucursal seleccionada»; la primera versión sumaba todas las sedes y restaba la
+> deuda de todo el negocio): el inventario de la pestaña menos lo que deben las
+> compras de ESA sede (`findTotalesDeuda(negocio, sede)`). La sede de cada
+> movimiento: un **cargo** es de la sede de su compra (`movimientos_acreedor.sucursal_id`
+> o la compra); un **abono a un cargo** es de la sede del CARGO, no de la caja
+> que pagó (una compra de Norte pagada desde Centro deja de deberse en Norte); un
+> **anticipo** (abono libre) es de la sede que lo dio. Lo que no tiene sede
+> —cargos manuales— no se le carga a nadie: va en `deuda_sin_sede`, informado y
+> sin restar. Σ deuda de las sedes + sin sede = la deuda del negocio. Sin sede
+> (nadie lo llama así hoy) responde el negocio entero, como antes
+> (`alcance: 'negocio'`). La pestaña lleva la sede en la `queryKey`.
+> **Nada se calcula de nuevo**: el inventario es `getValorInventario` y la deuda
+> vive en `acreedores.repository`, pegada a `findAll`,
 > con la MISMA expresión de saldo y el mismo filtro de proveedores activos — da
 > lo mismo que sumar la columna «saldo» de la lista de Acreedores. Se suma por
 > acreedor y solo lo positivo: un **saldo a favor** con un proveedor no le paga a
@@ -2300,9 +2303,9 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Límite conocido: en un local de la red lo consignado va al valor del despacho,
 > no al costo de compra (es lo que dice su pestaña); el bloque avisa cuánto es.
 > No resta lo que un local le debe a la bodega: eso no es deuda con proveedores.
-> Prueba: `74-inventario-menos-deuda` (54; la sección 1 es que
+> Prueba: `74-inventario-menos-deuda` (64; la sección 1 es que
 > `getValorInventario` no cambió, la 3 compara contra la lista de Acreedores y la
-> 5 —★— que con varias sedes el número es el mismo desde cualquiera).
+> 5 —★— que cada sede ve solo lo suyo y que las sedes suman la deuda del negocio).
 
 > **Red interna — el ENVÍO es la deuda** (`red-interna/`): una sucursal-bodega
 > surte a los locales. Feature opt-in (`config_negocio.red_interna_activa`),

@@ -2319,25 +2319,52 @@ const actualizarCostoCompra = async (sucursalId, tipo, imei, nombreProducto, nue
 // «Cuánto vale el inventario menos lo que le debemos a los proveedores»
 // (pedido del usuario, 6-oct-2026): lo que de la mercancía ya es del negocio.
 //
-// SE MIDE A NIVEL DE NEGOCIO, y esa es la decisión: el inventario es de cada
-// sede, pero la cuenta con un proveedor es del NEGOCIO —un acreedor no tiene
-// sede, y un pago puede salir de la caja de cualquiera—. Restarle toda la deuda
-// al inventario de UNA sede daría un número sin sentido (negativo en un local
-// que no le compra a nadie). Por eso se suma el inventario de TODAS las sedes
-// activas y se resta la deuda completa; con una sola sede es el mismo «Costo
-// total inventario» de la pestaña.
+// ES DE LA SEDE ELEGIDA (pedido del usuario, 14-oct-2026: «que salga solo la
+// sucursal seleccionada»; la primera versión sumaba el inventario de todas las
+// sedes y restaba la deuda de todo el negocio). El inventario es el de la
+// pestaña y la deuda la de las compras de ESA sede (`findTotalesDeuda` con
+// sede: cada cargo es de la sede de su compra, cada abono a un cargo es de la
+// sede del cargo). La deuda que no tiene sede —cargos manuales— no se le carga
+// a ninguna y se informa aparte (`deuda_sin_sede`).
+// Sin sede (nadie la llama así hoy) se mide el negocio entero, como antes.
 //
-// Nada nuevo se calcula aquí: el inventario de cada sede es `getValorInventario`
-// (la misma cifra que muestra su pestaña — en un local de la red, lo consignado
-// va al valor del despacho) y la deuda es `acreedores.findTotalesDeuda` (la
-// misma suma de la lista de Acreedores). Es un valor A LA FECHA, como el
-// inventario: no depende del rango del reporte.
+// Nada nuevo se calcula aquí: el inventario es `getValorInventario` (la misma
+// cifra que muestra su pestaña — en un local de la red, lo consignado va al
+// valor del despacho) y la deuda sale de `acreedores.findTotalesDeuda`. Es un
+// valor A LA FECHA, como el inventario: no depende del rango del reporte.
 //
 // `valorSede` es el resultado ya calculado de la sede elegida, para no
-// repetirlo. Las sedes van una tras otra: cada una ya lanza cuatro consultas en
-// paralelo y el pool es de diez para todos los negocios.
+// repetirlo.
 const getInventarioMenosDeuda = async (negocioId, sucursalId = null, valorSede = null) => {
   const acreedoresRepo = require('../acreedores/acreedores.repository');
+  if (sucursalId) {
+    const { rows: [sede] } = await pool.query(
+      'SELECT id, nombre FROM sucursales WHERE id = $1 AND negocio_id = $2',
+      [sucursalId, negocioId]
+    );
+    if (!sede) throw Object.assign(new Error('Sucursal no encontrada en este negocio'), { status: 404 });
+    const v = valorSede || await getValorInventario(sede.id, { soloTotales: true });
+    const deuda = await acreedoresRepo.findTotalesDeuda(negocioId, sede.id);
+    const inventario = Number(v.totales.costo_total || 0);
+    return {
+      alcance:               'sucursal',
+      inventario_costo:      inventario,
+      unidades:              v.totales.unidades,
+      unidades_sin_costo:    Number(v.serial.sin_costo || 0) + Number(v.cantidad.sin_costo || 0),
+      valorado_por_despacho: Number(v.serial.costo_bodega || 0),
+      deuda_proveedores:     deuda.deuda_proveedores,
+      proveedores_con_deuda: deuda.proveedores_con_deuda,
+      neto:                  inventario - deuda.deuda_proveedores,
+      deuda_otros:           deuda.deuda_otros,
+      saldo_a_favor:         deuda.saldo_a_favor,
+      deuda_sin_sede:        deuda.deuda_sin_sede,
+      sedes:                 [{ sucursal_id: sede.id, nombre: sede.nombre, unidades: v.totales.unidades, costo_total: inventario }],
+    };
+  }
+
+  // Sin sede: el negocio entero (inventario de las sedes activas, toda la
+  // deuda). Las sedes van una tras otra: cada una ya lanza cuatro consultas en
+  // paralelo y el pool es de diez para todos los negocios.
   const { rows: sedes } = await pool.query(
     `SELECT id, nombre FROM sucursales
      WHERE negocio_id = $1 AND (activa = TRUE OR id = $2)
@@ -2366,6 +2393,7 @@ const getInventarioMenosDeuda = async (negocioId, sucursalId = null, valorSede =
   const inventario = porSede.reduce((s, x) => s + Number(x.costo_total || 0), 0);
 
   return {
+    alcance:               'negocio',
     inventario_costo:      inventario,
     unidades:              porSede.reduce((s, x) => s + Number(x.unidades || 0), 0),
     // Lo que no tiene costo no suma al inventario: el neto queda por debajo de

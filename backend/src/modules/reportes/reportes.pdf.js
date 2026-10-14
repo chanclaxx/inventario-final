@@ -776,27 +776,31 @@ const generarReporteContable = async ({ negocio, sucursalNombre, sucursalId, neg
   y += 8;
 
   // ── 7. Inventario valorizado a la fecha ────────────────────────────────────
-  y = ensureSpace(doc, y, menosDeuda ? 190 : 90);
+  y = ensureSpace(doc, y, menosDeuda ? 205 : 90);
   y = tituloSeccion(doc, y, 'Inventario disponible a la fecha');
   y = fila(doc, y, `Unidades en stock`, String(inventario.totales.unidades));
   y = fila(doc, y, 'Valor en costo', formatCOP(inventario.totales.costo_total), { bold: true });
   y = fila(doc, y, 'Valor en precio de venta', formatCOP(inventario.totales.precio_venta_total));
-  // Lo que de la mercancía ya es del negocio. La deuda es de TODO el negocio,
-  // así que se resta del inventario de todas las sedes, no del de esta.
+  // Lo que de la mercancía ya es del negocio: con sede, el inventario de esta
+  // sede menos lo que deben sus compras; sin sede, el negocio entero.
   if (menosDeuda) {
-    const variasSedes = menosDeuda.sedes.length > 1;
+    const deSede = menosDeuda.alcance === 'sucursal';
+    const variasSedes = !deSede && menosDeuda.sedes.length > 1;
     y += 4;
     if (variasSedes) {
       y = fila(doc, y, `Inventario en costo de las ${menosDeuda.sedes.length} sedes del negocio`, formatCOP(menosDeuda.inventario_costo));
     }
     y = fila(doc, y,
-      `(-) Deuda con proveedores${variasSedes ? ' (todo el negocio)' : ''} · ${menosDeuda.proveedores_con_deuda} con saldo`,
+      `(-) Deuda con proveedores${deSede ? ' de esta sede' : variasSedes ? ' (todo el negocio)' : ''} · ${menosDeuda.proveedores_con_deuda} con saldo`,
       formatCOP(menosDeuda.deuda_proveedores), { valorColor: C.rojo });
     hLine(doc, y); y += 6;
     y = fila(doc, y, 'Inventario menos deuda con proveedores', formatCOP(menosDeuda.neto),
       { bold: true, valorColor: menosDeuda.neto >= 0 ? C.verde : C.rojo });
     if (menosDeuda.unidades_sin_costo > 0) {
       y = fila(doc, y, `   ${menosDeuda.unidades_sin_costo} unidad(es) sin costo registrado no suman al inventario`, '', { valorColor: C.gris });
+    }
+    if (menosDeuda.deuda_sin_sede > 0) {
+      y = fila(doc, y, '   Deuda con proveedores sin sede: cargos manuales (no se resta)', formatCOP(menosDeuda.deuda_sin_sede), { valorColor: C.gris });
     }
     if (menosDeuda.deuda_otros > 0) {
       y = fila(doc, y, '   Otros acreedores que no son proveedores (no se restan)', formatCOP(menosDeuda.deuda_otros), { valorColor: C.gris });

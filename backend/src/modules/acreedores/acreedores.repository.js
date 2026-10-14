@@ -78,7 +78,20 @@ const findAll = async (negocioId, filtro) => {
 // no le paga la deuda a otro, así que va aparte y no se resta.
 // «Proveedores» son las cuentas ligadas a un proveedor; las demás (un acreedor
 // creado a mano) se reportan por separado.
-const findTotalesDeuda = async (negocioId) => {
+//
+// Con `sucursalId` responde la deuda DE ESA SEDE (pedido del usuario,
+// 14-oct-2026: «que salga solo la sucursal seleccionada»). La sede de cada
+// movimiento:
+//   · un CARGO es de la sede de su compra (la columna, o la compra);
+//   · un abono A UN CARGO es de la sede de ESE cargo, no de la caja que pagó:
+//     una compra de Norte pagada desde la caja de Centro deja de deberse en
+//     Norte, que es donde estaba la deuda;
+//   · un abono LIBRE (anticipo) es de la sede que lo dio.
+// Lo que no tiene sede (cargos manuales e históricos sin compra) no se le
+// carga a ninguna: va en `deuda_sin_sede`, sin restar. Por construcción,
+// Σ saldo de cada sede + saldo sin sede = saldo del acreedor en la lista.
+const findTotalesDeuda = async (negocioId, sucursalId = null) => {
+  if (sucursalId) return _findTotalesDeudaSucursal(negocioId, sucursalId);
   const { rows } = await pool.query(`
     SELECT
       COALESCE(SUM(GREATEST(s.saldo, 0)) FILTER (WHERE s.proveedor_id IS NOT NULL), 0) AS deuda_proveedores,
@@ -102,6 +115,48 @@ const findTotalesDeuda = async (negocioId) => {
     proveedores_con_deuda: Number(r.proveedores_con_deuda || 0),
     deuda_otros:           Number(r.deuda_otros || 0),
     saldo_a_favor:         Number(r.saldo_a_favor || 0),
+  };
+};
+
+const _findTotalesDeudaSucursal = async (negocioId, sucursalId) => {
+  const { rows } = await pool.query(`
+    WITH movs AS (
+      SELECT a.id AS acreedor_id, a.proveedor_id,
+             CASE WHEN m.tipo = 'Cargo' THEN m.valor ELSE -m.valor END AS valor,
+             CASE WHEN m.tipo <> 'Cargo' AND m.cargo_id IS NOT NULL
+                  THEN COALESCE(cg.sucursal_id, cgc.sucursal_id)
+                  ELSE COALESCE(m.sucursal_id, mc.sucursal_id)
+             END AS sede
+      FROM acreedores a
+      LEFT JOIN proveedores p ON p.id = a.proveedor_id
+      JOIN movimientos_acreedor m ON m.acreedor_id = a.id
+      LEFT JOIN compras mc ON mc.id = m.compra_id
+      LEFT JOIN movimientos_acreedor cg ON cg.id = m.cargo_id
+      LEFT JOIN compras cgc ON cgc.id = cg.compra_id
+      WHERE a.negocio_id = $1
+        AND (a.proveedor_id IS NULL OR p.activo = TRUE)
+    ), s AS (
+      SELECT acreedor_id, proveedor_id,
+             COALESCE(SUM(valor) FILTER (WHERE sede = $2), 0)     AS saldo,
+             COALESCE(SUM(valor) FILTER (WHERE sede IS NULL), 0)  AS saldo_sin_sede
+      FROM movs
+      GROUP BY acreedor_id, proveedor_id
+    )
+    SELECT
+      COALESCE(SUM(GREATEST(s.saldo, 0)) FILTER (WHERE s.proveedor_id IS NOT NULL), 0)          AS deuda_proveedores,
+      COUNT(*) FILTER (WHERE s.proveedor_id IS NOT NULL AND s.saldo > 0)::int                   AS proveedores_con_deuda,
+      COALESCE(SUM(GREATEST(s.saldo, 0)) FILTER (WHERE s.proveedor_id IS NULL), 0)              AS deuda_otros,
+      COALESCE(SUM(GREATEST(-s.saldo, 0)), 0)                                                   AS saldo_a_favor,
+      COALESCE(SUM(GREATEST(s.saldo_sin_sede, 0)) FILTER (WHERE s.proveedor_id IS NOT NULL), 0) AS deuda_sin_sede
+    FROM s
+  `, [negocioId, sucursalId]);
+  const r = rows[0] || {};
+  return {
+    deuda_proveedores:     Number(r.deuda_proveedores || 0),
+    proveedores_con_deuda: Number(r.proveedores_con_deuda || 0),
+    deuda_otros:           Number(r.deuda_otros || 0),
+    saldo_a_favor:         Number(r.saldo_a_favor || 0),
+    deuda_sin_sede:        Number(r.deuda_sin_sede || 0),
   };
 };
 

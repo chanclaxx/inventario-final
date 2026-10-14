@@ -15,6 +15,7 @@ import { Spinner }    from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Badge }      from '../../components/ui/Badge';
 import { useAuth }    from '../../context/useAuth';
+import useSucursalStore from '../../store/sucursalStore';
 import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
@@ -1952,21 +1953,23 @@ const FilaInventario = ({ label, datos, colorCosto, colorVenta }) => (
 // (`getInventarioMenosDeuda`) y aquí solo se pinta: la deuda es la misma suma de
 // la lista de Acreedores, y el inventario el mismo de esta pestaña.
 //
-// Se mide a nivel de NEGOCIO: la cuenta con un proveedor no tiene sede, así que
-// se resta del inventario de TODAS las sedes. Con una sola sede coincide con el
-// «Costo total inventario» de arriba; con varias, se dice de cuáles sale.
-// Un backend anterior no manda el bloque (`datos` ausente) y no se pinta nada.
+// Es de la SEDE elegida (`alcance: 'sucursal'`): el inventario de arriba menos
+// lo que deben las compras de esta sede. Un backend anterior manda el del
+// negocio entero (sin `alcance`) y entonces se dice de cuántas sedes sale.
+// Un backend más viejo no manda el bloque (`datos` ausente) y no se pinta nada.
 const InventarioMenosDeuda = ({ datos }) => {
   if (!datos) return null;
-  const variasSedes = datos.sedes.length > 1;
+  const deSede = datos.alcance === 'sucursal';
+  const variasSedes = !deSede && datos.sedes.length > 1;
   const positivo = datos.neto >= 0;
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col gap-3">
       <div>
         <p className="text-sm font-semibold text-gray-700">Inventario menos deuda con proveedores</p>
         <p className="text-xs text-gray-400">
-          Lo que de la mercancía ya es tuyo: el inventario en costo, menos lo que todavía le debes a
-          los proveedores{variasSedes ? '. La deuda es de todo el negocio, así que se resta del inventario de todas las sedes' : ''}.
+          {deSede
+            ? `Lo que de la mercancía de ${datos.sedes[0]?.nombre ?? 'esta sede'} ya es tuyo: su inventario en costo, menos lo que todavía se debe de las compras de esta sede.`
+            : `Lo que de la mercancía ya es tuyo: el inventario en costo, menos lo que todavía le debes a los proveedores${variasSedes ? '. La deuda es de todo el negocio, así que se resta del inventario de todas las sedes' : ''}.`}
         </p>
       </div>
 
@@ -2011,7 +2014,7 @@ const InventarioMenosDeuda = ({ datos }) => {
       )}
 
       {(datos.unidades_sin_costo > 0 || datos.valorado_por_despacho > 0
-        || datos.deuda_otros > 0 || datos.saldo_a_favor > 0) && (
+        || datos.deuda_sin_sede > 0 || datos.deuda_otros > 0 || datos.saldo_a_favor > 0) && (
         <div className="flex flex-col gap-1 border-t border-gray-100 pt-2 text-xs text-gray-500">
           {datos.unidades_sin_costo > 0 && (
             <p className="flex items-start gap-1">
@@ -2024,6 +2027,13 @@ const InventarioMenosDeuda = ({ datos }) => {
               <Info size={11} className="flex-shrink-0 mt-0.5" />
               {formatCOP(datos.valorado_por_despacho)} son equipos que la bodega despachó a los locales,
               contados al valor del despacho y no al costo de compra.
+            </p>
+          )}
+          {datos.deuda_sin_sede > 0 && (
+            <p className="flex items-start gap-1">
+              <Info size={11} className="flex-shrink-0 mt-0.5" />
+              Hay {formatCOP(datos.deuda_sin_sede)} de deuda con proveedores que no está ligada a ninguna
+              sede (cargos registrados a mano). No se resta aquí.
             </p>
           )}
           {datos.deuda_otros > 0 && (
@@ -2045,8 +2055,11 @@ const InventarioMenosDeuda = ({ datos }) => {
 };
 
 const PanelInventario = () => {
+  // La sede va en la clave: todo lo de esta pestaña es de la sucursal elegida,
+  // y sin ella al cambiar de sede se seguiría viendo la anterior hasta recargar.
+  const sucursalActiva = useSucursalStore((s) => s.sucursalActiva);
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['valor-inventario'],
+    queryKey: ['valor-inventario', sucursalActiva],
     queryFn: () => getValorInventario().then((r) => r.data.data),
   });
 
