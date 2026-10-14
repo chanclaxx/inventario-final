@@ -10,6 +10,8 @@ import { CambioDivisa } from '../../components/ui/CambioDivisa';
 import { cambioInicial, cambioCompleto } from '../../utils/cambioDivisa';
 import { formatCOP }    from '../../utils/formatters';
 import { crearCompra }  from '../../api/compras.api';
+import { usePreciosCompra } from '../../hooks/usePreciosCompra';
+import { PreciosVentaCompra } from '../../components/ui/PreciosVentaCompra';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import {
   getProductosSerial, crearProductoSerial,
@@ -370,6 +372,21 @@ function MiniSelectorVariante({ arbolData, nodoSel, onSeleccionar }) {
   );
 }
 
+// Lo que se está comprando, para la sección «Precios de venta»: el producto, y
+// cada variante a la que ya se le puso cantidad.
+function lineasPreciosCantidad(productos) {
+  return (productos || []).flatMap((p) => [
+    { tipo: 'cantidad', producto_id: p.id },
+    ...Object.values(p.nodosData || {})
+      .filter((d) => Number(d?.cantidad) > 0)
+      .map((d) => ({
+        tipo: 'cantidad', producto_id: p.id,
+        atributo_id: d.tipo === 'atributo' ? d.id : null,
+        variante_id: d.tipo === 'variante' ? d.id : null,
+      })),
+  ]);
+}
+
 // ─── Fila de producto por cantidad con selector de variante ───────────────────
 function FilaProductoCantidad({
   productoSel, variantesActivo, usandoConversion,
@@ -723,7 +740,7 @@ function LineaImeis({
 function PasoLineaSerial({
   proveedorId, lineasIniciales, factorInicial, traidaInicial,
   verificando, sucursalKey, sucursalLista, onContinuar, onVolver,
-  coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista,
+  coloresActivo, coloresConfig, caracteristicasActivo, caracteristicasLista, precios,
 }) {
   const [busqueda,            setBusqueda]           = useState('');
   const [filtroLineaId,       setFiltroLineaId]      = useState('');
@@ -1000,6 +1017,9 @@ function PasoLineaSerial({
         );
       })()}
 
+      <PreciosVentaCompra ctl={precios}
+        lineas={lineasSeleccionadas.map((l) => ({ tipo: 'serial', producto_id: l.id }))} />
+
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       <div className="flex gap-2">
@@ -1016,7 +1036,7 @@ function PasoLineaSerial({
 function PasoCantidad({
   proveedorId, productosIniciales, factorInicial, traidaInicial,
   sucursalKey, sucursalLista, onProductosListos, onVolver, variantesActivo,
-  codigoActivo = false, codigoAuto = false,
+  codigoActivo = false, codigoAuto = false, precios,
 }) {
   const { esAdminNegocio } = useAuth();
   const puedeVerCosto = usePuedeVerCostos();
@@ -1223,6 +1243,8 @@ function PasoCantidad({
           ))}
         </div>
       )}
+
+      <PreciosVentaCompra ctl={precios} lineas={lineasPreciosCantidad(productosSeleccionados)} />
 
       {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -1668,8 +1690,15 @@ export function ModalCompra({ proveedor, onClose }) {
     modalPrestados, serialesPrestados, handleCerrarPrestados,
   } = useVerificacionImeis();
 
+  // Precios de venta (solo con las listas de precios): se ven y se editan en el
+  // paso de los productos, y se guardan al confirmar, ANTES de la compra.
+  const precios = usePreciosCompra();
+
   const mutCompra = useMutation({
-    mutationFn: (payload) => crearCompra(payload),
+    mutationFn: async ({ payload, lineasPrecios }) => {
+      await precios.guardar(lineasPrecios);
+      return crearCompra(payload);
+    },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
@@ -1774,7 +1803,12 @@ export function ModalCompra({ proveedor, onClose }) {
           }];
         });
 
-    mutCompra.mutate({
+    const lineasPrecios = lineas.map((l) => ({
+      tipo: l.imei ? 'serial' : 'cantidad',
+      producto_id: l.producto_id, atributo_id: l.atributo_id, variante_id: l.variante_id,
+    }));
+
+    mutCompra.mutate({ lineasPrecios, payload: {
       proveedor_id:        proveedor.id,
       numero_factura:      pagoData.numeroFactura,
       // El backend deriva la fecha de vencimiento y la escribe en el cargo del
@@ -1788,7 +1822,7 @@ export function ModalCompra({ proveedor, onClose }) {
       lineas,
       pagos:             pagoData.pagos,
       registrar_en_caja: pagoData.registrarEnCaja,
-    });
+    } });
   };
 
   const titulos = ['Tipo de producto', 'Productos e IMEIs', 'Pago y confirmación'];
@@ -1864,6 +1898,7 @@ export function ModalCompra({ proveedor, onClose }) {
             coloresConfig={coloresConfig}
             caracteristicasActivo={caracteristicasActivo}
             caracteristicasLista={caracteristicasLista}
+            precios={precios}
           />
         )}
         {paso === 2 && tipo === 'cantidad' && (
@@ -1879,6 +1914,7 @@ export function ModalCompra({ proveedor, onClose }) {
             variantesActivo={variantesActivo}
             codigoActivo={codigoActivo}
             codigoAuto={codigoAuto}
+            precios={precios}
           />
         )}
 
@@ -1892,6 +1928,11 @@ export function ModalCompra({ proveedor, onClose }) {
             onVolver={handleVolverA2}
             loading={mutCompra.isPending}
           />
+        )}
+        {paso === 3 && mutCompra.isError && (
+          <p className="text-sm text-red-500 mt-3">
+            {mutCompra.error?.response?.data?.error || 'No se pudo registrar la compra'}
+          </p>
         )}
       </Modal>
 

@@ -16,6 +16,8 @@ import {
 } from './capturaMercancia.utils';
 import api from '../../api/axios.config';
 import { ModalEtiquetasCompra } from '../inventario/ModalEtiquetasCompra';
+import { usePreciosCompra } from '../../hooks/usePreciosCompra';
+import { PreciosVentaCompra } from '../../components/ui/PreciosVentaCompra';
 import { etiquetasCompraActivas } from '../inventario/etiquetas/etiquetasUi';
 import {
   Package, Smartphone, Minus, Plus, PackageCheck, AlertTriangle, ShieldCheck, Layers,
@@ -613,6 +615,7 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
   const [metodo,        setMetodo]        = useState(() => metodosPago[0]?.id ?? 'Efectivo');
   const [valorPago,     setValorPago]     = useState('');
   const [error,         setError]         = useState('');
+  const precios = usePreciosCompra();
 
   const cambiar = (lineaId, campo, valor) =>
     setEstados((prev) => ({ ...prev, [lineaId]: { ...prev[lineaId], [campo]: valor } }));
@@ -788,17 +791,36 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
     (l) => recibidasDe(l) > Number(l.pendiente) && !estados[l.id]?.excedenteOk
   );
 
+  // Precios de venta (solo con las listas de precios): los productos de la
+  // orden desde el principio —un equipo se ve antes de escanear su IMEI— y,
+  // además, la variante que de verdad llegó o la que llegó sin pedirse.
+  const lineasPrecios = [
+    ...lineas.map((l) => ({
+      tipo: l.tipo, producto_id: l.producto_id, atributo_id: l.atributo_id, variante_id: l.variante_id,
+    })),
+    ...lineasEnvio.map((l) => ({
+      tipo: l.imei ? 'serial' : 'cantidad',
+      producto_id: l.producto_id, atributo_id: l.atributo_id, variante_id: l.variante_id,
+    })),
+  ];
+
+  const registrarRecepcion = () => crearCompra({
+    proveedor_id:    orden.proveedor_id,
+    orden_compra_id: orden.id,
+    numero_factura:  numeroFactura.trim() || null,
+    total,
+    lineas:          lineasEnvio,
+    pagos: pagoAhora && Number(valorPago) > 0
+      ? [{ metodo, valor: Number(valorPago) }]
+      : [],
+  });
+
   const mut = useMutation({
-    mutationFn: () => crearCompra({
-      proveedor_id:    orden.proveedor_id,
-      orden_compra_id: orden.id,
-      numero_factura:  numeroFactura.trim() || null,
-      total,
-      lineas:          lineasEnvio,
-      pagos: pagoAhora && Number(valorPago) > 0
-        ? [{ metodo, valor: Number(valorPago) }]
-        : [],
-    }),
+    // Los precios primero: si no se pueden guardar, nada se recibió todavía.
+    mutationFn: async () => {
+      await precios.guardar(lineasPrecios);
+      return registrarRecepcion();
+    },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['ordenes-compra'], exact: false });
       queryClient.invalidateQueries({ queryKey: ['compras'], exact: false });
@@ -879,6 +901,8 @@ export function ModalRecibir({ open, orden, garantiaActiva, onClose, onRecibida 
             ))}
           </div>
         )}
+
+        {lineas.length > 0 && <PreciosVentaCompra ctl={precios} lineas={lineasPrecios} />}
 
         {lineasEnvio.length > 0 && (
           <>

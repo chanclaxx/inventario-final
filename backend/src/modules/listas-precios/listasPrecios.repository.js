@@ -104,6 +104,59 @@ const leerPreciosProductoCantidad = async (productoId, negocioId) => {
 };
 
 /**
+ * Los precios de venta de los productos que van en una COMPRA (o en un pedido,
+ * o en una recepción): todos sus nodos —producto, tallas, colores, referencia
+ * con IMEI— con el precio normal y el mapa de listas, en UNA consulta.
+ *
+ * Es lo que pinta la sección «Precios de venta» de las pantallas de compra para
+ * que quien recibe la mercancía vea, y si puede, corrija o ponga los precios en
+ * el mismo momento. Las pantallas no tienen esto a la mano —la recepción de una
+ * orden no carga el inventario—, y pedir producto por producto serían N
+ * peticiones por cada compra.
+ *
+ * `atributo_id` en la fila de una variante es su padre: la pantalla lo necesita
+ * para mostrar qué se hereda. Solo nodos ACTIVOS y siempre DENTRO del negocio:
+ * un id de otro negocio simplemente no vuelve.
+ */
+const leerPreciosParaCompra = async (negocioId, { cantidad = [], serial = [] }) => {
+  const { rows } = await pool.query(`
+    SELECT 'producto' AS nivel, pc.id, pc.id AS producto_id, NULL::int AS atributo_id,
+           pc.nombre AS etiqueta, pc.precio, pc.precios
+    FROM productos_cantidad pc
+    JOIN sucursales su ON su.id = pc.sucursal_id
+    WHERE pc.id = ANY($2::int[]) AND su.negocio_id = $1
+
+    UNION ALL
+
+    SELECT 'atributo', ap.id, ap.producto_id, NULL::int,
+           COALESCE(tc.nombre || ': ', '') || ap.valor, ap.precio, ap.precios
+    FROM atributos_producto ap
+    JOIN sucursales su ON su.id = ap.sucursal_id
+    LEFT JOIN tipos_caracteristica tc ON tc.id = ap.tipo_id
+    WHERE ap.producto_id = ANY($2::int[]) AND ap.activo = true AND su.negocio_id = $1
+
+    UNION ALL
+
+    SELECT 'variante', v.id, ap.producto_id, ap.id,
+           COALESCE(tc.nombre || ': ', '') || v.valor, v.precio, v.precios
+    FROM variantes_atributo v
+    JOIN atributos_producto ap ON ap.id = v.atributo_id
+    JOIN sucursales su ON su.id = ap.sucursal_id
+    LEFT JOIN tipos_caracteristica tc ON tc.id = v.tipo_id
+    WHERE ap.producto_id = ANY($2::int[]) AND ap.activo = true AND v.activo = true
+      AND su.negocio_id = $1
+
+    UNION ALL
+
+    SELECT 'serial', ps.id, ps.id, NULL::int, ps.nombre, ps.precio, ps.precios
+    FROM productos_serial ps
+    JOIN sucursales su ON su.id = ps.sucursal_id
+    WHERE ps.id = ANY($3::int[]) AND su.negocio_id = $1
+  `, [negocioId, cantidad, serial]);
+  return rows;
+};
+
+/**
  * Todos los nodos tarifables de una sucursal, para armar la plantilla de Excel.
  *
  * **Las TALLAS entran por defecto** (sep-2026, reportado por el usuario: «la
@@ -252,6 +305,6 @@ const leerSucursales = async (negocioId) => {
 };
 
 module.exports = {
-  NIVELES, escribirPrecios, leerPreciosProductoCantidad,
+  NIVELES, escribirPrecios, leerPreciosProductoCantidad, leerPreciosParaCompra,
   leerNodosSucursal, leerSucursales, pool,
 };

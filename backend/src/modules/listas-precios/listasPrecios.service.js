@@ -134,6 +134,35 @@ const getPreciosProducto = async (productoId, negocioId) => {
   return repo.leerPreciosProductoCantidad(id, negocioId);
 };
 
+/** Tope de productos por consulta: una compra real no pasa de unas decenas. */
+const MAX_PRODUCTOS_COMPRA = 200;
+
+/** Ids enteros positivos, sin repetir; lo demás se ignora. */
+const _ids = (valor) => {
+  const crudos = Array.isArray(valor) ? valor : String(valor ?? '').split(',');
+  const ids = new Set();
+  for (const v of crudos) {
+    const n = Number(String(v).trim());
+    if (Number.isInteger(n) && n > 0) ids.add(n);
+  }
+  return [...ids];
+};
+
+/**
+ * Los precios de venta de los productos de una compra (cantidad e IMEI), para la
+ * sección «Precios de venta» de las pantallas de compra, pedido y recepción.
+ * Solo LEE: escribir sigue siendo `guardarPrecios`, con su permiso.
+ */
+const getPreciosParaCompra = async ({ cantidad, serial }, negocioId) => {
+  if (!hayListasPrecios()) throw _sinInfra();
+  const ids = { cantidad: _ids(cantidad), serial: _ids(serial) };
+  if (ids.cantidad.length + ids.serial.length > MAX_PRODUCTOS_COMPRA) {
+    throw { status: 400, message: `Máximo ${MAX_PRODUCTOS_COMPRA} productos por consulta` };
+  }
+  if (!ids.cantidad.length && !ids.serial.length) return [];
+  return repo.leerPreciosParaCompra(negocioId, ids);
+};
+
 // ── Excel: el mismo archivo de ida y de vuelta ───────────────────────────────
 
 /** Las listas configuradas, o un 400 que explica qué falta. Reusa la guarda. */
@@ -262,6 +291,6 @@ const importarExcel = async (usuario, buffer, sucursales) => {
 };
 
 module.exports = {
-  guardarPrecios, getPreciosProducto, MAX_NODOS,
+  guardarPrecios, getPreciosProducto, getPreciosParaCompra, MAX_NODOS,
   generarPlantilla, analizarExcel, importarExcel,
 };

@@ -14,6 +14,8 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { Spinner }     from '../../components/ui/Spinner';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
+import { usePreciosCompra } from '../../hooks/usePreciosCompra';
+import { PreciosVentaCompra } from '../../components/ui/PreciosVentaCompra';
 import {
   Plus, Trash2, Package, Smartphone, CalendarClock, Info, ShieldCheck,
   Layers, ChevronLeft,
@@ -334,6 +336,8 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, deta
   const [diasPlazo,     setDiasPlazo]     = useState(orden?.dias_plazo ?? '');
   const [notas,         setNotas]         = useState(orden?.notas || '');
   const [error,         setError]         = useState('');
+  // Precios de venta de lo que se pide (solo con las listas de precios).
+  const precios = usePreciosCompra();
 
   // ── La clave INCLUYE el nodo ───────────────────────────────────────────────
   // Antes era `tipo-producto_id` y por eso el mismo producto no podia entrar dos
@@ -390,10 +394,18 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, deta
     })),
   });
 
+  const lineasPrecios = lineas.map((l) => ({
+    tipo: l.tipo, producto_id: l.producto_id, atributo_id: l.atributo_id, variante_id: l.variante_id,
+  }));
+
   const mut = useMutation({
-    mutationFn: ({ emitir }) => editando
-      ? editarOrden(orden.id, payload(emitir))
-      : crearOrden(payload(emitir)),
+    // Los precios primero: si no se pueden guardar, la orden todavía no existe.
+    mutationFn: async ({ emitir }) => {
+      await precios.guardar(lineasPrecios);
+      return editando
+        ? editarOrden(orden.id, payload(emitir))
+        : crearOrden(payload(emitir));
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ordenes-compra'], exact: false });
       onClose();
@@ -440,6 +452,8 @@ export function ModalOrden({ open, proveedor, orden = null, garantiaActiva, deta
             ))}
           </div>
         )}
+
+        <PreciosVentaCompra ctl={precios} lineas={lineasPrecios} />
 
         <div className="border-t border-gray-100 pt-4 flex flex-col gap-3">
           <div className="flex items-center gap-2">

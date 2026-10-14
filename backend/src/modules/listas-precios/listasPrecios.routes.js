@@ -35,6 +35,10 @@ const upload = multer({
 
 router.get('/producto/:productoId', requireNivel('vendedor'), ctrl.getPreciosProducto);
 
+// Los precios de los productos de una compra, pedido o recepción (solo lectura:
+// son precios de venta, como el de arriba). Cambiarlos va por PUT /nodos.
+router.get('/compra', requireNivel('vendedor'), ctrl.getPreciosParaCompra);
+
 router.put('/nodos', requirePermisoPreciosLista, ctrl.guardarPrecios);
 
 // ── Excel: el mismo archivo de ida y de vuelta ───────────────────────────────

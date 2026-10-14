@@ -15,6 +15,8 @@ import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { useSoloListas } from '../../hooks/useSoloListas';
+import { usePreciosCompra } from '../../hooks/usePreciosCompra';
+import { PreciosVentaCompra } from '../../components/ui/PreciosVentaCompra';
 import { crearCompra }  from '../../api/compras.api';
 import { buscarPorCedula, crearCliente, getClientes } from '../../api/clientes.api';
 import {
@@ -788,6 +790,13 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
   const reactivarMapRef = useRef({});
   const inputRefs       = useRef([]);
 
+  // Precios de venta (solo con las listas de precios), guardados antes de
+  // registrar la compra.
+  const precios = usePreciosCompra();
+  const lineasPrecios = tipoProducto === 'serial'
+    ? (lineaSel ? [{ tipo: 'serial', producto_id: lineaSel.id }] : [])
+    : (productoSel ? [{ tipo: 'cantidad', producto_id: productoSel.id }] : []);
+
   const { data: productosSerialRaw } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
     queryFn:  () => getProductosSerial().then((r) => normalizarProductos(r.data.data)),
@@ -870,6 +879,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 
   const mutConfirmarSerial = useMutation({
     mutationFn: async () => {
+      await precios.guardar(lineasPrecios);
       await Promise.all(
         items
           .filter((i) => extraerImei(i).trim())
@@ -896,6 +906,7 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
 
   const mutConfirmarCantidad = useMutation({
     mutationFn: async () => {
+      await precios.guardar(lineasPrecios);
       await ajustarStockCantidad(productoSel.id, {
         cantidad:       Number(cantidad),
         costo_unitario: costo,
@@ -1195,6 +1206,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
         </div>
       )}
 
+      <PreciosVentaCompra ctl={precios} lineas={lineasPrecios} />
+
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {hayProducto && (
@@ -1231,6 +1244,8 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
   const [verificando,    setVerificando]    = useState(false);
   const reactivarMapRef = useRef({});
   const inputRefs       = useRef([]);
+  const precios         = usePreciosCompra();
+  const lineasPrecios   = lineaSel ? [{ tipo: 'serial', producto_id: lineaSel.id }] : [];
 
   const { data: productosData } = useQuery({
     queryKey: ['productos-serial', ...sucursalKey],
@@ -1276,6 +1291,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
 
   const mutConfirmar = useMutation({
     mutationFn: async () => {
+      await precios.guardar(lineasPrecios);
       const itemsValidos = items.filter((i) => extraerImei(i).trim());
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
 
@@ -1510,6 +1526,7 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
           />
         </div>
       )}
+      <PreciosVentaCompra ctl={precios} lineas={lineasPrecios} />
       {error && <p className="text-sm text-red-500">{error}</p>}
       {lineaSel && (
         <Button className="w-full" loading={mutConfirmar.isPending || verificando} onClick={handleConfirmar}>
@@ -1762,6 +1779,21 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
     return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodoInline(atr), stock: atr.stock }];
   }) : [];
 
+  // Precios de venta (solo con las listas de precios): el producto y cada
+  // variante que recibe stock. Se guardan antes de agregar el stock.
+  const precios = usePreciosCompra();
+  const lineasPrecios = !productoSel ? [] : [
+    { tipo: 'cantidad', producto_id: productoSel.id },
+    ...(tieneArbol
+      ? hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0)
+      : (nodoSel ? [nodoSel] : [])
+    ).map((h) => ({
+      tipo: 'cantidad', producto_id: productoSel.id,
+      atributo_id: h.tipo === 'atributo' ? h.id : null,
+      variante_id: h.tipo === 'variante' ? h.id : null,
+    })),
+  ];
+
   // Query de proveedores para el panel "crear nuevo producto"
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
@@ -1822,6 +1854,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
 
   const mutConfirmar = useMutation({
     mutationFn: async () => {
+      await precios.guardar(lineasPrecios);
       const cantidadNum = Number(cantidad);
       const costo = costoCompra !== '' ? Number(costoCompra) : null;
 
@@ -2088,6 +2121,8 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
               Selecciona si fue pagado o a crédito para registrar la compra en el proveedor.
             </p>
           )}
+
+          <PreciosVentaCompra ctl={precios} lineas={lineasPrecios} />
         </div>
       )}
       {error && <p className="text-sm text-red-500">{error}</p>}

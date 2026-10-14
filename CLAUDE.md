@@ -203,6 +203,31 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > elegidas, la 2 el guardado, la 7 backend == navegador) y
 > `frontend/scripts/prueba-solo-listas.mjs` (41; compila el store REAL con Vite).
 
+> **Precios de venta AL COMPRAR** (`components/ui/PreciosVentaCompra.jsx`,
+> `hooks/usePreciosCompra.js`, `utils/preciosCompra.js`,
+> `GET /listas-precios/compra`; pedido del usuario, 14-oct-2026). Con
+> `listas_precios_activo`, toda pantalla donde entra mercancía muestra el precio
+> de cada lista de lo que se compra —el producto (o la referencia con IMEI) y
+> debajo cada talla/color que entra— y deja ponerlo o corregirlo: compra a
+> proveedor (`ModalCompra`, en el paso de productos), pedido (`ModalOrden`),
+> recepción de una orden (`ModalRecibir`, con los productos de la orden desde
+> el principio) y los tres pasos de «Agregar» en Inventario (IMEI, cantidad y
+> compra a cliente). **La Entrada de bodega NO** (el bodeguero recibe sin
+> precios). Sin listas la sección no pinta nada; sin
+> `puede_editar_precios_lista` (o admin) se ve en solo lectura.
+> **Se guarda ANTES de registrar**, en la misma mutación, por el MISMO
+> `PUT /listas-precios/nodos` del editor «Precios por lista» (mismo permiso,
+> mismo saneado, mismo alcance de negocio): si los precios fallan, la compra
+> todavía no existe y el error dice «Todavía no se registró nada». Solo viaja lo
+> TOCADO, con el mapa COMPLETO del nodo (el backend reemplaza la columna); una
+> casilla vaciada se quita (hereda); lo editado y después quitado de la compra
+> no se guarda (`clavesVigentes`). La lectura es una sola consulta por compra
+> (todos los nodos de los productos, con precio normal y el padre de cada
+> variante), tope 200 productos. De paso, `ModalCompra` ahora muestra el error
+> si la compra falla (antes no decía nada).
+> Prueba: `80-precios-venta-en-compras` (48; la 3 es qué se guarda, la 4 la ida
+> y vuelta contra la base y la 5 que las pantallas guardan antes de registrar).
+
 > **Obsequios — se regala, se factura en $0 y el COSTO sigue contando**
 > (`utils/obsequios.util.js`, `lineas_factura.obsequio`,
 > `20260920_obsequios.sql`; botón «Marcar como obsequio» en el CARRITO, que es

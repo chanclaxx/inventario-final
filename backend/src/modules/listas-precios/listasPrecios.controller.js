@@ -10,6 +10,15 @@ const getPreciosProducto = (req, res, next) =>
     .then((data) => res.json({ ok: true, data }))
     .catch(next);
 
+// `?cantidad=1,2&serial=3`: los productos de la compra que se está armando.
+const getPreciosParaCompra = (req, res, next) =>
+  svc.getPreciosParaCompra(
+    { cantidad: req.query.cantidad, serial: req.query.serial },
+    req.user.negocio_id,
+  )
+    .then((data) => res.json({ ok: true, data }))
+    .catch(next);
+
 // `sucursales` viaja como lista separada por comas en el query (GET) o como
 // arreglo en el cuerpo (POST). Quién puede tocarlas lo decide el service, no
 // esto: aquí solo se normaliza la forma.
@@ -55,6 +64,6 @@ const importarExcel = (req, res, next) =>
     .catch(next);
 
 module.exports = {
-  guardarPrecios, getPreciosProducto,
+  guardarPrecios, getPreciosProducto, getPreciosParaCompra,
   descargarPlantilla, analizarExcel, importarExcel,
 };

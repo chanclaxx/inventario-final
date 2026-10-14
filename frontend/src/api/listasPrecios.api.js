@@ -28,6 +28,15 @@ export const guardarPreciosNodos = (nodos) =>
 export const getPreciosProducto = (productoId) =>
   api.get(`/listas-precios/producto/${productoId}`);
 
+/**
+ * Los precios de venta (normal y por lista) de todos los nodos de los productos
+ * de una compra, pedido o recepción. Solo lee.
+ */
+export const getPreciosParaCompra = ({ cantidad = [], serial = [] }) =>
+  api.get('/listas-precios/compra', {
+    params: { cantidad: cantidad.join(','), serial: serial.join(',') },
+  });
+
 // ── Excel: el mismo archivo de ida y de vuelta ───────────────────────────────
 //
 // No hay "exportar precios" por un lado y una plantilla vacía por el otro: se
