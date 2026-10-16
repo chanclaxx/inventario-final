@@ -148,6 +148,8 @@ const LINEAS = [
     correa.filas.map((f) => f.clave).join(' '));
   const negro = correa.filas[1];
   ok('el color hereda de la talla y del producto', negro.cadena.map((n) => `${n.nivel}:${n.id}`).join(' ') === 'producto:1 atributo:2');
+  ok('la fila del color dice de qué talla es (visto en Chrome: salía «m» suelto)',
+    negro.etiqueta === 'Talla: 38MM · Color: Negro', negro.etiqueta);
 
   ok('una casilla con precio propio muestra el suyo', pc.valorEnLista(negro, 'mayor', {}) === 48000);
   ok('una vacía muestra vacío…', pc.valorEnLista(negro, 'final', {}) === '');

@@ -95,11 +95,17 @@ export const armarGrupos = (lineas, datos) => {
       const nodo = porClave.get(clave);
       if (!nodo) continue;
       const cadena = [raiz];
+      let etiqueta = nodo.etiqueta;
       if (nodo.nivel === 'variante') {
         const padre = porClave.get(claveNodo('atributo', nodo.atributo_id));
-        if (padre) cadena.push(padre);
+        if (padre) {
+          cadena.push(padre);
+          // «m» suelto no dice de qué talla es; el selector de la compra
+          // muestra las dos («Talla: L / m») y aquí tiene que decir lo mismo.
+          etiqueta = `${padre.etiqueta} · ${nodo.etiqueta}`;
+        }
       }
-      grupo.filas.push({ ...nodo, clave, cadena, sangria: 1 });
+      grupo.filas.push({ ...nodo, etiqueta, clave, cadena, sangria: 1 });
     }
   }
   return [...grupos.values()];

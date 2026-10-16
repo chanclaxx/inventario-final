@@ -170,7 +170,7 @@ console.log('\n6. Los ocho selectores lo usan');
 const SITIOS = [
   ['compra, recepción y entrada (chips)', 'pages/proveedores/capturaMercancia.jsx', ['useBuscadorVariantes(hojas)', 'buscador.visibles.map(']],
   ['agregar stock desde Inventario',      'pages/inventario/ModalAgregarProducto.jsx', ['useBuscadorVariantes(hojas)', 'buscador.visibles.map(']],
-  ['pedir una variante en la orden',      'pages/proveedores/ModalOrden.jsx', ['useBuscadorVariantes(hojas)', 'buscador.visibles.map(']],
+  ['pedir una variante en la orden',      'pages/proveedores/ModalOrden.jsx', ['useBuscadorVariantes(hojas', 'buscador.visibles.map(']],
   ['recibir: llegó otra / llegó de más',  'pages/proveedores/ModalRecibir.jsx', ['buscSust.visibles.map(', 'buscExtra.visibles.map(']],
   ['entrada: llegó otra / llegó de más',  'pages/entradas/VistaEntrada.jsx', ['buscSust.visibles.map(', 'buscExtra.visibles.map(']],
   ['retoma: a cuál entra',                'components/ui/SelectorNodoRetoma.jsx', ['useBuscadorVariantes(hojas)', 'buscador.visibles.map(']],

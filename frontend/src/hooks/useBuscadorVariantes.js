@@ -7,8 +7,11 @@ import { filtrarHojas, mereceBuscador } from '../utils/buscarVariantes';
 //
 // Por debajo del umbral `activo` es falso, no hay cuadro y `visibles` es la
 // lista TAL CUAL llegó: el selector se comporta exactamente como antes.
-export function useBuscadorVariantes(hojas) {
-  const [consulta, setConsulta] = useState('');
+//
+// `consultaInicial`: el código de variante que se escaneó para llegar aquí; la
+// lista arranca filtrada a esa variante (solo la primera vez que se monta).
+export function useBuscadorVariantes(hojas, consultaInicial = '') {
+  const [consulta, setConsulta] = useState(consultaInicial || '');
   const activo = mereceBuscador(hojas);
   return {
     activo,

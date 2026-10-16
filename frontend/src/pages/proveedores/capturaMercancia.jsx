@@ -6,6 +6,7 @@ import {
 } from './capturaMercancia.utils';
 import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
 import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
+import { hojaPorCodigo } from '../../utils/buscarVariantes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CAPTURA DE MERCANCÍA QUE ENTRA — componentes compartidos
@@ -112,10 +113,18 @@ export function FilaImeiCompra({
 // variante igual que una compra pero no puede ver ni escribir precios. Es un
 // prop y no un componente aparte: duplicarlo dejaria a uno de los dos mintiendo
 // tras el primer arreglo, que es lo que ya paso con el codigo escaneable.
-export function MultiSelectorCompra({ hojas, nodosData, onActualizar, mostrarCosto = true }) {
-  const [seleccionadas, setSeleccionadas] = useState(
-    () => new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key))
-  );
+//
+// `codigoInicial`: el código de la variante que se escaneó en el buscador de
+// productos. Esa variante arranca ELEGIDA y con el cursor en su cantidad, así el
+// lector lleva directo a escribir cuántas llegaron. Se lee al MONTAR: quien
+// quiera que otro escaneo vuelva a contar, remonta el selector con `key`.
+export function MultiSelectorCompra({ hojas, nodosData, onActualizar, mostrarCosto = true, codigoInicial = null }) {
+  const escaneada = hojaPorCodigo(hojas, codigoInicial);
+  const [seleccionadas, setSeleccionadas] = useState(() => {
+    const s = new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key));
+    if (escaneada) s.add(escaneada.key);
+    return s;
+  });
 
   const base = (h) => ({
     label: h.label, labelPadre: h.labelPadre, tipo: h.tipo, id: h.id,
@@ -141,7 +150,7 @@ export function MultiSelectorCompra({ hojas, nodosData, onActualizar, mostrarCos
   const buscador = useBuscadorVariantes(hojas);
   // La que se eligió con Enter desde el buscador: su casilla de cantidad toma
   // el foco al aparecer, para seguir escribiendo sin tocar el mouse.
-  const [recienElegida, setRecienElegida] = useState(null);
+  const [recienElegida, setRecienElegida] = useState(() => escaneada?.key ?? null);
   const elegirDesdeBuscador = (h) => {
     // Enter sobre una que YA estaba elegida no la quita: borraría su cantidad.
     if (!seleccionadas.has(h.key)) { toggle(h); setRecienElegida(h.key); }

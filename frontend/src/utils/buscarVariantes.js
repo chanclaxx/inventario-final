@@ -46,5 +46,13 @@ export const filtrarHojas = (hojas, consulta) => {
   });
 };
 
+/** La hoja cuyo código es EXACTAMENTE `codigo` (sin mayúsculas), o null. La usa
+ *  el selector que se abre después de escanear el código de una variante. */
+export const hojaPorCodigo = (hojas, codigo) => {
+  const q = String(codigo ?? '').trim().toLowerCase();
+  if (!q) return null;
+  return (hojas ?? []).find((h) => String(h?.codigo ?? '').trim().toLowerCase() === q) ?? null;
+};
+
 /** ¿Esta lista es lo bastante larga para merecer el buscador? */
 export const mereceBuscador = (hojas) => (hojas?.length ?? 0) >= MIN_VARIANTES_BUSCADOR;

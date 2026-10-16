@@ -6,6 +6,8 @@ import { getArbol }        from '../../api/variantesProductoApi';
 import { hojasDelArbol }   from './capturaMercancia.utils';
 import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
 import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
+import { useCorregirGuiones } from '../../hooks/useCorregirGuiones';
+import { filtrarProductos, elegirConEnter } from '../../utils/buscarProductos';
 import { formatCOP }   from '../../utils/formatters';
 import { Modal }       from '../../components/ui/Modal';
 import { Button }      from '../../components/ui/Button';
@@ -69,7 +71,9 @@ function normalizar(data) {
 //
 // "Todos, sin especificar" sigue estando y es la primera opcion: es lo que hacen
 // hoy los 28 negocios y hay pedidos donde de verdad da igual la variante.
-function PanelVariantes({ producto, yaAgregados, onElegir, onVolver }) {
+// `codigoInicial`: se llegó escaneando el código de una variante; la lista
+// arranca filtrada a ella (con muchas variantes, que es cuando hay buscador).
+function PanelVariantes({ producto, yaAgregados, onElegir, onVolver, codigoInicial = '' }) {
   const { data: arbol = [], isLoading } = useQuery({
     queryKey: ['arbol-producto', producto.id, producto.sucursal_id],
     queryFn:  () => getArbol(producto.id, producto.sucursal_id).then((r) => r.data.data),
@@ -79,7 +83,7 @@ function PanelVariantes({ producto, yaAgregados, onElegir, onVolver }) {
 
   const hojas = hojasDelArbol(arbol);
   const claveProducto = `cantidad-${producto.id}-p`;
-  const buscador = useBuscadorVariantes(hojas);
+  const buscador = useBuscadorVariantes(hojas, codigoInicial);
 
   return (
     <div className="flex flex-col gap-2">
@@ -145,6 +149,9 @@ function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados, 
   // Que producto esta abierto por variantes. Un estado, no una pantalla aparte:
   // elegir la potencia es parte de "agregar un producto", no un paso propio.
   const [abierto,  setAbierto]  = useState(null);
+  // El código de variante con el que se abrió (escaneado), o null.
+  const [codigoAbierto, setCodigoAbierto] = useState(null);
+  const corregirGuiones = useCorregirGuiones();
 
   const { data: cantidadData, isLoading: cargandoCant } = useQuery({
     queryKey: ['productos-cantidad', ...sucursalKey],
@@ -161,15 +168,30 @@ function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados, 
   const fuente = tipo === 'cantidad' ? normalizar(cantidadData) : normalizar(serialData);
   const cargando = tipo === 'cantidad' ? cargandoCant : cargandoSer;
 
+  // Por nombre o por código (el del producto o el de una de sus variantes).
   const texto = busqueda.trim().toLowerCase();
-  const lista = fuente
-    .filter((p) => !texto || (p.nombre || '').toLowerCase().includes(texto))
-    .slice(0, 40);
+  const coincidencias = filtrarProductos(fuente, busqueda, { corregir: corregirGuiones });
+  const lista = coincidencias.slice(0, 40);
+
+  // El lector escribe el código y manda Enter: se toma ese producto como si se
+  // hubiera tocado (con detalle por variante se abre su panel, ya filtrado a la
+  // variante escaneada).
+  const elegirConEnterBusqueda = () => {
+    const elegido = elegirConEnter(fuente, coincidencias, busqueda, { corregir: corregirGuiones });
+    if (!elegido) return;
+    const p = elegido.producto;
+    const porNodo = detalleNodo && tipo === 'cantidad';
+    const clave = tipo === 'serial' ? `serial-${p.id}` : `cantidad-${p.id}-p`;
+    if (porNodo) { setCodigoAbierto(elegido.codigoVariante); setAbierto(p); }
+    else if (!yaAgregados.has(clave)) onAgregar(p, tipo, null);
+    setBusqueda('');
+  };
 
   if (abierto) {
     return (
       <PanelVariantes
         producto={abierto}
+        codigoInicial={codigoAbierto ?? ''}
         yaAgregados={yaAgregados}
         onVolver={() => setAbierto(null)}
         onElegir={(hoja) => { onAgregar(abierto, 'cantidad', hoja); setAbierto(null); }}
@@ -195,7 +217,8 @@ function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados, 
         })}
       </div>
 
-      <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto…" />
+      <SearchInput value={busqueda} onChange={setBusqueda} onEnter={elegirConEnterBusqueda}
+        placeholder="Buscar producto o escanear código…" />
 
       {tipo === 'serial' && (
         <div className="bg-blue-50 rounded-xl px-3 py-2 flex items-start gap-2">
@@ -221,7 +244,11 @@ function SelectorProducto({ sucursalKey, sucursalLista, onAgregar, yaAgregados, 
           const puesto  = !porNodo && yaAgregados.has(clave);
           return (
             <button key={`${tipo}-${p.id}`} type="button" disabled={puesto}
-              onClick={() => (porNodo ? setAbierto(p) : onAgregar(p, tipo, null))}
+              onClick={() => {
+                if (!porNodo) return onAgregar(p, tipo, null);
+                setCodigoAbierto(null);
+                setAbierto(p);
+              }}
               className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left transition-colors
                 ${puesto ? 'bg-gray-50 text-gray-300 cursor-default' : 'hover:bg-blue-50 text-gray-700'}`}>
               <span className="text-sm truncate">{p.nombre}</span>

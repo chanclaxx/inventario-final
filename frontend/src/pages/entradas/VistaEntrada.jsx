@@ -18,6 +18,8 @@ import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { FilaImeiCompra, MultiSelectorCompra } from '../proveedores/capturaMercancia';
 import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
 import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
+import { useCorregirGuiones } from '../../hooks/useCorregirGuiones';
+import { filtrarProductos, productoPorCodigo } from '../../utils/buscarProductos';
 import {
   extraerImei, extraerColor, extraerCaracteristicas,
   parsearColoresConfig, parsearCaracteristicasConfig,
@@ -261,8 +263,10 @@ function FilaLinea({
       {!esSerial && variantesActivo && cargandoArbol && <Spinner className="py-3 scale-75" />}
       {!esSerial && tieneArbol && !nodoFijo && !cargandoArbol && (
         <MultiSelectorCompra
+          key={linea._escaneo?.n ?? 0}
           hojas={hojas}
           nodosData={linea.nodos || {}}
+          codigoInicial={linea._escaneo?.codigo}
           mostrarCosto={false}
           onActualizar={(key, datos) => onCambiar(linea.key, {
             nodos: { ...(linea.nodos || {}), [key]: datos },
@@ -467,30 +471,47 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
   });
 
   const catalogo = useMemo(() => ([
-    ...norm(cantData).map((p)   => ({ id: p.id, nombre: p.nombre, tipo: 'cantidad', codigo: p.codigo })),
+    // `codigos_variantes`: con variantes activas lo que se escanea es la talla.
+    ...norm(cantData).map((p)   => ({ id: p.id, nombre: p.nombre, tipo: 'cantidad', codigo: p.codigo, codigos_variantes: p.codigos_variantes })),
     ...norm(serialData).map((p) => ({ id: p.id, nombre: p.nombre, tipo: 'serial',   codigo: null })),
   ]), [cantData, serialData]);
 
+  const corregirGuiones = useCorregirGuiones();
   const resultados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     if (q.length < 2) return [];
-    return catalogo
-      .filter((p) => p.nombre.toLowerCase().includes(q) || (p.codigo || '').toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [busqueda, catalogo]);
+    return filtrarProductos(catalogo, busqueda, { corregir: corregirGuiones }).slice(0, 8);
+  }, [busqueda, catalogo, corregirGuiones]);
 
-  const agregar = (p) => {
+  // `codigoVariante`: se escaneó una talla; su línea abre el selector con ella
+  // elegida (`_escaneo` no viaja al backend: el payload se arma campo por
+  // campo). Si el producto ya estaba en la entrada, se elige ahí.
+  const agregar = (p, codigoVariante = null) => {
     const key = `p-${p.tipo}-${p.id}`;
     setBusqueda('');
     setLineas((ls) => {
-      if (ls.some((l) => l.key === key)) return ls;   // ya está: no se duplica
+      if (ls.some((l) => l.key === key)) {   // ya está: no se duplica
+        if (!codigoVariante) return ls;
+        return ls.map((l) => (l.key === key
+          ? { ...l, _escaneo: { codigo: codigoVariante, n: (l._escaneo?.n ?? 0) + 1 } }
+          : l));
+      }
       return [...ls, nuevaLinea({
         key, producto_id: p.id, nombre_producto: p.nombre, tipo: p.tipo,
         items: p.tipo === 'serial'
           ? [itemSerialVacio(coloresActivo, caracteristicasActivo, caracteristicasLista)]
           : [],
+        ...(codigoVariante ? { _escaneo: { codigo: codigoVariante, n: 1 } } : {}),
       })];
     });
+  };
+
+  // El lector escribe el código y manda Enter: el código exacto gana; si no,
+  // la única coincidencia de la lista.
+  const agregarConEnter = () => {
+    const exacto = productoPorCodigo(catalogo, busqueda, { corregir: corregirGuiones });
+    if (exacto) return agregar(exacto.producto, exacto.codigoVariante);
+    if (resultados.length === 1) agregar(resultados[0]);
   };
 
   // Los nodos que YA están en la entrada para un producto. El selector de "otra
@@ -673,6 +694,7 @@ export function VistaEntrada({ orden, onVolver, onListo }) {
       <SearchInput
         value={busqueda}
         onChange={setBusqueda}
+        onEnter={agregarConEnter}
         placeholder="Escanea el código o busca el producto..."
       />
 

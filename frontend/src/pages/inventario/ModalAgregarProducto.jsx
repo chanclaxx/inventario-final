@@ -1,6 +1,9 @@
 import { useState, useRef } from 'react';
 import { BuscadorVariantes } from '../../components/ui/BuscadorVariantes';
 import { useBuscadorVariantes } from '../../hooks/useBuscadorVariantes';
+import { hojaPorCodigo } from '../../utils/buscarVariantes';
+import { useCorregirGuiones } from '../../hooks/useCorregirGuiones';
+import { filtrarProductos, elegirConEnter } from '../../utils/buscarProductos';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal }        from '../../components/ui/Modal';
 import { Button }       from '../../components/ui/Button';
@@ -813,9 +816,18 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
     .filter((p) => p.nombre.toLowerCase().includes(busquedaSerial.toLowerCase()))
     .filter((p) => !filtroLineaSerial || String(p.linea_id) === filtroLineaSerial);
 
-  const productosCantidad = normalizarProductos(productosCantidadRaw)
-    .filter((p) => p.nombre.toLowerCase().includes(busquedaCantidad.toLowerCase()))
+  // Por nombre o por código (el del producto o el de una variante: lo que se pistolea).
+  const corregirGuiones = useCorregirGuiones();
+  const todosCantidad = normalizarProductos(productosCantidadRaw);
+  const productosCantidad = filtrarProductos(todosCantidad, busquedaCantidad, { corregir: corregirGuiones })
     .filter((p) => !filtroLineaCantidad || String(p.linea_id) === filtroLineaCantidad);
+  // Compra a cliente entra al producto plano (no reparte por variante), así que
+  // el código de una talla solo sirve para encontrar su producto.
+  const elegirCantidadConEnter = () => {
+    const elegido = elegirConEnter(todosCantidad, productosCantidad, busquedaCantidad, { corregir: corregirGuiones });
+    if (!elegido) return;
+    setProductoSel(elegido.producto); setError(''); setBusquedaCantidad('');
+  };
 
   const imeisValidos  = items.filter((i) => extraerImei(i).trim()).length;
   const costo         = costoCompra !== '' ? Number(costoCompra) : null;
@@ -1118,7 +1130,8 @@ function PasoCompraCliente({ sucursalKey, sucursalLista, onExito, onDuplicadosEn
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-gray-700">Producto</p>
               {/* ── FILTRO POR LÍNEA ── */}
-              <SearchInput value={busquedaCantidad} onChange={setBusquedaCantidad} placeholder="Buscar producto..." />
+              <SearchInput value={busquedaCantidad} onChange={setBusquedaCantidad} onEnter={elegirCantidadConEnter}
+                placeholder="Buscar producto o escanear código..." />
 <SelectFiltroLinea value={filtroLineaCantidad} onChange={setFiltroLineaCantidad} accentColor="emerald" />
               <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
                 {productosCantidad.length === 0 ? (
@@ -1538,10 +1551,15 @@ function PasoSerial({ sucursalKey, onExito, onDuplicadosEncontrados, coloresActi
 }
 
 // ─── Selector multi-variante (cantidad + costo por hoja del árbol) ────────────
-function MultiSelectorVariante({ hojas, nodosData, onActualizar }) {
-  const [seleccionadas, setSeleccionadas] = useState(
-    () => new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key))
-  );
+// `codigoInicial`: el código de la variante que se escaneó para llegar aquí;
+// arranca elegida y con el cursor en su cantidad (igual que `MultiSelectorCompra`).
+function MultiSelectorVariante({ hojas, nodosData, onActualizar, codigoInicial = null }) {
+  const escaneada = hojaPorCodigo(hojas, codigoInicial);
+  const [seleccionadas, setSeleccionadas] = useState(() => {
+    const s = new Set(hojas.filter((h) => Number(nodosData[h.key]?.cantidad) > 0).map((h) => h.key));
+    if (escaneada) s.add(escaneada.key);
+    return s;
+  });
 
   const toggle = (h) => {
     setSeleccionadas((prev) => {
@@ -1560,7 +1578,7 @@ function MultiSelectorVariante({ hojas, nodosData, onActualizar }) {
   // Mismo buscador que `MultiSelectorCompra`: filtra los chips, nunca las
   // filas ya elegidas.
   const buscador = useBuscadorVariantes(hojas);
-  const [recienElegida, setRecienElegida] = useState(null);
+  const [recienElegida, setRecienElegida] = useState(() => escaneada?.key ?? null);
   const elegirDesdeBuscador = (h) => {
     if (!seleccionadas.has(h.key)) { toggle(h); setRecienElegida(h.key); }
     buscador.limpiar();
@@ -1745,6 +1763,9 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
   const [error,     setError]     = useState('');
   const [nodoSel,   setNodoSel]   = useState(null);
   const [nodosData, setNodosData] = useState({});
+  // El código de variante escaneado al elegir el producto: esa talla llega
+  // elegida en el selector.
+  const [codigoEscaneado, setCodigoEscaneado] = useState(null);
   const [variantesNuevas, setVariantesNuevas] = useState(estadoVariantesVacio);
 
   const { data: productosData } = useQuery({
@@ -1774,9 +1795,11 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
         labelPadre: labelNodoInline(atr),
         label:      labelNodoInline(v),
         stock:      v.stock,
+        // Solo para buscarla y para el escaneo: nadie lo envía.
+        codigo:     v.codigo ?? null,
       }));
     }
-    return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodoInline(atr), stock: atr.stock }];
+    return [{ key: `a-${atr.id}`, id: atr.id, tipo: 'atributo', label: labelNodoInline(atr), stock: atr.stock, codigo: atr.codigo ?? null }];
   }) : [];
 
   // Precios de venta (solo con las listas de precios): el producto y cada
@@ -1805,13 +1828,16 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
   });
   const listaProveedores = Array.isArray(proveedoresNuevoData) ? proveedoresNuevoData : [];
 
-  // ── Filtrado combinado: nombre + línea ────────────────────────────────────
-  const productos = normalizarProductos(productosData)
-    .filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+  // ── Filtrado combinado: nombre o código + línea ───────────────────────────
+  // El código puede ser el del producto o el de una de sus variantes.
+  const corregirGuiones = useCorregirGuiones();
+  const todosProductos = normalizarProductos(productosData);
+  const productos = filtrarProductos(todosProductos, busqueda, { corregir: corregirGuiones })
     .filter((p) => !filtroLineaId || String(p.linea_id) === filtroLineaId);
 
-  const handleSeleccionarProducto = (producto) => {
+  const handleSeleccionarProducto = (producto, codigoVariante = null) => {
     setProductoSel(producto);
+    setCodigoEscaneado(codigoVariante);
     setNodoSel(null);
     setNodosData({});
     setError('');
@@ -1968,7 +1994,13 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
       {!productoSel ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
-          <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
+          <SearchInput value={busqueda} onChange={setBusqueda}
+            onEnter={() => {
+              // El lector escribe el código y manda Enter: se elige ese producto.
+              const elegido = elegirConEnter(todosProductos, productos, busqueda, { corregir: corregirGuiones });
+              if (elegido) { handleSeleccionarProducto(elegido.producto, elegido.codigoVariante); setBusqueda(''); }
+            }}
+            placeholder="Buscar producto o escanear código..." />
           <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
           <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
             {productos.length === 0 ? (
@@ -2081,6 +2113,7 @@ function PasoCantidad({ sucursalKey, onExito, variantesActivo, codigoActivo, cod
               <MultiSelectorVariante
                 hojas={hojas}
                 nodosData={nodosData}
+                codigoInicial={codigoEscaneado}
                 onActualizar={(key, campo, valor) =>
                   setNodosData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), [campo]: valor } }))
                 }
@@ -2244,9 +2277,9 @@ function PasoRetomaPrestatario({ sucursalKey, onExito }) {
   const filtradosSerial   = productosSerial.filter((p) =>
     (p.nombre ?? '').toLowerCase().includes(busquedaSerial.toLowerCase())
   );
-  const filtradosCantidad = productosCantidad.filter((p) =>
-    (p.nombre ?? '').toLowerCase().includes(busquedaCantidad.toLowerCase())
-  );
+  // Por nombre o por código (el del producto o el de una de sus variantes).
+  const corregirGuiones   = useCorregirGuiones();
+  const filtradosCantidad = filtrarProductos(productosCantidad, busquedaCantidad, { corregir: corregirGuiones });
 
   const resetCamposProducto = () => {
     setImeiRetoma(''); setBusquedaSerial(''); setProductoSerialSel(null); setColorRetoma('');
@@ -2404,8 +2437,14 @@ function PasoRetomaPrestatario({ sucursalKey, onExito }) {
                   <label className="text-xs font-medium text-gray-600">
                     Producto{ingresoInventario ? ' *' : ''}
                   </label>
-                  <input type="text" placeholder="Buscar producto..." value={busquedaCantidad}
+                  <input type="text" placeholder="Buscar producto o escanear código..." value={busquedaCantidad}
                     onChange={(e) => { setBusquedaCantidad(e.target.value); setProductoCantidadSel(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || productoCantidadSel) return;
+                      e.preventDefault();
+                      const elegido = elegirConEnter(productosCantidad, filtradosCantidad, busquedaCantidad, { corregir: corregirGuiones });
+                      if (elegido) { setProductoCantidadSel(elegido.producto); setBusquedaCantidad(elegido.producto.nombre); }
+                    }}
                     className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
                       text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all" />
                   {busquedaCantidad.length > 0 && !productoCantidadSel && (

@@ -1,13 +1,22 @@
 import { Search, X } from 'lucide-react';
 
-export function SearchInput({ value, onChange, placeholder = 'Buscar...' }) {
+// `onEnter` (opcional): el lector de códigos es un teclado que escribe y manda
+// Enter; quien lo pase decide qué hacer con lo leído. Sin él, Enter no hace nada,
+// como siempre.
+export function SearchInput({ value, onChange, placeholder = 'Buscar...', onEnter, autoFocus = false }) {
   return (
     <div className="relative">
       <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       <input
         type="text"
         value={value}
+        autoFocus={autoFocus}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onEnter ? (e) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          onEnter(e.currentTarget.value);
+        } : undefined}
         placeholder={placeholder}
         className="w-full pl-9 pr-8 py-2.5 bg-gray-100 border-0 rounded-xl text-sm
           text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2

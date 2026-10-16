@@ -1734,6 +1734,28 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > componentes con el Vite del proyecto y los pinta con `react-dom/server` — la
 > sección 1 es la de «por debajo del umbral nada cambia» y la 6 revisa los ocho
 > sitios).
+>
+> **Buscar el PRODUCTO por su código al hacer entrar mercancía**
+> (`utils/buscarProductos.js`, `hooks/useCorregirGuiones.js`; pedido del
+> usuario, 16-oct-2026: «poder buscar desde el código que tenemos para
+> pistolear»). Solo frontend. Compra a proveedor (`ModalCompra`), pedido
+> (`ModalOrden`), Entrada de bodega (`VistaEntrada`) y en Inventario «Agregar
+> stock», «Compra a cliente» y la retoma buscaban SOLO por nombre; ahora también
+> por el `codigo` del producto y por `codigos_variantes` (los de sus tallas, que
+> ya mandaba `findAll`), sin tildes en el nombre. Lo que antes salía sigue
+> saliendo. **Enter** (el lector es un teclado): el código EXACTO gana —en todo
+> el catálogo, aunque haya filtro de línea—, si no la única coincidencia; con
+> varias no adivina. Si el código era de una **variante**, el selector de tallas
+> llega con ella elegida y el foco en su cantidad (`codigoInicial` en
+> `MultiSelectorCompra` / `MultiSelectorVariante`; en el pedido, el panel de
+> variantes llega filtrado). Escanear otra talla de un producto que ya está en la
+> compra o en la entrada la elige ahí (`_escaneo` + `key`; no viaja al backend:
+> los payloads se arman campo por campo). Respeta `escaneo_corregir_guiones`.
+> `SearchInput` ganó `onEnter` opcional (sin él, igual que antes). Las
+> referencias con IMEI no cambian: no tienen código propio.
+> Prueba: `frontend/scripts/prueba-buscar-por-codigo.mjs` (50; la sección 1 es
+> la de «por nombre nada cambia», la 5 pinta el selector y la 7 recorre los
+> 2.181 códigos reales de `precios-por-lista-AMERICAS.xlsx`).
 
 > **Etiquetas al RECIBIR, con el código del PROVEEDOR**
 > (`utils/codigoProveedor.util.js`, `etiquetas.service` → `lineasDeCompra`,

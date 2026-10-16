@@ -26,6 +26,8 @@ import { getArbol } from '../../api/variantesProductoApi';
 import { useAuth } from '../../context/useAuth';
 import { usePuedeVerCostos } from '../../hooks/usePuedeVerCostos';
 import { useSoloListas } from '../../hooks/useSoloListas';
+import { useCorregirGuiones } from '../../hooks/useCorregirGuiones';
+import { filtrarProductos, elegirConEnter } from '../../utils/buscarProductos';
 import { EditorVariantesNuevas } from '../inventario/EditorVariantesNuevas';
 import { estadoVariantesVacio, armarVariantesPayload, errorVariantes } from '../../utils/variantesNuevas';
 import {
@@ -417,9 +419,13 @@ function FilaProductoCantidad({
           <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
             <Layers size={11} /> Cantidad y precio por variante
           </label>
+          {/* Cada escaneo de una variante de este producto lo vuelve a montar
+              (`key`), para que esa variante quede elegida y con el foco. */}
           <MultiSelectorCompra
+            key={productoSel._escaneo?.n ?? 0}
             hojas={hojas}
             nodosData={productoSel.nodosData || {}}
+            codigoInicial={productoSel._escaneo?.codigo}
             onActualizar={(key, fullData) => onNodosDataChange(key, fullData)}
           />
         </div>
@@ -1063,8 +1069,11 @@ function PasoCantidad({
     enabled:  sucursalLista,
   });
 
-  const productos = normalizarProductos(productosData)
-    .filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+  // Por nombre, por el código del producto o por el de cualquiera de sus
+  // variantes (lo que se pistolea).
+  const corregirGuiones = useCorregirGuiones();
+  const todosProductos = normalizarProductos(productosData);
+  const productos = filtrarProductos(todosProductos, busqueda, { corregir: corregirGuiones })
     .filter((p) => !filtroLineaId || String(p.linea_id) === filtroLineaId);
 
   const mutCrear = useMutation({
@@ -1093,15 +1102,36 @@ function PasoCantidad({
     onError: (e) => setError(e.response?.data?.error || 'Error'),
   });
 
-  const agregarProducto = (producto) => {
-    if (productosSeleccionados.find((p) => p.id === producto.id)) return;
+  // `codigoVariante`: se escaneó el código de una talla. Va en `_escaneo` (no
+  // viaja al backend: las líneas se arman campo por campo) y hace que el
+  // selector de variantes llegue con ella elegida. Si el producto ya estaba en
+  // la compra, escanear otra talla suya la elige ahí mismo.
+  const agregarProducto = (producto, codigoVariante = null) => {
+    if (productosSeleccionados.find((p) => p.id === producto.id)) {
+      if (codigoVariante) {
+        setProductosSeleccionados((prev) => prev.map((p) => (p.id === producto.id
+          ? { ...p, _escaneo: { codigo: codigoVariante, n: (p._escaneo?.n ?? 0) + 1 } }
+          : p)));
+      }
+      return;
+    }
     setProductosSeleccionados((prev) => [...prev, {
       ...producto,
       cantidad_comprada: 1,
       precio_usd:        '',
       precio_compra:     Number(producto.costo_unitario) || 0,
       nodosData:         {},
+      ...(codigoVariante ? { _escaneo: { codigo: codigoVariante, n: 1 } } : {}),
     }]);
+  };
+
+  // El lector escribe el código y manda Enter: se agrega ese producto y el
+  // buscador queda limpio para el siguiente.
+  const handleEnterBusqueda = () => {
+    const elegido = elegirConEnter(todosProductos, productos, busqueda, { corregir: corregirGuiones });
+    if (!elegido) return;
+    agregarProducto(elegido.producto, elegido.codigoVariante);
+    setBusqueda('');
   };
 
   const actualizarCampo = (id, campo, valor) =>
@@ -1161,7 +1191,8 @@ function PasoCantidad({
 
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium text-gray-700">Seleccionar producto</p>
-        <SearchInput value={busqueda} onChange={setBusqueda} placeholder="Buscar producto..." />
+        <SearchInput value={busqueda} onChange={setBusqueda} onEnter={handleEnterBusqueda}
+          placeholder="Buscar producto o escanear código..." />
         <SelectFiltroLinea value={filtroLineaId} onChange={setFiltroLineaId} />
         <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
           {productos.map((p) => {
