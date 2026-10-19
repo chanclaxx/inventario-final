@@ -1,11 +1,11 @@
 const bcrypt       = require('bcryptjs');
 const { pool }     = require('../../config/db');
 const usuariosRepo = require('./usuarios.repository');
-const { PERMISOS_BASE } = require('../../config/modulos');
+const { PERMISOS_BASE, resolverModulos } = require('../../config/modulos');
 const crypto = require('crypto');
 const { enviarRecuperacionPassword } = require('../email/email.service');
 
-const { hayTecnicos } = require('../../config/columnas');
+const { hayTecnicos, hayPermisosReportes } = require('../../config/columnas');
 
 // Solo las cuatro llaves conocidas y solo booleanos: lo demás se descarta, para
 // que un payload raro no termine guardado y leído como permiso.
@@ -23,6 +23,30 @@ const _guardarPermisosTecnicos = async (negocioId, id, rol, permisos) => {
     negocioId, id, rol === 'admin_negocio' ? null : _normalizarPermisosTecnicos(permisos));
 };
 
+// Reportes completos: una sola llave. Se guarda `{ ver_todo: true }` o NULL —
+// nunca `{ ver_todo: false }`: apagado y nunca encendido son lo mismo, y así la
+// lista de usuarios no tiene dos formas de decir «no». Tampoco se guarda sin el
+// módulo «reportes»: la casilla no se ve en ese caso, y una marca huérfana
+// volvería sola el día que alguien le devuelva el módulo.
+const _normalizarPermisosReportes = (p, rol, modulos) => {
+  if (rol === 'admin_negocio') return null;
+  if (!p || typeof p !== 'object' || p.ver_todo !== true) return null;
+  const efectivos = resolverModulos(rol, modulos);
+  if (Array.isArray(efectivos) && !efectivos.includes('reportes')) return null;
+  return { ver_todo: true };
+};
+
+// `permisos === undefined` = el payload no lo trae (un frontend viejo): no se
+// toca lo guardado. Con los módulos sí se recalcula aunque no venga: quitarle
+// el módulo apaga la marca.
+const _guardarPermisosReportes = async (negocioId, id, rol, modulos, permisos, anteriores) => {
+  if (!hayPermisosReportes()) return;
+  const deseado = permisos === undefined ? anteriores : permisos;
+  if (deseado === undefined) return;
+  await usuariosRepo.updatePermisosReportes(
+    negocioId, id, _normalizarPermisosReportes(deseado, rol, modulos));
+};
+
 const getUsuarios = (negocioId) => usuariosRepo.findAll(negocioId);
 
 const getUsuarioById = async (negocioId, id) => {
@@ -33,7 +57,7 @@ const getUsuarioById = async (negocioId, id) => {
 
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
-  permisos_facturas, sucursales_vista, permisos_tecnicos,
+  permisos_facturas, sucursales_vista, permisos_tecnicos, permisos_reportes,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -105,6 +129,7 @@ const crearUsuario = async (negocioId, {
       sucursales_vista:            sucursalesVistaAGuardar,
     });
     await _guardarPermisosTecnicos(negocioId, creado.id, rol, permisos_tecnicos);
+    await _guardarPermisosReportes(negocioId, creado.id, rol, modulosAGuardar, permisos_reportes, undefined);
     return creado;
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -180,6 +205,8 @@ const actualizarUsuario = async (negocioId, id, datos) => {
     sucursales_vista:            sucursalesVistaAGuardar,
   });
   await _guardarPermisosTecnicos(negocioId, id, rolFinal, datos.permisos_tecnicos);
+  await _guardarPermisosReportes(negocioId, id, rolFinal, modulosAGuardar,
+    datos.permisos_reportes, existe.permisos_reportes ?? null);
   return actualizado;
 };
 
@@ -275,6 +302,7 @@ const getActividadUsuarios = (negocioId, filtros) =>
   usuariosRepo.getActividad(negocioId, filtros);
 
 module.exports = {
+  _normalizarPermisosReportes,
   getUsuarios, getUsuarioById, crearUsuario,
   actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,
   resetearPassword, solicitarRecuperacion, getActividadUsuarios,

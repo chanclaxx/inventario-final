@@ -348,8 +348,11 @@ seccion('8. Estática');
   ok('…y si fallara, la pestaña sigue (try/catch con null)', /data\.menos_deuda = null/.test(ctrl));
   ok('el PDF recibe el negocio de la sesión', /negocioId:\s+req\.user\.negocio_id/.test(ctrl));
   const rutas = leer(RAIZ, 'src/modules/reportes/reportes.routes.js');
-  ok('la ruta sigue siendo solo del admin (son costos)',
-    /'\/inventario\/valor'.*requireNivel\('admin_negocio'\)/.test(rutas));
+  // Desde 19-oct-2026 también la ve quien tenga «Ver todos los reportes»
+  // (permisos_reportes, apagado por defecto); la prueba 81 cubre el permiso.
+  ok('la ruta sigue siendo del admin (son costos) o de reportes completos',
+    /'\/inventario\/valor'.*lectura\('admin_negocio'\)/.test(rutas)
+      && /const lectura = requireNivelOReportesCompletos;/.test(rutas));
 
   const svc = leer(RAIZ, 'src/modules/reportes/reportes.service.js');
   const cuerpo = svc.slice(svc.indexOf('const getInventarioMenosDeuda'), svc.indexOf('// ─── getValorInventario'));

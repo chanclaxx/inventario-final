@@ -7,6 +7,7 @@ import {
 import { getAnalisisAsesor } from '../../api/reportes.api';
 import { Spinner } from '../../components/ui/Spinner';
 import useSucursalStore from '../../store/sucursalStore';
+import { useAuth } from '../../context/useAuth';
 import {
   GRUPOS, TABLAS, INDICADORES, SENALES, tablaPorId, columnasDePantalla, formatearCelda,
   esNumerica, ordenarFilas, buscarFilas, contarSenales,
@@ -232,7 +233,11 @@ export function Hallazgos({ hallazgos, onVerTabla }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function PanelAsesor({ desde, hasta }) {
-  const variasSedes = useSucursalStore((s) => s.sucursales.length > 1);
+  // «Todo el negocio» es solo del admin (el backend responde la sede propia a
+  // los demás): quien ve los reportes completos ve los de SU sede.
+  const { esAdminNegocio } = useAuth();
+  const hayVariasSedes = useSucursalStore((s) => s.sucursales.length > 1);
+  const variasSedes = hayVariasSedes && esAdminNegocio();
   const [alcance,    setAlcance]    = useState('sede');
   const [grupo,      setGrupo]      = useState('hallazgos');
   const [exportando, setExportando] = useState(false);

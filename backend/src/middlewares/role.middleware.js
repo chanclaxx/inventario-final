@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { tieneAcceso } = require('../config/modulos');
 
 const JERARQUIA = { admin_negocio: 3, supervisor: 2, vendedor: 1 };
 
@@ -278,4 +279,34 @@ const requirePermisoTecnicos = (accion) => (req, res, next) => {
   return res.status(403).json({ ok: false, error: MENSAJES_TECNICOS[accion] || 'Sin permiso' });
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS };
+/**
+ * Reportes completos — `permisos_reportes.ver_todo`.
+ *
+ * Abre a un supervisor o vendedor TODOS los reportes de lectura que hoy son del
+ * admin (Resumen, Análisis y sus tablas para asesoría, Proyección, Inventario)
+ * y los de supervisor (Ventas, Vendedores, Productos), siempre en SU sede o en
+ * las que tenga de solo lectura: `resolveSucursal` sigue decidiendo cuál.
+ *
+ * El permiso NACE con la feature, así que ausente = "no" — no hay nada que el
+ * rol ya pudiera hacer y que esto pueda quitar: si el rol alcanza, pasa igual
+ * que antes. Exige además el módulo «reportes»: sin él la casilla ni se ve en
+ * Ajustes, y una columna que quedara escrita no puede abrir nada por su cuenta.
+ *
+ * Solo se cuelga de rutas GET. Corregir un costo o editar los gastos fijos
+ * siguen siendo `requireNivel('admin_negocio')`.
+ */
+const puedeVerReportesCompletos = (user) => {
+  if (!user) return false;
+  if (user.rol === 'admin_negocio') return true;
+  if (user.permisos_reportes?.ver_todo !== true) return false;
+  return tieneAcceso(user, 'reportes');
+};
+
+const requireNivelOReportesCompletos = (nivelMinimo) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if ((JERARQUIA[req.user.rol] || 0) >= (JERARQUIA[nivelMinimo] || 0)) return next();
+  if (puedeVerReportesCompletos(req.user)) return next();
+  return res.status(403).json({ ok: false, error: 'No tienes permisos para esta acción' });
+};
+
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS, puedeVerReportesCompletos, requireNivelOReportesCompletos };

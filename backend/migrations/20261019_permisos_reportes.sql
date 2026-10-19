@@ -1,0 +1,25 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- REPORTES COMPLETOS POR USUARIO (19-oct-2026)
+--
+-- Reportes tiene cuatro pestañas que solo ve `admin_negocio` —Resumen,
+-- Análisis (con las tablas para asesoría), Proyección e Inventario— y las
+-- demás piden supervisor. Un dueño que quería que su administrador de tienda
+-- viera la utilidad o el valor del inventario solo podía darle el rol de admin,
+-- que le abre el negocio entero.
+--
+-- `permisos_reportes` es una columna jsonb NULL, igual que las otras de
+-- permisos. Forma:
+--   NULL                    → lo de siempre: manda el rol
+--   { "ver_todo": true }    → ve TODOS los reportes de SU sede (y de las que
+--                             tenga de solo lectura), como los ve el admin
+--
+-- El permiso NACE con la feature y por eso su ausencia es "no": nadie lo tiene
+-- hasta que un admin lo encienda en Ajustes → Usuarios. Aplicar la migración no
+-- le cambia el acceso a nadie.
+--
+-- Solo da LECTURA: corregir costos y editar los gastos fijos siguen siendo del
+-- admin. Y solo cuenta con el módulo «reportes» concedido.
+-- Idempotente.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE IF EXISTS usuarios
+  ADD COLUMN IF NOT EXISTS permisos_reportes JSONB;

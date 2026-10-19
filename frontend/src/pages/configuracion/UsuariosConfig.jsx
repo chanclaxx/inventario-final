@@ -6,7 +6,7 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench, BarChart2 } from 'lucide-react';
 import { LLAVES_TECNICOS, BASE_TECNICOS, permisosEfectivosTecnicos } from '../../utils/permisosTecnicos';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -80,6 +80,7 @@ const FORM_INICIAL = {
   permisos_edicion_productos:  null,
   permisos_facturas:           null,
   permisos_tecnicos:           null,
+  permisos_reportes:           null,
   sucursales_vista:            [],
 };
 
@@ -519,6 +520,49 @@ function SelectorPermisosTecnicos({ permisos, onChange, rol }) {
   );
 }
 
+// ─── SelectorPermisosReportes ─────────────────────────────────────────────────
+//
+// «Ver todos los reportes»: abre las pestañas que hoy son solo del admin
+// (Resumen, Análisis, Proyección, Inventario) y las de supervisor (Ventas,
+// Productos, Vendedores), siempre en la sede del usuario. Apagado por defecto:
+// el permiso nace con la feature, así que nadie lo tiene hasta que se encienda
+// aquí. Solo se muestra con el módulo «Reportes» concedido.
+function SelectorPermisosReportes({ permisos, onChange }) {
+  const verTodo = permisos?.ver_todo === true;
+
+  return (
+    <div className="flex flex-col gap-3 bg-sky-50 border border-sky-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <BarChart2 size={13} className="text-sky-600 flex-shrink-0" />
+        <p className="text-xs font-semibold text-sky-700 uppercase tracking-wide">Reportes</p>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={verTodo}
+          onChange={() => onChange(verTodo ? null : { ver_todo: true })}
+          color="blue"
+        />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-gray-700">Ver todos los reportes, sin restricciones</span>
+          <span className="text-xs text-gray-400">
+            Resumen, Análisis, Proyección e Inventario completo de su sucursal, como los ve el administrador
+          </span>
+        </div>
+      </label>
+      {verTodo ? (
+        <p className="text-xs text-sky-700 bg-white rounded-lg px-3 py-1.5 border border-sky-100">
+          Verá costos, utilidades, el valor del inventario y la deuda con proveedores de su sucursal.
+          No podrá corregir costos ni editar los gastos fijos. Aplica la próxima vez que inicie sesión.
+        </p>
+      ) : (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          Apagado: ve solo los reportes de su rol.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── SelectorSucursalesVista ──────────────────────────────────────────────────
 
 function SelectorSucursalesVista({ sucursalesVista, sucursalHomeId, onChange, sucursales }) {
@@ -690,6 +734,7 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
   const pp  = usuario.permisos_proveedores;
   const pep = usuario.permisos_edicion_productos;
   const pf  = usuario.permisos_facturas;
+  const tieneReportesCompletos = !esAdmin && usuario.permisos_reportes?.ver_todo === true;
   const tienePermProv     = !esAdmin && pp  && (pp.ver || pp.crear);
   const tienePermEditar   = !esAdmin && pep && pep.puede_editar;
   const tienePermExportar = !esAdmin && pep?.puede_exportar === true;
@@ -749,6 +794,12 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
               {[pf.puede_editar && 'Edita', pf.puede_cancelar && 'Cancela'].filter(Boolean).join('+') || 'Sin'} facturas
             </span>
           )}
+          {tieneReportesCompletos && (
+            <span className="text-xs text-sky-600 flex items-center gap-1">
+              <BarChart2 size={10} />
+              Todos los reportes
+            </span>
+          )}
           {!esAdmin && usuario.sucursales_vista?.length > 0 && (
             <span className="text-xs text-amber-600 flex items-center gap-1">
               <Eye size={10} />
@@ -795,6 +846,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           permisos_edicion_productos:  editando.permisos_edicion_productos  ?? null,
           permisos_facturas:           editando.permisos_facturas           ?? null,
           permisos_tecnicos:           editando.permisos_tecnicos           ?? null,
+          permisos_reportes:           editando.permisos_reportes           ?? null,
           sucursales_vista:            editando.sucursales_vista            ?? [],
         }
       : FORM_INICIAL
@@ -816,6 +868,8 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   const mostrarPermFacturas = form.rol !== 'admin_negocio' && tieneModuloFacturar;
   const mostrarPermTecnicos = form.rol !== 'admin_negocio'
     && (modulosEfectivos === null || modulosEfectivos.includes('servicios'));
+  const mostrarPermReportes = form.rol !== 'admin_negocio'
+    && (modulosEfectivos === null || modulosEfectivos.includes('reportes'));
 
   // Lista de proveedores para el selector "ver solo algunos"
   const { data: proveedoresLista = [] } = useQuery({
@@ -836,6 +890,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       // permite un vendedor, así que el objeto del rol anterior mentiría.
       permisos_facturas:    null,
       permisos_tecnicos:    null,
+      permisos_reportes:    null,
       sucursales_vista:     [],
     }));
   };
@@ -850,6 +905,9 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     if (!tieneInv)         set('permisos_edicion_productos', null);
     if (!tieneFact)        set('permisos_facturas', null);
     if (!(modulos === null || modulos.includes('servicios'))) set('permisos_tecnicos', null);
+    // Sin el módulo, la marca se apaga: si no, volvería sola el día que alguien
+    // le devuelva Reportes.
+    if (!(modulos === null || modulos.includes('reportes'))) set('permisos_reportes', null);
   };
 
   const handleGuardar = () => {
@@ -864,6 +922,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       payload.permisos_edicion_productos = null;
       payload.permisos_facturas          = null;
       payload.permisos_tecnicos          = null;
+      payload.permisos_reportes          = null;
       payload.sucursales_vista           = [];
     }
     onGuardar(payload);
@@ -986,6 +1045,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
             permisos={form.permisos_tecnicos}
             onChange={(p) => set('permisos_tecnicos', p)}
             rol={form.rol}
+          />
+        )}
+
+        {/* Reportes completos (solo si el módulo reportes está activo) */}
+        {mostrarPermReportes && (
+          <SelectorPermisosReportes
+            permisos={form.permisos_reportes}
+            onChange={(p) => set('permisos_reportes', p)}
           />
         )}
 

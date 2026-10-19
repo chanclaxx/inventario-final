@@ -30,6 +30,9 @@ const _buildPayload = (usuario) => ({
   permisos_facturas:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_facturas ?? null),
   // Técnicos externos. Misma regla: null = permisos base del rol.
   permisos_tecnicos:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_tecnicos ?? null),
+  // Reportes completos (Ajustes → Usuarios). Nace con la feature: null o
+  // ausente = lo de siempre, manda el rol.
+  permisos_reportes:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_reportes ?? null),
   // IDs de sucursales que el usuario puede ver en modo lectura (no admin)
   sucursales_vista:            usuario.rol === 'admin_negocio' ? null : (usuario.sucursales_vista ?? []),
 });
@@ -49,6 +52,7 @@ const QUERY_USUARIO_BASE = `
     -- to_jsonb: si la migración de técnicos no se aplicó, nombrar la columna
     -- tumbaría el LOGIN de todos. Así sale NULL (= permisos base del rol).
     to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
+    to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
     u.sucursales_vista
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id

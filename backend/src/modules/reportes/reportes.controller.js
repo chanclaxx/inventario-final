@@ -227,10 +227,12 @@ const getValorInventario = async (req, res, next) => {
 // Las tablas para asesoría (Reportes → Análisis). `alcance=negocio` suma todas
 // las sedes ACTIVAS; sin él, la sede de la cabecera. Las sedes salen siempre de
 // la base y del negocio de la sesión: el cliente no manda ids.
+// «Todo el negocio» es solo del admin: un supervisor con los reportes completos
+// ve todo lo de SU sede, nunca las de las otras. Si lo pide, recibe su sede.
 const getAnalisisAsesor = async (req, res, next) => {
   try {
     const { desde, hasta, alcance } = req.query;
-    const todo = alcance === 'negocio';
+    const todo = alcance === 'negocio' && req.user.rol === 'admin_negocio';
     let sucursalIds = [req.sucursal_id];
     if (todo) {
       const { rows } = await pool.query(

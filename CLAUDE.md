@@ -108,6 +108,26 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Prueba: `46-editar-factura-credito` (85 verificaciones; la sección 10 es la de
 > los bloqueos, la 1 que el contado no cambió y la 11 renderiza el PDF de verdad).
 
+> **«Ver todos los reportes» por usuario** (`usuarios.permisos_reportes`,
+> `role.middleware.requireNivelOReportesCompletos` / `puedeVerReportesCompletos`,
+> `AuthContext.puedeVerReportesCompletos`, `20261019_permisos_reportes.sql`;
+> Ajustes → Usuarios, caja «Reportes», visible SOLO con el módulo «reportes»;
+> pedido del usuario, 19-oct-2026). `{ ver_todo: true }` abre a un supervisor o
+> vendedor todas las LECTURAS de Reportes —Resumen (dashboard), Análisis y sus
+> tablas para asesoría, Proyección, Inventario, Ventas, Vendedores, Productos—
+> en SU sede (o las de solo lectura: `resolveSucursal` no cambia). **Nace con
+> la feature: ausente = no**, y si el rol ya alcanzaba pasa igual que antes.
+> Se guarda `{ver_todo:true}` o NULL, nunca `false`, y sin el módulo se guarda
+> NULL. **Solo lectura**: corregir costos (`PATCH /costo-compra`) y los gastos
+> fijos (POST/PATCH/DELETE) siguen `requireNivel('admin_negocio')`, y en
+> pantalla `esAdmin` sigue mandando sobre esos controles (Proyección los pinta
+> en solo lectura). «Todo el negocio» del análisis para asesoría sigue siendo
+> del admin (el controlador responde la sede propia). Va en el JWT: aplica al
+> volver a iniciar sesión. Lectura por `to_jsonb` (sin la columna el login no
+> se cae); escritura solo con `hayPermisosReportes()`.
+> Prueba: `81-permisos-reportes` (165; la sección 1 es la de apagado = lo de
+> siempre, la 3 que no da escritura).
+
 > **«Pagar todo» de un crédito REGISTRA el abono** (`creditos.service.saldarCredito`,
 > `PATCH /creditos/:id/saldar`, botón en `TabCreditos`): antes se llamaba
 > «Saldado» y hacía un `UPDATE estado='Saldado'` a secas —sin abono, sin mirar

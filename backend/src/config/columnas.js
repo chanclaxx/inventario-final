@@ -53,6 +53,7 @@ const detectarColumnas = async () => {
   await _detectarMoraEnvios();
   await _detectarDatosDocumentoSucursal();
   await _detectarArchivosCompra();
+  await _detectarPermisosReportes();
   return _ubicacionDisponible;
 };
 
@@ -549,6 +550,32 @@ const _detectarArchivosCompra = async () => {
 const hayArchivosCompra = () => _archivosCompraDisponible;
 const _setArchivosCompraDisponible = (v) => { _archivosCompraDisponible = !!v; };
 
+// ── Reportes completos por usuario ───────────────────────────────────────────
+//
+// Ver migrations/20261019_permisos_reportes.sql. La LECTURA no depende de esto
+// (login y lista de usuarios van por to_jsonb); la bandera solo decide si el
+// guardado de un usuario escribe la columna. Sin ella el UPDATE tumbaría el
+// guardado entero.
+let _permisosReportesDisponible = false;
+const _detectarPermisosReportes = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'usuarios'
+         AND column_name = 'permisos_reportes'`
+    );
+    _permisosReportesDisponible = rows.length > 0;
+    if (!_permisosReportesDisponible) {
+      console.warn('⚠️  Columna `usuarios.permisos_reportes` ausente: el permiso de reportes completos queda desactivado.');
+    }
+  } catch (err) {
+    _permisosReportesDisponible = false;
+    console.error('⚠️  No se pudo verificar `usuarios.permisos_reportes` (feature desactivada):', err.message);
+  }
+};
+const hayPermisosReportes = () => _permisosReportesDisponible;
+const _setPermisosReportesDisponible = (v) => { _permisosReportesDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -578,4 +605,5 @@ module.exports = {
   hayMoraEnvios, _setMoraEnviosDisponible,
   hayDatosDocumentoSucursal, _setDatosDocumentoSucursalDisponible,
   hayArchivosCompra, _setArchivosCompraDisponible,
+  hayPermisosReportes, _setPermisosReportesDisponible,
 };

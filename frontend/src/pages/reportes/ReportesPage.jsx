@@ -2131,8 +2131,12 @@ export default function ReportesPage() {
   const [desde,     setDesde]     = useState(hoy);
   const [hasta,     setHasta]     = useState(hoy);
 
-  const { esAdminNegocio } = useAuth();
+  const { esAdminNegocio, puedeVerReportesCompletos } = useAuth();
+  // `esAdmin` sigue mandando sobre lo que ESCRIBE (corregir costos, gastos
+  // fijos); `verTodo` abre las pestañas de solo lectura a quien el admin le
+  // encendió «Ver todos los reportes» en Ajustes → Usuarios.
   const esAdmin = esAdminNegocio();
+  const verTodo = puedeVerReportesCompletos();
 
   const { data: dashboard, isLoading: loadingD } = useQuery({
     queryKey: ['dashboard'],
@@ -2146,7 +2150,7 @@ export default function ReportesPage() {
   const vendedoresActivo = config?.vendedores_activo === '1';
 
   const tabsVisibles = TABS.filter((t) => {
-    if (['inventario', 'analisis', 'proyeccion'].includes(t.id)) return esAdmin;
+    if (['inventario', 'analisis', 'proyeccion'].includes(t.id)) return verTodo;
     if (t.id === 'vendedores') return vendedoresActivo;
     return true;
   });
@@ -2171,14 +2175,14 @@ export default function ReportesPage() {
       </div>
 
       {tabActiva === 'resumen'    && <PanelResumen   dashboard={dashboard} loading={loadingD} />}
-      {tabActiva === 'analisis'   && esAdmin && (
+      {tabActiva === 'analisis'   && verTodo && (
         <Suspense fallback={<Spinner className="py-20" />}>
           <PanelAnalisis />
         </Suspense>
       )}
-      {tabActiva === 'proyeccion' && esAdmin && (
+      {tabActiva === 'proyeccion' && verTodo && (
         <Suspense fallback={<Spinner className="py-20" />}>
-          <PanelProyeccion />
+          <PanelProyeccion puedeEditarGastos={esAdmin} />
         </Suspense>
       )}
       {tabActiva === 'vendedores' && vendedoresActivo && (
@@ -2189,7 +2193,7 @@ export default function ReportesPage() {
       {tabActiva === 'ventas'     && <PanelVentas    desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} esAdmin={esAdmin} />}
       {tabActiva === 'productos'  && <PanelProductos desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} />}
       {tabActiva === 'stock'      && <PanelStock />}
-      {tabActiva === 'inventario' && esAdmin && <PanelInventario />}
+      {tabActiva === 'inventario' && verTodo && <PanelInventario />}
     </div>
   );
 }

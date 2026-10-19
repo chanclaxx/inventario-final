@@ -162,6 +162,19 @@ export function AuthProvider({ children }) {
     return usuario?.permisos_edicion_productos?.puede_exportar_global === true;
   };
 
+  // ── Reportes completos ─────────────────────────────────────────────────────
+  //
+  // Espeja `puedeVerReportesCompletos` del backend: el admin siempre; los demás
+  // solo con `permisos_reportes.ver_todo` Y el módulo «reportes». El permiso
+  // nace con la feature, así que ausente = no (un token viejo no lo trae).
+  // Es solo para pintar las pestañas: quien manda es el backend.
+  const puedeVerReportesCompletos = () => {
+    if (usuario?.rol === 'admin_negocio') return true;
+    if (usuario?.permisos_reportes?.ver_todo !== true) return false;
+    const modulos = usuario?.modulos_permitidos;
+    return modulos === null || (Array.isArray(modulos) && modulos.includes('reportes'));
+  };
+
   return (
     <AuthContext.Provider value={{
       usuario,
@@ -178,6 +191,7 @@ export function AuthProvider({ children }) {
       puedeCancelarFacturas,
       puedeExportarInventario,
       puedeExportarInventarioGlobal,
+      puedeVerReportesCompletos,
     }}>
       {children}
     </AuthContext.Provider>

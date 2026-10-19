@@ -556,7 +556,11 @@ seccion('12. Estática');
 
   const rutas = leer(RAIZ, 'src/modules/reportes/reportes.routes.js');
   const linea = rutas.slice(rutas.indexOf("'/analisis/asesor'"), rutas.indexOf('ctrl.getAnalisisAsesor'));
-  ok('★ la ruta es solo de admin_negocio (son costos y márgenes)', /requireNivel\('admin_negocio'\)/.test(linea) && /requireModulo\('reportes'\)/.test(linea));
+  // Desde 19-oct-2026 también la ve quien tenga «Ver todos los reportes»
+  // (apagado por defecto), y solo en SU sede; la prueba 81 cubre el permiso.
+  ok('★ la ruta es de admin_negocio (son costos y márgenes) o de reportes completos',
+    /lectura\('admin_negocio'\)/.test(linea) && /requireModulo\('reportes'\)/.test(linea)
+      && /const lectura = requireNivelOReportesCompletos;/.test(rutas));
   ok('…y valida el rango y el alcance', linea.includes('validarRango') && linea.includes("isIn(['sede', 'negocio'])"));
   const ctrl = leer(RAIZ, 'src/modules/reportes/reportes.controller.js');
   const cuerpo = ctrl.slice(ctrl.indexOf('const getAnalisisAsesor'), ctrl.indexOf('module.exports'));

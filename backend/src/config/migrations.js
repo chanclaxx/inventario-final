@@ -1743,6 +1743,17 @@ const aplicarMigraciones = async (client) => {
       ADD COLUMN IF NOT EXISTS sucursales_extra INTEGER NOT NULL DEFAULT 0;
   `);
 
+  // Reportes completos por usuario (Ajustes → Usuarios). Ver
+  // migrations/20261019_permisos_reportes.sql. Bloque PROPIO: si fallara, el
+  // login y la lista de usuarios leen la columna con to_jsonb (sale NULL = lo
+  // de siempre) y `hayPermisosReportes()` no deja escribirla.
+  //
+  // Sin backticks ni interpolaciones dentro del template literal.
+  await migrar(client, 'Permisos de reportes por usuario', `
+    ALTER TABLE IF EXISTS usuarios
+      ADD COLUMN IF NOT EXISTS permisos_reportes JSONB;
+  `);
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

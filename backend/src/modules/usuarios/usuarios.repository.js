@@ -10,6 +10,7 @@ const findAll = async (negocioId) => {
            -- aplicó, la columna no existe y nombrarla tumbaría la lista de
            -- usuarios entera. Así sale NULL (= permisos base del rol).
            to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
+           to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -29,6 +30,7 @@ const findById = async (negocioId, id) => {
            -- aplicó, la columna no existe y nombrarla tumbaría la lista de
            -- usuarios entera. Así sale NULL (= permisos base del rol).
            to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
+           to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -146,6 +148,15 @@ const update = async (negocioId, id, datos) => {
 const updatePermisosTecnicos = async (negocioId, id, permisos) => {
   await pool.query(
     'UPDATE usuarios SET permisos_tecnicos = $1::jsonb WHERE id = $2 AND negocio_id = $3',
+    [permisos ? JSON.stringify(permisos) : null, id, negocioId]
+  );
+};
+
+// Reportes completos: misma escritura aparte que técnicos, y solo con la
+// columna presente (`hayPermisosReportes()`). `null` = lo de siempre.
+const updatePermisosReportes = async (negocioId, id, permisos) => {
+  await pool.query(
+    'UPDATE usuarios SET permisos_reportes = $1::jsonb WHERE id = $2 AND negocio_id = $3',
     [permisos ? JSON.stringify(permisos) : null, id, negocioId]
   );
 };
@@ -281,7 +292,7 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
 };
 
 module.exports = {
-  updatePermisosTecnicos,
+  updatePermisosTecnicos, updatePermisosReportes,
   findAll, findById, findByEmail,
   create, update, updatePassword,
   crearTokenRecuperacion, findAdminByEmail,

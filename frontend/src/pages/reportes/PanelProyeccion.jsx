@@ -273,7 +273,10 @@ const FilaGastoFijo = ({ gasto, onGuardar, onEliminar, guardando }) => {
   );
 };
 
-const GastosFijosEditor = ({ gastos, total, realesProm }) => {
+// `puedeEditar` en falso = solo lectura: quien ve los reportes completos sin
+// ser admin ve los gastos (entran en la ganancia), pero no los cambia — el
+// backend tampoco se lo permitiría.
+const GastosFijosEditor = ({ gastos, total, realesProm, puedeEditar = true }) => {
   const queryClient = useQueryClient();
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [nuevoValor,  setNuevoValor]  = useState('');
@@ -298,16 +301,26 @@ const GastosFijosEditor = ({ gastos, total, realesProm }) => {
       extra={<span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatCOP(total)}/mes</span>}
     >
       <div className="flex flex-col gap-2">
-        {gastos.map((g) => (
+        {gastos.map((g) => (puedeEditar ? (
           <FilaGastoFijo key={g.id} gasto={g} guardando={guardando}
             onGuardar={(id, p) => mEdit.mutate({ id, ...p })}
             onEliminar={(id) => mDel.mutate(id)} />
-        ))}
+        ) : (
+          <div key={g.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 rounded-xl text-sm">
+            <span className="text-gray-700 truncate">{g.nombre}</span>
+            <span className="font-medium text-gray-800 whitespace-nowrap">{formatCOP(g.valor)}</span>
+          </div>
+        )))}
         {gastos.length === 0 && (
-          <p className="text-xs text-gray-400 py-1">Aún no has agregado gastos. Empieza por el arriendo o la nómina 👇</p>
+          <p className="text-xs text-gray-400 py-1">
+            {puedeEditar
+              ? 'Aún no has agregado gastos. Empieza por el arriendo o la nómina 👇'
+              : 'El administrador aún no ha registrado gastos fijos.'}
+          </p>
         )}
       </div>
 
+      {puedeEditar && (
       <div className="flex items-center gap-2 border-t border-gray-100 pt-3">
         <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && agregar()}
@@ -322,6 +335,11 @@ const GastosFijosEditor = ({ gastos, total, realesProm }) => {
           <Plus size={15} />
         </button>
       </div>
+      )}
+
+      {!puedeEditar && (
+        <p className="text-xs text-gray-400">Solo el administrador puede cambiar los gastos fijos.</p>
+      )}
 
       {realesProm > 0 && (
         <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs text-blue-700">
@@ -336,7 +354,7 @@ const GastosFijosEditor = ({ gastos, total, realesProm }) => {
 // ─────────────────────────────────────────────
 // PANEL PRINCIPAL
 // ─────────────────────────────────────────────
-export default function PanelProyeccion() {
+export default function PanelProyeccion({ puedeEditarGastos = true }) {
   const [meses, setMeses]         = useState('6');
   const [ventasAjuste, setAjuste] = useState(null);   // null = automático
   const [descargando, setDescargando] = useState(false);
@@ -560,7 +578,8 @@ export default function PanelProyeccion() {
           </div>
 
           {/* Gastos fijos */}
-          <GastosFijosEditor gastos={data.gastos_fijos} total={base.gastos_fijos} realesProm={data.gastos_reales_prom} />
+          <GastosFijosEditor gastos={data.gastos_fijos} total={base.gastos_fijos} realesProm={data.gastos_reales_prom}
+            puedeEditar={puedeEditarGastos} />
 
           <p className="text-xs text-gray-400 px-1">
             Esta es una estimación basada en tu propio historial; no es una promesa. Los resultados reales dependen de tus ventas del mes.
