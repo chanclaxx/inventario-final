@@ -54,6 +54,7 @@ const detectarColumnas = async () => {
   await _detectarDatosDocumentoSucursal();
   await _detectarArchivosCompra();
   await _detectarPermisosReportes();
+  await _detectarGastos();
   return _ubicacionDisponible;
 };
 
@@ -576,6 +577,45 @@ const _detectarPermisosReportes = async () => {
 const hayPermisosReportes = () => _permisosReportesDisponible;
 const _setPermisosReportesDisponible = (v) => { _permisosReportesDisponible = !!v; };
 
+// ── Centro de gastos ─────────────────────────────────────────────────────────
+//
+// Ver migrations/20261020_gastos.sql. Dos banderas: las TRES tablas (abren las
+// rutas y dejan que Proyección las nombre) y la columna de permisos de
+// `usuarios` (solo decide si el guardado de un usuario la escribe; la lectura
+// va por to_jsonb). Con media estructura, la feature entera queda apagada.
+const TABLAS_GASTOS = ['categorias_gasto', 'gastos_recurrentes', 'gastos'];
+let _gastosDisponible = false;
+let _permisosGastosDisponible = false;
+const _detectarGastos = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+         AND table_name = ANY($1::text[])`,
+      [TABLAS_GASTOS]
+    );
+    const encontradas = new Set(rows.map((r) => r.table_name));
+    _gastosDisponible = TABLAS_GASTOS.every((t) => encontradas.has(t));
+    const { rows: col } = await pool.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'usuarios'
+         AND column_name = 'permisos_gastos'`
+    );
+    _permisosGastosDisponible = col.length > 0;
+    if (!_gastosDisponible) {
+      console.warn('⚠️  Tablas del centro de gastos ausentes: la feature queda desactivada.');
+    }
+  } catch (err) {
+    _gastosDisponible = false;
+    _permisosGastosDisponible = false;
+    console.error('⚠️  No se pudieron verificar las tablas de gastos (feature desactivada):', err.message);
+  }
+};
+const hayGastos = () => _gastosDisponible;
+const hayPermisosGastos = () => _permisosGastosDisponible;
+const _setGastosDisponible = (v) => { _gastosDisponible = !!v; };
+const _setPermisosGastosDisponible = (v) => { _permisosGastosDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -606,4 +646,5 @@ module.exports = {
   hayDatosDocumentoSucursal, _setDatosDocumentoSucursalDisponible,
   hayArchivosCompra, _setArchivosCompraDisponible,
   hayPermisosReportes, _setPermisosReportesDisponible,
+  hayGastos, _setGastosDisponible, hayPermisosGastos, _setPermisosGastosDisponible,
 };

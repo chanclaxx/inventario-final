@@ -35,7 +35,7 @@ import {
   Printer, Palette, ListChecks, Wallet, Layers,
   ChevronUp, ChevronDown, RotateCcw, Navigation,
   Upload, X, Image as ImageIcon, Download, Barcode, Percent, CalendarClock, Bookmark,
-  MapPin, Bell, Globe, ClipboardList, Wrench,
+  MapPin, Bell, Globe, ClipboardList, Wrench, Receipt,
 } from 'lucide-react';
 
 // ─── Navegación principal ─────────────────────────────────────────────────────
@@ -73,6 +73,7 @@ const TABS_CATALOGO = [
   { id: 'interes',   label: 'Interés',   Icn: Percent    },
   { id: 'borradores', label: 'Borradores', Icn: Bookmark },
   { id: 'tecnicos',  label: 'Técnicos externos', Icn: Wrench },
+  { id: 'gastos',    label: 'Gastos',    Icn: Receipt    },
 ];
 
 // ─── Campos del formulario de venta ──────────────────────────────────────────
@@ -834,6 +835,40 @@ function TecnicosConfig({ valores, set }) {
           {campo('tecnicos_garantia_dias_aviso', 5, 1, 60, 'Avisar de una garantía del técnico que vence dentro de',
             'Si vence hoy, el aviso es urgente.')}
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── Centro de gastos ────────────────────────────────────────────────────────
+// Opt-in: ausente = apagado. Encendido, Reportes gana la pestaña «Gastos» y
+// Proyección resta los gastos de ahí (apagado, Proyección no resta nada).
+function GastosConfig({ valores, set }) {
+  const activo = valores['gastos_activo'] === '1';
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Receipt size={15} className="text-gray-400" />
+        <h3 className="text-sm font-semibold text-gray-700">Centro de gastos</h3>
+      </div>
+      <p className="text-xs text-gray-400 -mt-2">
+        Anota lo que cuesta operar el negocio —arriendo, nómina, servicios, transporte,
+        publicidad— por mes contable, fijos y variables. La mercancía no va aquí: las
+        compras a proveedores ya son el costo de lo vendido. Con los gastos, Reportes
+        muestra la utilidad neta real del mes y Proyección los resta.
+      </p>
+      <Toggle
+        label="Activar el centro de gastos"
+        description="Añade la pestaña Gastos en Reportes"
+        enabled={activo}
+        onChange={(val) => set('gastos_activo', val ? '1' : '0')}
+      />
+      {activo && (
+        <p className="text-xs text-gray-500 bg-gray-50 rounded-xl px-3 py-2">
+          Además del administrador, puedes dejar que otras personas registren gastos desde
+          Equipo → Usuarios (casilla «Puede registrar gastos», con el módulo Reportes).
+          Los gastos fijos que tenías en Proyección ya están ahí como gastos fijos del mes.
+        </p>
       )}
     </div>
   );
@@ -1646,6 +1681,12 @@ function SeccionCatalogo({ valores, set }) {
       {tab === 'tecnicos' && (
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <TecnicosConfig valores={valores} set={set} />
+        </div>
+      )}
+
+      {tab === 'gastos' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <GastosConfig valores={valores} set={set} />
         </div>
       )}
 

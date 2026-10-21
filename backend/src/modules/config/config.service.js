@@ -190,6 +190,8 @@ const getConfig = async (negocioId) => {
   if (!hayUbicacion()) config.ubicacion_activa = '0';
   if (!hayCodigoProveedor()) config[codigoProveedor.CLAVE_CONFIG] = '0';
   if (!hayArchivosCompra()) config[CLAVE_ARCHIVOS_COMPRA] = '0';
+  // Sin las tablas, el centro de gastos no existe aunque la clave diga '1'.
+  if (!require('../../config/columnas').hayGastos()) config.gastos_activo = '0';
   return config;
 };
 
@@ -262,6 +264,16 @@ const saveConfig = async (negocioId, datos) => {
     const v = Number(raw);
     if (!Number.isInteger(v) || v < r.min || v > r.max) {
       throw { status: 400, message: `${r.etiqueta} debe ser un número entero entre ${r.min} y ${r.max}` };
+    }
+  }
+
+  // Centro de gastos (Reportes → Gastos): opt-in, ausente = apagado.
+  if (datosProcesados.gastos_activo !== undefined) {
+    if (!['0', '1'].includes(String(datosProcesados.gastos_activo))) {
+      throw { status: 400, message: 'Gastos solo puede estar encendido (1) o apagado (0)' };
+    }
+    if (String(datosProcesados.gastos_activo) === '1' && !require('../../config/columnas').hayGastos()) {
+      throw { status: 503, message: 'El centro de gastos todavía no está instalado en la base de datos' };
     }
   }
 

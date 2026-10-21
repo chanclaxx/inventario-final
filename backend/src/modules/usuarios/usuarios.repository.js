@@ -11,6 +11,7 @@ const findAll = async (negocioId) => {
            -- usuarios entera. Así sale NULL (= permisos base del rol).
            to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
            to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
+           to_jsonb(u) -> 'permisos_gastos' AS permisos_gastos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -31,6 +32,7 @@ const findById = async (negocioId, id) => {
            -- usuarios entera. Así sale NULL (= permisos base del rol).
            to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
            to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
+           to_jsonb(u) -> 'permisos_gastos' AS permisos_gastos,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -157,6 +159,14 @@ const updatePermisosTecnicos = async (negocioId, id, permisos) => {
 const updatePermisosReportes = async (negocioId, id, permisos) => {
   await pool.query(
     'UPDATE usuarios SET permisos_reportes = $1::jsonb WHERE id = $2 AND negocio_id = $3',
+    [permisos ? JSON.stringify(permisos) : null, id, negocioId]
+  );
+};
+
+// Registrar gastos: misma escritura aparte, solo con `hayPermisosGastos()`.
+const updatePermisosGastos = async (negocioId, id, permisos) => {
+  await pool.query(
+    'UPDATE usuarios SET permisos_gastos = $1::jsonb WHERE id = $2 AND negocio_id = $3',
     [permisos ? JSON.stringify(permisos) : null, id, negocioId]
   );
 };
@@ -292,7 +302,7 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
 };
 
 module.exports = {
-  updatePermisosTecnicos, updatePermisosReportes,
+  updatePermisosTecnicos, updatePermisosReportes, updatePermisosGastos,
   findAll, findById, findByEmail,
   create, update, updatePassword,
   crearTokenRecuperacion, findAdminByEmail,

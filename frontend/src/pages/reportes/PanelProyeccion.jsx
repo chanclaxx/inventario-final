@@ -1,16 +1,15 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts';
 import {
-  Target, Sliders, RotateCcw, Plus, Trash2, Check, Info, Wallet,
+  Target, Sliders, RotateCcw, Info, Wallet,
   FileDown, CheckCircle2, AlertTriangle, TrendingUp,
 } from 'lucide-react';
 import {
-  getProyeccion, crearGastoFijo, actualizarGastoFijo, eliminarGastoFijo,
-  exportarProyeccionPdf, invalidarReportes,
+  getProyeccion, exportarProyeccionPdf,
 } from '../../api/reportes.api';
 import { formatCOP } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
@@ -44,8 +43,8 @@ const labelMesLargo = (periodo) => {
 // Estado (semáforo) en lenguaje llano
 const calcularEstado = ({ gastos, utilNeta, ventas, puntoEq }) => {
   if (gastos === 0) {
-    return { tono: 'blue', titulo: 'Configura tus gastos fijos',
-      mensaje: 'Agrega abajo tus gastos del mes (arriendo, nómina, servicios) para ver tu ganancia real y cuánto necesitas vender para no perder.' };
+    return { tono: 'blue', titulo: 'Registra tus gastos',
+      mensaje: 'Registra tus gastos del mes (arriendo, nómina, servicios) en la pestaña Gastos para ver tu ganancia real y cuánto necesitas vender para no perder.' };
   }
   if (utilNeta < 0) {
     return { tono: 'red', titulo: 'Cuidado, estarías perdiendo',
@@ -204,7 +203,7 @@ const DondeVaCadaPeso = ({ ventas, costo, gastos, utilNeta }) => {
   const queda = Math.max(0, utilNeta);
   const seg = [
     { label: 'Mercancía',    valor: costo,  color: 'bg-amber-400',   chip: 'bg-amber-400' },
-    { label: 'Gastos fijos', valor: gastos, color: 'bg-rose-400',    chip: 'bg-rose-400' },
+    { label: 'Gastos',       valor: gastos, color: 'bg-rose-400',    chip: 'bg-rose-400' },
     { label: 'Te queda',     valor: queda,  color: 'bg-emerald-500', chip: 'bg-emerald-500' },
   ];
   const de100Costo  = Math.round((costo / ventas) * 100);
@@ -232,7 +231,7 @@ const DondeVaCadaPeso = ({ ventas, costo, gastos, utilNeta }) => {
       </div>
       <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs text-gray-600">
         De cada <strong>$100</strong> que vendes: <strong className="text-amber-600">${de100Costo}</strong> se van en mercancía,{' '}
-        <strong className="text-rose-600">${de100Gastos}</strong> en gastos fijos, y
+        <strong className="text-rose-600">${de100Gastos}</strong> en gastos, y
         {de100Queda >= 0
           ? <> te quedan <strong className="text-emerald-600">${de100Queda}</strong> de ganancia.</>
           : <> te faltan <strong className="text-red-600">${Math.abs(de100Queda)}</strong> (estás en pérdida).</>}
@@ -242,103 +241,43 @@ const DondeVaCadaPeso = ({ ventas, costo, gastos, utilNeta }) => {
 };
 
 // ─────────────────────────────────────────────
-// EDITOR DE GASTOS FIJOS
+// GASTOS DEL MES (vienen del centro de gastos)
 // ─────────────────────────────────────────────
-const FilaGastoFijo = ({ gasto, onGuardar, onEliminar, guardando }) => {
-  const [nombre, setNombre] = useState(gasto.nombre);
-  const [valor,  setValor]  = useState(gasto.valor);
-  const dirty  = nombre.trim() !== gasto.nombre || Number(valor) !== gasto.valor;
-  const valido = nombre.trim() !== '' && valor !== '' && !isNaN(Number(valor)) && Number(valor) >= 0;
-
+// Proyección ya no edita gastos: los lee de Reportes → Gastos (los gastos
+// fijos del mes y el promedio de los demás). Apagado el centro de gastos, la
+// proyección no resta nada y aquí se dice cómo encenderlo.
+const GastosDelMes = ({ gastos, total, info, realesProm, onIrAGastos }) => {
+  const apagado = info?.activo === false;
   return (
-    <div className="flex items-center gap-2">
-      <input value={nombre} onChange={(e) => setNombre(e.target.value)}
-        className="flex-1 min-w-0 px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        placeholder="Concepto (arriendo, nómina…)" />
-      <InputMoneda value={valor} onChange={setValor}
-        className="w-32 px-3 py-2 bg-gray-100 rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-        placeholder="0" />
-      {dirty && valido && (
-        <button onClick={() => onGuardar(gasto.id, { nombre: nombre.trim(), valor: Number(valor) })}
-          disabled={guardando} title="Guardar cambios"
-          className="p-2 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors disabled:opacity-50">
-          <Check size={15} />
-        </button>
-      )}
-      <button onClick={() => onEliminar(gasto.id)} disabled={guardando} title="Eliminar"
-        className="p-2 rounded-lg bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600 transition-colors disabled:opacity-50">
-        <Trash2 size={15} />
-      </button>
-    </div>
-  );
-};
-
-// `puedeEditar` en falso = solo lectura: quien ve los reportes completos sin
-// ser admin ve los gastos (entran en la ganancia), pero no los cambia — el
-// backend tampoco se lo permitiría.
-const GastosFijosEditor = ({ gastos, total, realesProm, puedeEditar = true }) => {
-  const queryClient = useQueryClient();
-  const [nuevoNombre, setNuevoNombre] = useState('');
-  const [nuevoValor,  setNuevoValor]  = useState('');
-
-  const onSettled = () => invalidarReportes(queryClient);
-  const mCrear = useMutation({ mutationFn: (p) => crearGastoFijo(p),                    onSuccess: onSettled });
-  const mEdit  = useMutation({ mutationFn: ({ id, ...p }) => actualizarGastoFijo(id, p), onSuccess: onSettled });
-  const mDel   = useMutation({ mutationFn: (id) => eliminarGastoFijo(id),               onSuccess: onSettled });
-  const guardando = mCrear.isPending || mEdit.isPending || mDel.isPending;
-
-  const nuevoValido = nuevoNombre.trim() !== '' && nuevoValor !== '' && !isNaN(Number(nuevoValor)) && Number(nuevoValor) >= 0;
-  const agregar = () => {
-    if (!nuevoValido) return;
-    mCrear.mutate({ nombre: nuevoNombre.trim(), valor: Number(nuevoValor) }, {
-      onSuccess: () => { setNuevoNombre(''); setNuevoValor(''); },
-    });
-  };
-
-  return (
-    <ChartCard titulo="Tus gastos fijos del mes" icon={Wallet} color="text-rose-500"
-      subtitulo="Lo que pagas cada mes vendas o no (arriendo, nómina, servicios). Se restan de tu ganancia."
-      extra={<span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatCOP(total)}/mes</span>}
+    <ChartCard titulo="Tus gastos del mes" icon={Wallet} color="text-rose-500"
+      subtitulo={apagado
+        ? 'La proyección no está restando gastos.'
+        : 'Lo que esperas gastar en el mes, según tu centro de gastos. Se resta de tu ganancia.'}
+      extra={!apagado && <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatCOP(total)}/mes</span>}
     >
-      <div className="flex flex-col gap-2">
-        {gastos.map((g) => (puedeEditar ? (
-          <FilaGastoFijo key={g.id} gasto={g} guardando={guardando}
-            onGuardar={(id, p) => mEdit.mutate({ id, ...p })}
-            onEliminar={(id) => mDel.mutate(id)} />
-        ) : (
-          <div key={g.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 rounded-xl text-sm">
-            <span className="text-gray-700 truncate">{g.nombre}</span>
-            <span className="font-medium text-gray-800 whitespace-nowrap">{formatCOP(g.valor)}</span>
-          </div>
-        )))}
-        {gastos.length === 0 && (
-          <p className="text-xs text-gray-400 py-1">
-            {puedeEditar
-              ? 'Aún no has agregado gastos. Empieza por el arriendo o la nómina 👇'
-              : 'El administrador aún no ha registrado gastos fijos.'}
-          </p>
-        )}
-      </div>
-
-      {puedeEditar && (
-      <div className="flex items-center gap-2 border-t border-gray-100 pt-3">
-        <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && agregar()}
-          className="flex-1 min-w-0 px-3 py-2 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Nuevo gasto (arriendo, nómina…)" />
-        <InputMoneda value={nuevoValor} onChange={setNuevoValor}
-          onKeyDown={(e) => e.key === 'Enter' && agregar()}
-          className="w-32 px-3 py-2 bg-gray-100 rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="0" />
-        <button onClick={agregar} disabled={!nuevoValido || guardando} title="Agregar gasto"
-          className="p-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-          <Plus size={15} />
-        </button>
-      </div>
-      )}
-
-      {!puedeEditar && (
-        <p className="text-xs text-gray-400">Solo el administrador puede cambiar los gastos fijos.</p>
+      {apagado ? (
+        <p className="text-sm text-gray-500">
+          Activa el <strong>centro de gastos</strong> en Ajustes → Catálogo → Gastos y registra ahí
+          tu arriendo, nómina y servicios para ver tu ganancia real y tu punto de equilibrio.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {gastos.map((g) => (
+            <div key={g.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 rounded-xl text-sm">
+              <span className="text-gray-700 truncate">{g.nombre}</span>
+              <span className="font-medium text-gray-800 whitespace-nowrap">{formatCOP(g.valor)}</span>
+            </div>
+          ))}
+          {gastos.length === 0 && (
+            <p className="text-xs text-gray-400 py-1">Todavía no hay gastos registrados en esta sede.</p>
+          )}
+          {onIrAGastos && (
+            <button onClick={onIrAGastos}
+              className="self-start text-xs font-medium text-blue-600 hover:text-blue-800">
+              Ver y registrar gastos →
+            </button>
+          )}
+        </div>
       )}
 
       {realesProm > 0 && (
@@ -354,7 +293,7 @@ const GastosFijosEditor = ({ gastos, total, realesProm, puedeEditar = true }) =>
 // ─────────────────────────────────────────────
 // PANEL PRINCIPAL
 // ─────────────────────────────────────────────
-export default function PanelProyeccion({ puedeEditarGastos = true }) {
+export default function PanelProyeccion({ onIrAGastos }) {
   const [meses, setMeses]         = useState('6');
   const [ventasAjuste, setAjuste] = useState(null);   // null = automático
   const [descargando, setDescargando] = useState(false);
@@ -459,7 +398,7 @@ export default function PanelProyeccion({ puedeEditarGastos = true }) {
             </div>
             <p className={`text-sm leading-relaxed ${tono.text}`}>
               Esperamos que vendas alrededor de <strong>{formatCOP(ventas)}</strong>. Después de pagar la
-              mercancía (<strong>−{formatCOP(costo)}</strong>) y tus gastos fijos (<strong>−{formatCOP(gastos)}</strong>),
+              mercancía (<strong>−{formatCOP(costo)}</strong>) y tus gastos (<strong>−{formatCOP(gastos)}</strong>),
               te quedaría una ganancia de <strong>{formatCOP(utilNeta)}</strong>.
             </p>
             <p className={`text-xs ${tono.sub}`}>{estado.mensaje}</p>
@@ -516,7 +455,7 @@ export default function PanelProyeccion({ puedeEditarGastos = true }) {
               ayuda="Después de costos y gastos" />
             <MetricCard label="Para no perder" valor={puntoEq !== null ? formatCOP(puntoEq) : '—'}
               colorClass="bg-purple-50 text-purple-700"
-              ayuda={puntoEq !== null ? 'Mínimo que debes vender' : 'Agrega tus gastos fijos'} />
+              ayuda={puntoEq !== null ? 'Mínimo que debes vender' : 'Registra tus gastos'} />
             <MetricCard label="De cada $100, te quedan" valor={`$${Math.round(margenContrib > 0 ? (utilNeta / ventas) * 100 : 0)}`}
               colorClass="bg-gray-100 text-gray-700"
               ayuda="Tu margen de ganancia" />
@@ -577,9 +516,9 @@ export default function PanelProyeccion({ puedeEditarGastos = true }) {
               className="w-full sm:w-56 px-3 py-2 bg-gray-100 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
-          {/* Gastos fijos */}
-          <GastosFijosEditor gastos={data.gastos_fijos} total={base.gastos_fijos} realesProm={data.gastos_reales_prom}
-            puedeEditar={puedeEditarGastos} />
+          {/* Gastos del mes (centro de gastos) */}
+          <GastosDelMes gastos={data.gastos_fijos} total={base.gastos_fijos} info={data.gastos}
+            realesProm={data.gastos_reales_prom} onIrAGastos={onIrAGastos} />
 
           <p className="text-xs text-gray-400 px-1">
             Esta es una estimación basada en tu propio historial; no es una promesa. Los resultados reales dependen de tus ventas del mes.

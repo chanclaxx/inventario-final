@@ -6,7 +6,7 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench, BarChart2 } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench, BarChart2, Wallet } from 'lucide-react';
 import { LLAVES_TECNICOS, BASE_TECNICOS, permisosEfectivosTecnicos } from '../../utils/permisosTecnicos';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -81,6 +81,7 @@ const FORM_INICIAL = {
   permisos_facturas:           null,
   permisos_tecnicos:           null,
   permisos_reportes:           null,
+  permisos_gastos:             null,
   sucursales_vista:            [],
 };
 
@@ -88,6 +89,7 @@ const FORM_INICIAL = {
 
 const fetchUsuarios   = () => api.get('/usuarios').then((r)   => r.data.data);
 const fetchSucursales = () => api.get('/sucursales').then((r) => r.data.data);
+const fetchConfig     = () => api.get('/config').then((r) => r.data.data);
 const fetchProveedores = () => api.get('/proveedores').then((r) => {
   const data = r.data.data;
   return Array.isArray(data) ? data : [];
@@ -563,6 +565,41 @@ function SelectorPermisosReportes({ permisos, onChange }) {
   );
 }
 
+// ─── SelectorPermisosGastos ───────────────────────────────────────────────────
+//
+// Registrar gastos en Reportes → Gastos. Es del admin y de quien se autorice
+// aquí. Solo aparece con el módulo «Reportes» y con el centro de gastos
+// encendido en Ajustes. Apagado por defecto.
+function SelectorPermisosGastos({ permisos, onChange }) {
+  const registrar = permisos?.registrar === true;
+  return (
+    <div className="flex flex-col gap-3 bg-emerald-50 border border-emerald-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <Wallet size={13} className="text-emerald-600 flex-shrink-0" />
+        <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Gastos</p>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={registrar}
+          onChange={() => onChange(registrar ? null : { registrar: true })}
+          color="green"
+        />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-gray-700">Puede registrar gastos</span>
+          <span className="text-xs text-gray-400">
+            Anotar los gastos de su sucursal y marcar como pagados los gastos fijos del mes
+          </span>
+        </div>
+      </label>
+      <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+        {registrar
+          ? 'Solo puede editar o anular los gastos que registró. Las categorías y los gastos fijos los maneja el administrador. Aplica la próxima vez que inicie sesión.'
+          : 'Apagado: no puede registrar gastos.'}
+      </p>
+    </div>
+  );
+}
+
 // ─── SelectorSucursalesVista ──────────────────────────────────────────────────
 
 function SelectorSucursalesVista({ sucursalesVista, sucursalHomeId, onChange, sucursales }) {
@@ -735,6 +772,7 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
   const pep = usuario.permisos_edicion_productos;
   const pf  = usuario.permisos_facturas;
   const tieneReportesCompletos = !esAdmin && usuario.permisos_reportes?.ver_todo === true;
+  const registraGastos = !esAdmin && usuario.permisos_gastos?.registrar === true;
   const tienePermProv     = !esAdmin && pp  && (pp.ver || pp.crear);
   const tienePermEditar   = !esAdmin && pep && pep.puede_editar;
   const tienePermExportar = !esAdmin && pep?.puede_exportar === true;
@@ -800,6 +838,12 @@ function FilaUsuario({ usuario, onEditar, onToggleActivo }) {
               Todos los reportes
             </span>
           )}
+          {registraGastos && (
+            <span className="text-xs text-emerald-600 flex items-center gap-1">
+              <Wallet size={10} />
+              Registra gastos
+            </span>
+          )}
           {!esAdmin && usuario.sucursales_vista?.length > 0 && (
             <span className="text-xs text-amber-600 flex items-center gap-1">
               <Eye size={10} />
@@ -847,6 +891,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           permisos_facturas:           editando.permisos_facturas           ?? null,
           permisos_tecnicos:           editando.permisos_tecnicos           ?? null,
           permisos_reportes:           editando.permisos_reportes           ?? null,
+          permisos_gastos:             editando.permisos_gastos             ?? null,
           sucursales_vista:            editando.sucursales_vista            ?? [],
         }
       : FORM_INICIAL
@@ -870,6 +915,9 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     && (modulosEfectivos === null || modulosEfectivos.includes('servicios'));
   const mostrarPermReportes = form.rol !== 'admin_negocio'
     && (modulosEfectivos === null || modulosEfectivos.includes('reportes'));
+  // La casilla de gastos existe solo con el centro de gastos encendido.
+  const { data: config } = useQuery({ queryKey: ['config'], queryFn: fetchConfig, staleTime: 60_000 });
+  const mostrarPermGastos = mostrarPermReportes && config?.gastos_activo === '1';
 
   // Lista de proveedores para el selector "ver solo algunos"
   const { data: proveedoresLista = [] } = useQuery({
@@ -891,6 +939,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       permisos_facturas:    null,
       permisos_tecnicos:    null,
       permisos_reportes:    null,
+      permisos_gastos:      null,
       sucursales_vista:     [],
     }));
   };
@@ -907,7 +956,10 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
     if (!(modulos === null || modulos.includes('servicios'))) set('permisos_tecnicos', null);
     // Sin el módulo, la marca se apaga: si no, volvería sola el día que alguien
     // le devuelva Reportes.
-    if (!(modulos === null || modulos.includes('reportes'))) set('permisos_reportes', null);
+    if (!(modulos === null || modulos.includes('reportes'))) {
+      set('permisos_reportes', null);
+      set('permisos_gastos', null);
+    }
   };
 
   const handleGuardar = () => {
@@ -923,6 +975,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       payload.permisos_facturas          = null;
       payload.permisos_tecnicos          = null;
       payload.permisos_reportes          = null;
+      payload.permisos_gastos            = null;
       payload.sucursales_vista           = [];
     }
     onGuardar(payload);
@@ -1053,6 +1106,14 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           <SelectorPermisosReportes
             permisos={form.permisos_reportes}
             onChange={(p) => set('permisos_reportes', p)}
+          />
+        )}
+
+        {/* Registrar gastos (solo con Reportes y el centro de gastos encendido) */}
+        {mostrarPermGastos && (
+          <SelectorPermisosGastos
+            permisos={form.permisos_gastos}
+            onChange={(p) => set('permisos_gastos', p)}
           />
         )}
 

@@ -20,11 +20,12 @@ import {
   BarChart2, TrendingUp, Package, AlertTriangle,
   ChevronDown, ChevronUp, Info, Pencil, Check, X,
   Warehouse, Handshake, Wrench, CreditCard, LineChart, Users, Target, Truck,
-  Gift, Hourglass,
+  Gift, Hourglass, Receipt,
 } from 'lucide-react';
 const PanelAnalisis   = lazy(() => import('./PanelAnalisis'));
 const PanelVendedores = lazy(() => import('./PanelVendedores'));
 const PanelProyeccion = lazy(() => import('./PanelProyeccion'));
+const PanelGastos     = lazy(() => import('./PanelGastos'));
 
 // ─────────────────────────────────────────────
 // CONSTANTES
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'resumen',    label: 'Resumen',    icon: BarChart2     },
   { id: 'analisis',   label: 'Análisis',   icon: LineChart     },
   { id: 'proyeccion', label: 'Proyección', icon: Target        },
+  { id: 'gastos',     label: 'Gastos',     icon: Receipt       },
   { id: 'vendedores', label: 'Vendedores', icon: Users         },
   { id: 'ventas',     label: 'Ventas',     icon: TrendingUp    },
   { id: 'productos',  label: 'Productos',  icon: Package       },
@@ -2131,7 +2133,7 @@ export default function ReportesPage() {
   const [desde,     setDesde]     = useState(hoy);
   const [hasta,     setHasta]     = useState(hoy);
 
-  const { esAdminNegocio, puedeVerReportesCompletos } = useAuth();
+  const { esAdminNegocio, puedeVerReportesCompletos, puedeVerGastos } = useAuth();
   // `esAdmin` sigue mandando sobre lo que ESCRIBE (corregir costos, gastos
   // fijos); `verTodo` abre las pestañas de solo lectura a quien el admin le
   // encendió «Ver todos los reportes» en Ajustes → Usuarios.
@@ -2148,10 +2150,14 @@ export default function ReportesPage() {
     queryFn: () => getConfig().then((r) => r.data.data),
   });
   const vendedoresActivo = config?.vendedores_activo === '1';
+  // Centro de gastos: opt-in del negocio, y lo ven el admin, quien registra
+  // gastos y quien tiene todos los reportes.
+  const verGastos = config?.gastos_activo === '1' && puedeVerGastos();
 
   const tabsVisibles = TABS.filter((t) => {
     if (['inventario', 'analisis', 'proyeccion'].includes(t.id)) return verTodo;
     if (t.id === 'vendedores') return vendedoresActivo;
+    if (t.id === 'gastos') return verGastos;
     return true;
   });
 
@@ -2182,7 +2188,12 @@ export default function ReportesPage() {
       )}
       {tabActiva === 'proyeccion' && verTodo && (
         <Suspense fallback={<Spinner className="py-20" />}>
-          <PanelProyeccion puedeEditarGastos={esAdmin} />
+          <PanelProyeccion onIrAGastos={verGastos ? () => setTabActiva('gastos') : undefined} />
+        </Suspense>
+      )}
+      {tabActiva === 'gastos' && verGastos && (
+        <Suspense fallback={<Spinner className="py-20" />}>
+          <PanelGastos />
         </Suspense>
       )}
       {tabActiva === 'vendedores' && vendedoresActivo && (

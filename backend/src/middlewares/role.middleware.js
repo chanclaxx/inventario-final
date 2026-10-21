@@ -309,4 +309,21 @@ const requireNivelOReportesCompletos = (nivelMinimo) => (req, res, next) => {
   return res.status(403).json({ ok: false, error: 'No tienes permisos para esta acción' });
 };
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS, puedeVerReportesCompletos, requireNivelOReportesCompletos };
+/**
+ * Centro de gastos — `permisos_gastos.registrar`.
+ *
+ * Registrar gastos es del admin y de quien el admin autorice en Ajustes →
+ * Usuarios (la casilla solo se ve con el módulo «reportes» y la función
+ * encendida). Nace con la feature: ausente = no. VER la pestaña lo puede
+ * además quien tenga «Ver todos los reportes».
+ */
+const puedeRegistrarGastos = (user) => {
+  if (!user) return false;
+  if (user.rol === 'admin_negocio') return true;
+  if (user.permisos_gastos?.registrar !== true) return false;
+  return tieneAcceso(user, 'reportes');
+};
+
+const puedeVerGastos = (user) => puedeRegistrarGastos(user) || puedeVerReportesCompletos(user);
+
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS, puedeVerReportesCompletos, requireNivelOReportesCompletos, puedeRegistrarGastos, puedeVerGastos };

@@ -1754,6 +1754,20 @@ const aplicarMigraciones = async (client) => {
       ADD COLUMN IF NOT EXISTS permisos_reportes JSONB;
   `);
 
+  // Centro de gastos (Reportes → Gastos). Ver migrations/20261020_gastos.sql.
+  // Se lee el mismo archivo. Bloque PROPIO: si fallara, `hayGastos()` queda en
+  // falso, las rutas responden 404 y Proyección sigue sin gastos.
+  {
+    let sqlGastos = null;
+    try {
+      sqlGastos = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261020_gastos.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Gastos: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlGastos) await migrar(client, 'Centro de gastos', sqlGastos);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

@@ -50,6 +50,8 @@ export const REPORT_QUERY_KEYS = [
   'analisis-asesor',
   'proyeccion',
   'gastos-fijos',
+  // Centro de gastos: resumen, lista, estado de resultados y el rango de Análisis.
+  'gastos',
   'valor-inventario',
   'inventario-bajo',
   // Tesorería deriva sus saldos de las mismas transacciones: cualquier

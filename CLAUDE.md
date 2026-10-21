@@ -128,6 +128,49 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > Prueba: `81-permisos-reportes` (165; la sección 1 es la de apagado = lo de
 > siempre, la 3 que no da escritura).
 
+> **Centro de gastos — Reportes → Gastos** (`modules/gastos/`,
+> `20261020_gastos.sql`, `PanelGastos.jsx` + `pages/reportes/gastos/`; opt-in
+> `gastos_activo`, **ausente = apagado**, Ajustes → Catálogo → Gastos; pedido del
+> usuario, 20-oct-2026). Lo que cuesta OPERAR (arriendo, nómina, servicios…);
+> **las compras NO son gasto** (son costo de lo vendido) y no entran. Se agrupa
+> por **MES CONTABLE** (`mes_contable`, día 1; por defecto el mes de la fecha: el
+> arriendo de octubre pagado el 3 de noviembre es de octubre). Cada gasto es
+> **fijo o variable** (lo propone la categoría y se congela en el gasto).
+> Tres tablas: `categorias_gasto` (por negocio, 14 por defecto, se apagan, no se
+> borran), `gastos_recurrentes` (los fijos de cada mes por sede: generan la
+> lista de pendientes; confirmar uno crea su gasto, UNA vez por mes —índice
+> único `(recurrente_id, mes_contable)`, anular lo libera—) y `gastos` (las 18
+> columnas de la tabla del cliente; solo valor y categoría obligatorios; con
+> subtotal, total = subtotal + IVA − retenciones —`gastos.util.calcularValores`,
+> espejo en `gastosUi.totalCalculado`—). **Nada se borra**: se anula con motivo.
+> Clave de idempotencia contra el doble clic.
+> **Proyección ya no tiene gastos propios** (decisión del usuario): lee
+> `gastos.service.estimadoMensual` = recurrentes activos de la sede + promedio de
+> los demás gastos (sin plantilla) en los meses con algo registrado. **Apagado,
+> Proyección no resta nada.** Los `gastos_fijos` viejos se convierten en
+> recurrentes FIJOS en `asegurarCatalogo` (perezoso, idempotente por
+> `origen_gasto_fijo_id`; categoría por el nombre); la tabla vieja y sus rutas no
+> se tocan (un bundle viejo puede seguir escribiendo: se convierte después). Al
+> 20-oct solo los tenían el negocio 4 y Caliwood (35, $16,1 M): con la función
+> apagada su Proyección deja de restarlos hasta que la enciendan. Análisis resta
+> `totalPeriodo` (cada mes contable en proporción a los días del rango).
+> **Estado de resultados** (`/gastos/estado-resultados`): la utilidad bruta es
+> `utilidad_periodo` de `getVentasRango` (NO se recalcula) − gastos del mes
+> contable + mora e interés aparte = utilidad neta; «de cada $100 vendidos».
+> **Permisos**: registrar = admin o `usuarios.permisos_gastos.registrar` (nace
+> con la feature: ausente = no; casilla en Ajustes → Usuarios solo con el módulo
+> «reportes» y la función encendida; `{registrar:true}` o NULL); ver = eso o
+> «Ver todos los reportes»; editar/anular = admin o quien lo registró;
+> categorías y recurrentes = admin; estado de resultados = admin o reportes
+> completos. Todo por la sede de la cabecera. En el mes en curso no se compara
+> contra el promedio hacia abajo (a mitad de mes todo «baja»).
+> Fase 2 pendiente: bandeja de egresos de Caja/Tesorería sin clasificar (581 en
+> producción), «pagado con» que mueva la caja, «lo pago después» → Acreedores,
+> foto del recibo, avisos de vencimiento; fase 3: Excel ida y vuelta con las
+> columnas del cliente, prorrateo entre sedes.
+> Prueba: `82-centro-gastos` (107; la sección 1 es la de apagado, la 2 la
+> conversión, la 11 las rutas reales por HTTP).
+
 > **«Pagar todo» de un crédito REGISTRA el abono** (`creditos.service.saldarCredito`,
 > `PATCH /creditos/:id/saldar`, botón en `TabCreditos`): antes se llamaba
 > «Saldado» y hacía un `UPDATE estado='Saldado'` a secas —sin abono, sin mirar

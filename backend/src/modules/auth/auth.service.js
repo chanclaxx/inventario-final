@@ -33,6 +33,8 @@ const _buildPayload = (usuario) => ({
   // Reportes completos (Ajustes → Usuarios). Nace con la feature: null o
   // ausente = lo de siempre, manda el rol.
   permisos_reportes:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_reportes ?? null),
+  // Registrar gastos (Reportes → Gastos). Nace con la feature: ausente = no.
+  permisos_gastos:             usuario.rol === 'admin_negocio' ? null : (usuario.permisos_gastos ?? null),
   // IDs de sucursales que el usuario puede ver en modo lectura (no admin)
   sucursales_vista:            usuario.rol === 'admin_negocio' ? null : (usuario.sucursales_vista ?? []),
 });
@@ -53,6 +55,7 @@ const QUERY_USUARIO_BASE = `
     -- tumbaría el LOGIN de todos. Así sale NULL (= permisos base del rol).
     to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
     to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
+    to_jsonb(u) -> 'permisos_gastos' AS permisos_gastos,
     u.sucursales_vista
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id

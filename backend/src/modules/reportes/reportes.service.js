@@ -2634,7 +2634,8 @@ const getValorInventario = async (sucursalId, { soloTotales = false } = {}) => {
 //                            (ventas = facturas + despachos a locales)
 //   Costo esperado         = Ventas esperadas × % costo histórico
 //   Utilidad bruta         = Ventas esperadas − Costo esperado
-//   Gastos fijos           = Σ gastos_fijos activos de la sucursal (configurables)
+//   Gastos del mes         = centro de gastos: recurrentes activos de la sede
+//                            + promedio de los demás gastos (gastos.service)
 //   Utilidad neta          = Utilidad bruta − Gastos fijos
 //   Margen contrib.        = Utilidad bruta / Ventas esperadas
 //   Punto equilibrio       = Gastos fijos / Margen contribución (ventas mínimas para no perder)
@@ -2716,16 +2717,15 @@ const getProyeccion = async (sucursalId, meses = 6) => {
   const costoEstimado   = ventasEstimadas * pctCosto;
   const utilidadBruta   = ventasEstimadas - costoEstimado;
 
-  // Gastos fijos configurados (activos) de la sucursal.
-  const { rows: gastosFijos } = await pool.query(
-    `SELECT id, nombre, valor
-     FROM gastos_fijos
-     WHERE sucursal_id = $1 AND activo
-     ORDER BY creado_en ASC, id ASC`,
-    [sucursalId],
-  );
-  const listaGastos     = gastosFijos.map((g) => ({ id: g.id, nombre: g.nombre, valor: Number(g.valor) }));
-  const gastosFijosTotal = listaGastos.reduce((a, g) => a + g.valor, 0);
+  // Los gastos del mes salen del CENTRO DE GASTOS (Reportes → Gastos), no de
+  // la vieja tabla `gastos_fijos`, que se convirtió en sus recurrentes:
+  // recurrentes activos de la sede + el promedio de los demás gastos en los
+  // meses completos de la ventana. Con la función apagada, cero (decisión del
+  // usuario, 20-oct-2026). Import perezoso: gastos.service usa este módulo.
+  const gastosMes = await require('../gastos/gastos.service')
+    .estimadoMensual(sucursalId, rango.desde, rango.hasta);
+  const listaGastos      = gastosMes.lista;
+  const gastosFijosTotal = gastosMes.total;
 
   const utilidadNeta      = utilidadBruta - gastosFijosTotal;
   const margenContribPct  = ventasEstimadas > 0 ? utilidadBruta / ventasEstimadas : 0;
@@ -2796,6 +2796,13 @@ const getProyeccion = async (sucursalId, meses = 6) => {
       punto_equilibrio:        puntoEquilibrio,
     },
     gastos_fijos:       listaGastos,
+    // De dónde salieron los gastos de arriba (el centro de gastos).
+    gastos: {
+      activo:           gastosMes.activo,
+      plantillas_total: gastosMes.plantillas_total,
+      otros_promedio:   gastosMes.otros_promedio,
+      meses_otros:      gastosMes.meses_otros,
+    },
     gastos_reales_prom: gastosRealesProm,
   };
 };

@@ -5,7 +5,7 @@ const { PERMISOS_BASE, resolverModulos } = require('../../config/modulos');
 const crypto = require('crypto');
 const { enviarRecuperacionPassword } = require('../email/email.service');
 
-const { hayTecnicos, hayPermisosReportes } = require('../../config/columnas');
+const { hayTecnicos, hayPermisosReportes, hayPermisosGastos } = require('../../config/columnas');
 
 // Solo las cuatro llaves conocidas y solo booleanos: lo demás se descarta, para
 // que un payload raro no termine guardado y leído como permiso.
@@ -47,6 +47,25 @@ const _guardarPermisosReportes = async (negocioId, id, rol, modulos, permisos, a
     negocioId, id, _normalizarPermisosReportes(deseado, rol, modulos));
 };
 
+// Registrar gastos: misma forma y mismas reglas que los reportes completos —
+// `{ registrar: true }` o NULL, nunca false, y nunca sin el módulo «reportes»
+// (la pestaña Gastos vive dentro de Reportes).
+const _normalizarPermisosGastos = (p, rol, modulos) => {
+  if (rol === 'admin_negocio') return null;
+  if (!p || typeof p !== 'object' || p.registrar !== true) return null;
+  const efectivos = resolverModulos(rol, modulos);
+  if (Array.isArray(efectivos) && !efectivos.includes('reportes')) return null;
+  return { registrar: true };
+};
+
+const _guardarPermisosGastos = async (negocioId, id, rol, modulos, permisos, anteriores) => {
+  if (!hayPermisosGastos()) return;
+  const deseado = permisos === undefined ? anteriores : permisos;
+  if (deseado === undefined) return;
+  await usuariosRepo.updatePermisosGastos(
+    negocioId, id, _normalizarPermisosGastos(deseado, rol, modulos));
+};
+
 const getUsuarios = (negocioId) => usuariosRepo.findAll(negocioId);
 
 const getUsuarioById = async (negocioId, id) => {
@@ -57,7 +76,7 @@ const getUsuarioById = async (negocioId, id) => {
 
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
-  permisos_facturas, sucursales_vista, permisos_tecnicos, permisos_reportes,
+  permisos_facturas, sucursales_vista, permisos_tecnicos, permisos_reportes, permisos_gastos,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -130,6 +149,7 @@ const crearUsuario = async (negocioId, {
     });
     await _guardarPermisosTecnicos(negocioId, creado.id, rol, permisos_tecnicos);
     await _guardarPermisosReportes(negocioId, creado.id, rol, modulosAGuardar, permisos_reportes, undefined);
+    await _guardarPermisosGastos(negocioId, creado.id, rol, modulosAGuardar, permisos_gastos, undefined);
     return creado;
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -207,6 +227,8 @@ const actualizarUsuario = async (negocioId, id, datos) => {
   await _guardarPermisosTecnicos(negocioId, id, rolFinal, datos.permisos_tecnicos);
   await _guardarPermisosReportes(negocioId, id, rolFinal, modulosAGuardar,
     datos.permisos_reportes, existe.permisos_reportes ?? null);
+  await _guardarPermisosGastos(negocioId, id, rolFinal, modulosAGuardar,
+    datos.permisos_gastos, existe.permisos_gastos ?? null);
   return actualizado;
 };
 
@@ -302,7 +324,7 @@ const getActividadUsuarios = (negocioId, filtros) =>
   usuariosRepo.getActividad(negocioId, filtros);
 
 module.exports = {
-  _normalizarPermisosReportes,
+  _normalizarPermisosReportes, _normalizarPermisosGastos,
   getUsuarios, getUsuarioById, crearUsuario,
   actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,
   resetearPassword, solicitarRecuperacion, getActividadUsuarios,

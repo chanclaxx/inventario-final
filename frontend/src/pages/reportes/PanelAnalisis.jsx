@@ -10,7 +10,9 @@ import {
   TrendingUp, PieChart as PieIcon, CreditCard, Package, FileDown,
   Scale, Info, Table2,
 } from 'lucide-react';
-import { getAnalisis, getProductosTop, exportarAnalisisPdf, getGastosFijos } from '../../api/reportes.api';
+import { getAnalisis, getProductosTop, exportarAnalisisPdf } from '../../api/reportes.api';
+import { getGastosPeriodo } from '../../api/gastos.api';
+import { getConfig } from '../../api/config.api';
 import { formatCOP, formatFechaISO, fechaHoyBogota } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -286,9 +288,17 @@ export default function PanelAnalisis() {
     queryFn: () => getProductosTop(desde, hasta).then((r) => r.data.data),
   });
 
-  const { data: gastosFijos } = useQuery({
-    queryKey: ['gastos-fijos'],
-    queryFn: () => getGastosFijos().then((r) => r.data.data),
+  // Los gastos del período salen del centro de gastos (solo si está encendido):
+  // cada mes contable aporta en proporción a los días del rango que caen en él.
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => getConfig().then((r) => r.data.data),
+  });
+  const gastosActivo = config?.gastos_activo === '1';
+  const { data: gastosRango } = useQuery({
+    queryKey: ['gastos', 'periodo', desde, hasta],
+    queryFn: () => getGastosPeriodo(desde, hasta).then((r) => r.data.data),
+    enabled: gastosActivo,
   });
 
   const serie        = analisis?.serie        ?? [];
@@ -296,13 +306,11 @@ export default function PanelAnalisis() {
   const metodosPago  = analisis?.metodos_pago ?? [];
   const unit         = analisis?.agrupacion   ?? 'month';
 
-  // Utilidad neta estimada del período: utilidad bruta − gastos fijos actuales,
-  // prorrateados por los días del período. Es una ESTIMACIÓN (usa los gastos de
-  // hoy), por eso se muestra claramente etiquetada y no altera la serie por mes.
-  const gastosMensual        = (gastosFijos ?? []).reduce((s, g) => s + Number(g.valor), 0);
+  // Utilidad neta del período: utilidad bruta − los gastos REGISTRADOS en el
+  // centro de gastos para esos meses. No altera la serie por mes.
   const utilidadBrutaPeriodo = serie.reduce((s, r) => s + Number(r.utilidad), 0);
   const diasPeriodo          = diasEntre(desde, hasta);
-  const gastosPeriodo        = gastosMensual * (diasPeriodo / 30.44);
+  const gastosPeriodo        = Number(gastosRango?.total || 0);
   const utilidadNetaPeriodo  = utilidadBrutaPeriodo - gastosPeriodo;
 
   return (
@@ -415,12 +423,12 @@ export default function PanelAnalisis() {
               : <GraficaTendencia serie={serie} unit={unit} tipo={tipoGrafica} puntos={puntos} />}
           </ChartCard>
 
-          {/* Utilidad neta estimada del período (usa gastos fijos actuales) */}
-          {gastosMensual > 0 && serie.length > 0 && (
+          {/* Utilidad neta del período (gastos del centro de gastos) */}
+          {gastosActivo && gastosPeriodo > 0 && serie.length > 0 && (
             <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                 <Scale size={15} className="text-emerald-500" />
-                Utilidad neta estimada del período
+                Utilidad neta del período
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="bg-emerald-50 text-emerald-700 rounded-xl p-3">
@@ -428,7 +436,7 @@ export default function PanelAnalisis() {
                   <p className="text-lg font-bold mt-0.5">{formatCOP(utilidadBrutaPeriodo)}</p>
                 </div>
                 <div className="bg-rose-50 text-rose-700 rounded-xl p-3">
-                  <p className="text-xs opacity-70">(−) Gastos fijos (estimado)</p>
+                  <p className="text-xs opacity-70">(−) Gastos del período</p>
                   <p className="text-lg font-bold mt-0.5">{formatCOP(gastosPeriodo)}</p>
                 </div>
                 <div className={`rounded-xl p-3 ${utilidadNetaPeriodo >= 0 ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>
@@ -438,7 +446,7 @@ export default function PanelAnalisis() {
               </div>
               <p className="text-xs text-gray-400 flex items-start gap-1.5">
                 <Info size={12} className="flex-shrink-0 mt-0.5" />
-                Estimado: resta tus gastos fijos actuales ({formatCOP(gastosMensual)}/mes) proporcional a los {diasPeriodo} días del período. No refleja lo que pagabas en meses pasados. Edita tus gastos en la pestaña Proyección.
+                Resta los gastos registrados en la pestaña Gastos: cada mes cuenta en proporción a los días del período ({diasPeriodo}) que caen en él. Un mes con gastos sin anotar sale más alto de lo real.
               </p>
             </div>
           )}

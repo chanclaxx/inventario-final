@@ -510,7 +510,7 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
   // ── Semáforo (estado en lenguaje llano) ────────────────────────────────────
   let estado;
   if (pr.gastos_fijos === 0) {
-    estado = { texto: 'Consejo: agrega tus gastos fijos (arriendo, nómina, servicios) para ver tu ganancia real y cuánto necesitas vender para no perder.', fondo: '#EFF6FF', color: C.azul };
+    estado = { texto: 'Consejo: registra tus gastos (arriendo, nómina, servicios) en Reportes > Gastos para ver tu ganancia real y cuánto necesitas vender para no perder.', fondo: '#EFF6FF', color: C.azul };
   } else if (pr.utilidad_neta < 0) {
     estado = { texto: 'Atención: con este nivel de ventas estarías perdiendo dinero. Necesitas vender más o reducir gastos.', fondo: '#FEF2F2', color: C.rojo };
   } else if (pr.punto_equilibrio !== null && pr.ventas_estimadas < pr.punto_equilibrio * 1.15) {
@@ -528,7 +528,7 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
   y = fila(doc, y, `(-) Mercancía que vendes  (${formatPct(pr.pct_costo * 100)} de la venta)`, `-${formatCOP(pr.costo_estimado)}`, { valorColor: C.rojo });
   hLine(doc, y); y += 6;
   y = fila(doc, y, '= Utilidad bruta', formatCOP(pr.utilidad_bruta), { bold: true });
-  y = fila(doc, y, '(-) Gastos fijos del mes', `-${formatCOP(pr.gastos_fijos)}`, { valorColor: C.rojo });
+  y = fila(doc, y, '(-) Gastos del mes', `-${formatCOP(pr.gastos_fijos)}`, { valorColor: C.rojo });
   hLine(doc, y); y += 6;
   y = fila(doc, y, '= Ganancia esperada (después de todo)', formatCOP(pr.utilidad_neta), { bold: true, valorColor: gananciaColor });
   y += 12;
@@ -539,7 +539,7 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
     y = tituloSeccion(doc, y, 'A dónde va cada peso que vendes');
     y = drawStackedBar(doc, y, [
       { label: 'Mercancía',      valor: pr.costo_estimado,                    color: '#F59E0B' },
-      { label: 'Gastos fijos',   valor: pr.gastos_fijos,                      color: '#F43F5E' },
+      { label: 'Gastos',         valor: pr.gastos_fijos,                      color: '#F43F5E' },
       { label: 'Te queda',       valor: Math.max(0, pr.utilidad_neta),        color: '#10B981' },
     ], pr.ventas_estimadas);
     y += 8;
@@ -576,15 +576,17 @@ const generarReporteProyeccion = async ({ negocio, sucursalNombre, sucursalId, m
 
   // ── Gastos fijos configurados ──────────────────────────────────────────────
   y = ensureSpace(doc, y, 60);
-  y = tituloSeccion(doc, y, 'Tus gastos fijos mensuales');
+  y = tituloSeccion(doc, y, 'Tus gastos del mes');
   if (p.gastos_fijos.length === 0) {
-    y = parrafo(doc, y, 'Todavía no has registrado gastos fijos. Agrégalos en el programa para una proyección más precisa.', { size: 9, color: C.grisClaro });
+    y = parrafo(doc, y, p.gastos && p.gastos.activo === false
+      ? 'El centro de gastos está apagado. Actívalo en Ajustes y registra tus gastos en Reportes > Gastos para una proyección más precisa.'
+      : 'Todavía no has registrado gastos. Agrégalos en Reportes > Gastos para una proyección más precisa.', { size: 9, color: C.grisClaro });
   } else {
     y = drawTable(doc, y, [
       { label: 'Concepto', frac: 0.68, render: (r) => ({ text: r.nombre }) },
       { label: 'Valor mensual', frac: 0.32, align: 'right', render: (r) => ({ text: formatCOP(r.valor) }) },
     ], p.gastos_fijos);
-    y = fila(doc, y, 'Total de gastos fijos', formatCOP(pr.gastos_fijos), { bold: true, valorColor: C.rojo });
+    y = fila(doc, y, 'Total de gastos del mes', formatCOP(pr.gastos_fijos), { bold: true, valorColor: C.rojo });
   }
   y += 6;
   if (p.gastos_reales_prom > 0) {

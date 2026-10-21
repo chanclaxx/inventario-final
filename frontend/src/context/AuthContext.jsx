@@ -175,6 +175,22 @@ export function AuthProvider({ children }) {
     return modulos === null || (Array.isArray(modulos) && modulos.includes('reportes'));
   };
 
+  // ── Centro de gastos ────────────────────────────────────────────────────────
+  // Espeja `puedeRegistrarGastos` / `puedeVerGastos` del backend: registrar es
+  // del admin y de quien tenga `permisos_gastos.registrar` con el módulo
+  // «reportes»; ver, además, de quien tenga los reportes completos. Que la
+  // función esté encendida lo decide la config, no esto.
+  const _tieneReportes = () => {
+    const modulos = usuario?.modulos_permitidos;
+    return modulos === null || (Array.isArray(modulos) && modulos.includes('reportes'));
+  };
+  const puedeRegistrarGastos = () => {
+    if (usuario?.rol === 'admin_negocio') return true;
+    if (usuario?.permisos_gastos?.registrar !== true) return false;
+    return _tieneReportes();
+  };
+  const puedeVerGastos = () => puedeRegistrarGastos() || puedeVerReportesCompletos();
+
   return (
     <AuthContext.Provider value={{
       usuario,
@@ -192,6 +208,8 @@ export function AuthProvider({ children }) {
       puedeExportarInventario,
       puedeExportarInventarioGlobal,
       puedeVerReportesCompletos,
+      puedeRegistrarGastos,
+      puedeVerGastos,
     }}>
       {children}
     </AuthContext.Provider>

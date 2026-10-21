@@ -201,11 +201,14 @@ check("AuthContext exige el módulo 'reportes'", ctx.includes("modulos.includes(
 const pag = leer(path.join(FRONT, 'pages/reportes/ReportesPage.jsx'));
 check('las pestañas de admin miran verTodo', pag.includes("['inventario', 'analisis', 'proyeccion'].includes(t.id)) return verTodo"));
 check('★ corregir costo sigue con esAdmin', pag.includes('<FilaFactura key={factura.id} factura={factura} esAdmin={esAdmin}'));
-check('★ gastos fijos editables solo para el admin', pag.includes('<PanelProyeccion puedeEditarGastos={esAdmin} />'));
+// Desde 20-oct-2026 Proyección no edita gastos (los lee del centro de gastos,
+// suite 82), así que ya no hay controles de escritura que esconder ahí.
+check('★ Proyección no ofrece editar gastos', !/crearGastoFijo|actualizarGastoFijo|eliminarGastoFijo/
+  .test(leer(path.join(FRONT, 'pages/reportes/PanelProyeccion.jsx'))));
 const cfg = leer(path.join(FRONT, 'pages/configuracion/UsuariosConfig.jsx'));
 check("la casilla solo aparece con el módulo 'reportes'", cfg.includes("modulosEfectivos.includes('reportes')") && cfg.includes('mostrarPermReportes && ('));
-check('arranca apagada (FORM_INICIAL null)', /permisos_reportes:\s+null,\n\s+sucursales_vista/.test(cfg));
-check('quitar el módulo la apaga', cfg.includes("if (!(modulos === null || modulos.includes('reportes'))) set('permisos_reportes', null)"));
+check('arranca apagada (FORM_INICIAL null)', /const FORM_INICIAL = \{[^}]*permisos_reportes:\s+null,/.test(cfg));
+check('quitar el módulo la apaga', /if \(!\(modulos === null \|\| modulos\.includes\('reportes'\)\)\) \{?\s*set\('permisos_reportes', null\)/.test(cfg));
 
 console.log(`\n${pasados} verificaciones pasaron, ${fallos} fallaron.`);
 process.exit(fallos ? 1 : 0);

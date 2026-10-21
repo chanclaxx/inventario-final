@@ -23,7 +23,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // El bundle principal ronda los 4,2 MB: con 4 MiB el build FALLA (el
+        // plugin lo trata como error) y el despliegue no sale. Hay que partirlo
+        // con import() algún día; mientras, el tope tiene margen.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // Handlers de notificaciones push (public/push-sw.js). En modo
         // `generateSW` el service worker lo escribe Workbox y no se puede editar
         // a mano; importScripts inyecta nuestro código DENTRO de ese mismo SW
