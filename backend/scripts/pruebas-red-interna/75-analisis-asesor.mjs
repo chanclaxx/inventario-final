@@ -457,8 +457,13 @@ seccion('9. Hallazgos');
 // ═════════════════════════════════════════════════════════════════════════════
 seccion('10. ★ El contrato con la pantalla');
 const defs = await import(pathToFileURL(path.join(FRONT, 'src/pages/reportes/asesor/tablasAsesor.js')).href);
+// Las ventas una a una llegan aparte; la pantalla las mete en `ventas_detalle`.
+const conVentas = async (o) => ({
+  ...(await asesor.getAnalisisAsesor(1, o)),
+  ventas_detalle: await asesor.getVentasDetalle(1, o),
+});
 {
-  const n = await asesor.getAnalisisAsesor(1, { sucursalIds: [1, 2], desde: DESDE, hasta: HASTA, todoElNegocio: true });
+  const n = await conVentas({ sucursalIds: [1, 2], desde: DESDE, hasta: HASTA, todoElNegocio: true });
   const faltan = [];
   for (const t of defs.TABLAS) {
     const filas = (t.filasExcel || t.filas)(n);
@@ -466,7 +471,7 @@ const defs = await import(pathToFileURL(path.join(FRONT, 'src/pages/reportes/ase
     for (const col of t.columnas) if (!(col.clave in filas[0])) faltan.push(`${t.id}.${col.clave}`);
   }
   ok('★ cada columna de cada tabla existe en lo que manda el backend', faltan.length === 0, faltan.join(', '));
-  es('trece tablas', defs.TABLAS.length, 13);
+  es('catorce tablas (con las ventas una a una)', defs.TABLAS.length, 14);
   ok('cada hallazgo lleva a una tabla definida', n.hallazgos.every((h) => defs.tablaPorId(h.tabla)));
   const senalesUsadas = new Set(defs.TABLAS.flatMap((t) => t.filas(n).flatMap((f) => f.senales || [])));
   ok('★ toda señal que manda el backend tiene texto y explicación en la pantalla',
@@ -498,7 +503,7 @@ const defs = await import(pathToFileURL(path.join(FRONT, 'src/pages/reportes/ase
 // ═════════════════════════════════════════════════════════════════════════════
 seccion('11. El Excel, generado de verdad y releído');
 {
-  const n = await asesor.getAnalisisAsesor(1, { sucursalIds: [1, 2], desde: DESDE, hasta: HASTA, todoElNegocio: true });
+  const n = await conVentas({ sucursalIds: [1, 2], desde: DESDE, hasta: HASTA, todoElNegocio: true });
   const excel = await import(pathToFileURL(path.join(FRONT, 'src/utils/exportarAnalisisAsesorExcel.js')).href);
   const X = createRequire(path.join(FRONT, 'package.json'))('xlsx');
   const buf = X.write(excel.construirLibroAsesor(n, { negocio: 'Mío' }), { type: 'buffer', bookType: 'xlsx' });
@@ -506,7 +511,12 @@ seccion('11. El Excel, generado de verdad y releído');
   const celda = (hoja, r, c) => wb.Sheets[hoja][X.utils.encode_cell({ r, c })];
 
   es('la primera hoja es el Resumen', wb.SheetNames[0], 'Resumen');
-  es('…y hay una por tabla con datos (13)', wb.SheetNames.length, 14);
+  es('…y hay una por tabla con datos (14, con «Ventas»)', wb.SheetNames.length, 15);
+  {
+    const tv = defs.tablaPorId('ventas_detalle');
+    es('la hoja Ventas trae TODAS sus columnas', tv.columnas.map((_, c) => celda('Ventas', 4, c)?.v), tv.columnas.map((col) => col.titulo));
+    es('…y una fila por producto vendido', X.utils.decode_range(wb.Sheets.Ventas['!ref']).e.r - 4, n.ventas_detalle.filas.length);
+  }
   ok('el nombre del archivo dice el período y el alcance',
     excel.nombreArchivoAsesor(n) === `analisis-asesoria_${DESDE}_a_${HASTA}_negocio.xlsx`);
 
@@ -550,7 +560,7 @@ seccion('12. Estática');
     && !/costo_unitario FROM variantes_atributo v WHERE v\.id = l\.variante_id/.test(svc));
   ok('el valor del equipo en un local sale del mismo fragmento que la pestaña Inventario', (svc.match(/costoRed\.sqlValorInternoEnStock\(/g) || []).length === 2);
   ok('la deuda sale de acreedores', svc.includes('acreedoresRepo.findSaldosPorProveedor(negocioId)'));
-  ok('toda consulta de ventas lleva el filtro de sede, fecha y no cancelada', (svc.match(/WHERE \$\{FILTRO_VENTA\}/g) || []).length === 4);
+  ok('toda consulta de ventas lleva el filtro de sede, fecha y no cancelada', (svc.match(/WHERE \$\{FILTRO_VENTA\}/g) || []).length === 5);
   ok('toda consulta de compras lleva el suyo', (svc.match(/\$\{FILTRO_COMPRA\}/g) || []).length === 4);
   ok('las sedes se validan contra el negocio dentro del servicio', /WHERE negocio_id = \$1 AND id = ANY\(\$2::int\[\]\)/.test(svc));
 
@@ -574,6 +584,53 @@ seccion('12. Estática');
     && panel.includes("from './asesor/tablasAsesor'"));
   ok('Análisis ofrece las dos vistas', leer(FRONT, 'src/pages/reportes/PanelAnalisis.jsx').includes("label: 'Tablas para asesoría'"));
   ok('una mutación refresca también estas tablas', leer(FRONT, 'src/api/reportes.api.js').includes("'analisis-asesor',"));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('13. Ventas una a una');
+{
+  const v = await asesor.getVentasDetalle(1, { sucursalIds: [1], desde: DESDE, hasta: HASTA });
+  const f = v.filas;
+  const suma = (lista, k) => lista.reduce((s, x) => s + (x[k] ?? 0), 0);
+  const conCosto = f.filter((x) => x.costo !== null);
+  es('★ lo vendido suma lo mismo que el resumen del análisis', suma(f, 'subtotal'), d.resumen.ventas);
+  es('★ las unidades, también', suma(f, 'cantidad'), d.resumen.unidades_vendidas);
+  es('★ la utilidad (solo de lo que tiene costo), también', suma(conCosto, 'utilidad'), d.resumen.utilidad);
+  es('las facturas, también', v.facturas, d.resumen.facturas);
+  es('lo que no tiene costo no trae utilidad ni margen', f.filter((x) => x.costo === null).every((x) => x.utilidad === null && x.margen_pct === null), true);
+  es('…y son las unidades sin costo del resumen', suma(f.filter((x) => x.costo === null), 'cantidad'), d.resumen.unidades_sin_costo);
+  es('una fila por PRODUCTO (la factura de 4 productos son 4 filas)', f.filter((x) => x.cliente === 'Cliente Generico').length, 4);
+  const cable = f.find((x) => x.producto === 'Cable');
+  es('lo devuelto no cuenta, pero se dice', [cable.cantidad, cable.devueltas, cable.subtotal], [20, 2, 200000]);
+  const iphone = f.find((x) => x.imei === '111');
+  es('el crédito y el equipo', [iphone.forma_pago, iphone.tipo, iphone.cliente, iphone.cedula], ['Crédito', 'Equipo', 'Beto', '222']);
+  ok('★ la factura cancelada no sale', !f.some((x) => x.cantidad === 99));
+  ok('★ otra sede del negocio no sale', !f.some((x) => x.sede !== f[0].sede));
+  ok('★ otro negocio no sale', !f.some((x) => x.cliente === 'Intruso'));
+  ok('de la más reciente a la más vieja', f.every((x, i) => i === 0 || f[i - 1].fecha >= x.fecha));
+  ok('fecha con hora', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(f[0].fecha));
+  ok('quién la registró', f.every((x) => x.registro === 'Admin'));
+  const n2 = await asesor.getVentasDetalle(1, { sucursalIds: [1, 2], desde: DESDE, hasta: HASTA });
+  es('con todo el negocio entra la otra sede', n2.filas.length, f.length + 1);
+  const corto = await asesor.getVentasDetalle(1, { sucursalIds: [1], desde: DESDE, hasta: HASTA, tope: 3 });
+  es('★ con tope: las más recientes y lo avisa', [corto.filas.length, corto.truncado, corto.filas[0].fecha], [3, true, f[0].fecha]);
+  es('sin pasar el tope no avisa', v.truncado, false);
+  const e = await asesor.getVentasDetalle(1, { sucursalIds: [3], desde: DESDE, hasta: HASTA }).catch((x) => x);
+  es('★ una sede de otro negocio → 403', e.status, 403);
+  const vacio = await asesor.getVentasDetalle(1, { sucursalIds: [1], desde: '2020-01-01', hasta: '2020-01-31' });
+  es('sin ventas, vacío', [vacio.filas.length, vacio.total, vacio.facturas], [0, 0, 0]);
+
+  const rutas = leer(RAIZ, 'src/modules/reportes/reportes.routes.js');
+  const lin = rutas.slice(rutas.indexOf("'/analisis/asesor/ventas'"), rutas.indexOf('ctrl.getAnalisisAsesorVentas'));
+  ok('★ la ruta pide lo mismo que el análisis (módulo, admin o reportes completos, rango)',
+    /requireModulo\('reportes'\)/.test(lin) && /lectura\('admin_negocio'\)/.test(lin) && lin.includes('validarRango'));
+  const ctrl = leer(RAIZ, 'src/modules/reportes/reportes.controller.js');
+  const cuerpo = ctrl.slice(ctrl.indexOf('const getAnalisisAsesorVentas'), ctrl.indexOf('module.exports'));
+  ok('★ «todo el negocio» solo para el admin, y sin ids de sede del cliente',
+    cuerpo.includes("req.user.rol === 'admin_negocio'") && !/req\.(query|body)\.sucursal/.test(cuerpo));
+  const panel = leer(FRONT, 'src/pages/reportes/PanelAsesor.jsx');
+  ok('la pantalla pide las ventas solo al abrir su pestaña', panel.includes("enabled: grupo === 'ventas'"));
+  ok('…y antes de exportar, para que el Excel las lleve', panel.includes('queryClient.fetchQuery(consultaVentas)'));
 }
 
 console.log(`\n${'─'.repeat(60)}\n${pasados} verificaciones pasaron, ${fallos.length} fallaron`);

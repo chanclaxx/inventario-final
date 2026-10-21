@@ -248,8 +248,27 @@ const getAnalisisAsesor = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Las ventas una a una de las tablas para asesoría: mismo alcance que el
+// análisis («todo el negocio» solo para el admin).
+const getAnalisisAsesorVentas = async (req, res, next) => {
+  try {
+    const { desde, hasta, alcance } = req.query;
+    const todo = alcance === 'negocio' && req.user.rol === 'admin_negocio';
+    let sucursalIds = [req.sucursal_id];
+    if (todo) {
+      const { rows } = await pool.query(
+        'SELECT id FROM sucursales WHERE negocio_id = $1 AND activa = TRUE ORDER BY id',
+        [req.user.negocio_id]
+      );
+      sucursalIds = rows.map((r) => r.id);
+    }
+    const data = await asesor.getVentasDetalle(req.user.negocio_id, { sucursalIds, desde, hasta });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  getAnalisisAsesor,
+  getAnalisisAsesor, getAnalisisAsesorVentas,
   getDashboard, getVentasRango, getAnalisis, exportarPdf, getVentasPorVendedor, getProductosTop,
   getInventarioBajo, actualizarCostoCompra, getValorInventario,
   getProyeccion, exportarProyeccionPdf, listarGastosFijos, crearGastoFijo, actualizarGastoFijo, eliminarGastoFijo,

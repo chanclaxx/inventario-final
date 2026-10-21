@@ -2377,9 +2377,21 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Fuera, a propósito: cumplimiento de órdenes de compra (opt-in y casi sin uso),
 > ventas por vendedor (ya tiene su pestaña) y la mora de la cartera (solo
 > capital).
-> Prueba: `75-analisis-asesor` (165; la sección 1 es la coherencia con las
+> **Ventas una a una** (pestaña y hoja «Ventas», pedido del usuario,
+> 20-oct-2026; `asesor.getVentasDetalle`, `GET /reportes/analisis/asesor/ventas`):
+> una fila por PRODUCTO vendido con factura, cliente, IMEI, cantidad (y
+> devueltas), precio, vendido, costo, utilidad, margen, contado/crédito,
+> medios de pago, quién registró, vendedor, línea (`SQL_LINEA` del reporte por
+> empleado, importada) y obsequio. Mismas reglas que el resto: `FILTRO_VENTA`,
+> cantidades efectivas, `SQL_COSTO_LINEA`, sin costo = sin utilidad. **Llega
+> APARTE** —puede ser miles de filas—: la pantalla la pide al abrir la pestaña
+> (`enabled`) o antes de exportar (`fetchQuery`) y la mete en
+> `datos.ventas_detalle`; tope 20.000 (las más recientes, con aviso). Mismo
+> permiso y alcance que el análisis.
+> Prueba: `75-analisis-asesor` (191; la sección 1 es la coherencia con las
 > pantallas existentes, la 10 —★— el contrato backend↔pantalla, la 11 genera el
-> Excel y lo relee). Se revisó además contra Tesla en solo lectura (transacción
+> Excel y lo relee, la 13 que las ventas una a una suman lo mismo que el
+> resumen). Se revisó además contra Tesla en solo lectura (transacción
 > `READ ONLY` + `ROLLBACK`): inventario y deuda idénticos a las pantallas, ~8 s
 > desde un portátil para 16 consultas.
 

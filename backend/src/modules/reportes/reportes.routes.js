@@ -40,6 +40,11 @@ router.get('/analisis/pdf',     requireModulo('reportes'), lectura('admin_negoci
 router.get('/analisis/asesor',  requireModulo('reportes'), lectura('admin_negocio'),
   [...validarRango, query('alcance').optional().isIn(['sede', 'negocio']).withMessage('Alcance inválido')],
   validate, ctrl.getAnalisisAsesor);
+// Las ventas una a una (una fila por producto vendido), aparte porque pueden
+// ser miles: la pantalla las pide al abrir esa pestaña o al exportar.
+router.get('/analisis/asesor/ventas', requireModulo('reportes'), lectura('admin_negocio'),
+  [...validarRango, query('alcance').optional().isIn(['sede', 'negocio']).withMessage('Alcance inválido')],
+  validate, ctrl.getAnalisisAsesorVentas);
 // Proyección mensual + gastos fijos: verlos, admin o reportes completos;
 // editar los gastos, solo admin_negocio.
 router.get('/proyeccion',       requireModulo('reportes'), lectura('admin_negocio'),

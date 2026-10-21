@@ -3,6 +3,7 @@ const costoRed  = require('../../utils/costoRed.util');
 const obsequios = require('../../utils/obsequios.util');
 const reportes  = require('./reportes.service');
 const acreedoresRepo = require('../acreedores/acreedores.repository');
+const { SQL_LINEA } = require('../prestamos/reporteEmpleado.service');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ANÁLISIS PARA ASESORÍA — las tablas con las que un asesor comercial revisa el
@@ -1161,17 +1162,21 @@ const _hallazgos = (d) => {
  * @param {string}   o.hasta        'YYYY-MM-DD'
  * @param {boolean}  [o.todoElNegocio]
  */
-const getAnalisisAsesor = async (negocioId, { sucursalIds, desde, hasta, todoElNegocio = false }) => {
+// El alcance se valida contra el negocio AQUÍ, no se confía en quien llama:
+// una sede ajena en la lista sería el inventario y las ventas de otro negocio.
+const _sedesDelNegocio = async (negocioId, sucursalIds) => {
   const ids = [...new Set((sucursalIds || []).map(Number).filter((x) => Number.isInteger(x) && x > 0))];
   if (!ids.length) throw { status: 400, message: 'Elige una sede para el análisis' };
-
-  // El alcance se valida contra el negocio AQUÍ, no se confía en quien llama:
-  // una sede ajena en la lista sería el inventario y las ventas de otro negocio.
   const { rows: sedes } = await pool.query(
     'SELECT id, nombre FROM sucursales WHERE negocio_id = $1 AND id = ANY($2::int[]) ORDER BY id',
     [negocioId, ids]
   );
   if (sedes.length !== ids.length) throw { status: 403, message: 'Alguna de las sedes no es de tu negocio' };
+  return sedes;
+};
+
+const getAnalisisAsesor = async (negocioId, { sucursalIds, desde, hasta, todoElNegocio = false }) => {
+  const sedes = await _sedesDelNegocio(negocioId, sucursalIds);
   const sedeIds = sedes.map((s) => Number(s.id));
 
   const { rows: [{ hoy }] } = await pool.query(`SELECT to_char(${HOY_SQL}, 'YYYY-MM-DD') AS hoy`);
@@ -1257,8 +1262,114 @@ const getAnalisisAsesor = async (negocioId, { sucursalIds, desde, hasta, todoElN
   return { ...datos, hallazgos: _hallazgos(datos) };
 };
 
+// ═════════════════════════════════════════════════════════════════════════════
+// VENTAS UNA A UNA — una fila por PRODUCTO vendido (pedido del usuario,
+// 20-oct-2026). Una factura con dos equipos son dos filas, como en el reporte
+// por empleado.
+//
+// Se pide APARTE (`GET /reportes/analisis/asesor/ventas`) y no dentro del
+// análisis: un año de ventas son miles de filas y metidas en la respuesta de
+// siempre harían lenta toda la pestaña aunque nadie las mire. La pantalla las
+// pide al abrir «Ventas una a una» o al exportar el Excel.
+//
+// Mismas reglas que el resto de las tablas: las facturas NO canceladas del
+// rango, por su fecha (`FILTRO_VENTA`); cantidad y subtotal EFECTIVOS (lo
+// devuelto no cuenta, pero la fila sigue y dice cuántas se devolvieron); el
+// costo es `SQL_COSTO_LINEA` y sin costo NO hay utilidad (null, nunca 0); la
+// línea de producto es la regla del reporte por empleado (`SQL_LINEA`). Un
+// obsequio vale 0 y su utilidad es menos su costo, como en Productos.
+// ═════════════════════════════════════════════════════════════════════════════
+const TOPE_VENTAS_DETALLE = 20000;
+
+const _ventasDetalle = async (sedes, desde, hasta, tope) => {
+  const { rows } = await pool.query(`
+    SELECT
+      f.id                                         AS factura_id,
+      COALESCE(f.numero, f.id)                     AS factura,
+      to_char(f.fecha, 'YYYY-MM-DD HH24:MI')       AS fecha,
+      suc.nombre                                   AS sede,
+      f.nombre_cliente, f.cedula, f.celular, f.estado, f.notas,
+      u.nombre                                     AS registro,
+      vd.nombre                                    AS vendedor,
+      pg.medios                                    AS medios_pago,
+      l.nombre_producto,
+      NULLIF(BTRIM(l.imei), '')                    AS imei,
+      ${SQL_LINEA('l', 'f.sucursal_id')}           AS linea,
+      COALESCE(l.cantidad_devuelta, 0)             AS devueltas,
+      l.precio,
+      ${CANT_EFECTIVA}                             AS cantidad,
+      ${SUBTOTAL_EFECTIVO}                         AS subtotal,
+      ${SQL_COSTO_LINEA}                           AS costo,
+      ${obsequios.sqlEsObsequio('l')}              AS obsequio
+    FROM lineas_factura l
+    JOIN facturas f          ON f.id   = l.factura_id
+    JOIN sucursales suc      ON suc.id = f.sucursal_id
+    LEFT JOIN usuarios u     ON u.id   = f.usuario_id
+    LEFT JOIN vendedores vd  ON vd.id  = f.vendedor_id
+    LEFT JOIN LATERAL (
+      SELECT string_agg(DISTINCT pf.metodo, ', ' ORDER BY pf.metodo) AS medios
+        FROM pagos_factura pf
+       WHERE pf.factura_id = f.id
+    ) pg ON TRUE
+    WHERE ${FILTRO_VENTA}
+    ORDER BY f.fecha DESC, f.id DESC, l.id
+    LIMIT $4
+  `, [sedes, desde, hasta, tope + 1]);
+  return rows;
+};
+
+const _filaVenta = (r) => {
+  const subtotal = n0(r.subtotal);
+  const costo = n(r.costo);
+  const utilidad = costo === null ? null : subtotal - costo;
+  return {
+    fecha: r.fecha,
+    factura: String(r.factura),
+    sede: r.sede,
+    cliente: r.nombre_cliente || null,
+    cedula: r.cedula || null,
+    celular: r.celular || null,
+    forma_pago: r.estado === 'Credito' ? 'Crédito' : 'Contado',
+    medios_pago: r.medios_pago || null,
+    registro: r.registro || null,
+    vendedor: r.vendedor || null,
+    producto: r.nombre_producto,
+    linea: r.linea || 'Sin línea',
+    tipo: r.imei ? 'Equipo' : 'Por cantidad',
+    imei: r.imei,
+    cantidad: n0(r.cantidad),
+    devueltas: n0(r.devueltas),
+    precio: n0(r.precio),
+    subtotal,
+    costo,
+    utilidad,
+    margen_pct: utilidad !== null && subtotal > 0 ? r1((utilidad / subtotal) * 100) : null,
+    obsequio: r.obsequio ? 'Obsequio' : null,
+    notas: r.notas || null,
+  };
+};
+
+/**
+ * Las ventas del período, una fila por producto vendido. Mismo alcance que el
+ * análisis (las sedes se validan contra el negocio). Si pasan del tope, se
+ * devuelven las más recientes y `truncado` lo dice.
+ */
+const getVentasDetalle = async (negocioId, { sucursalIds, desde, hasta, tope = TOPE_VENTAS_DETALLE }) => {
+  const sedes = await _sedesDelNegocio(negocioId, sucursalIds);
+  const filas = await _ventasDetalle(sedes.map((s) => Number(s.id)), desde, hasta, tope);
+  const truncado = filas.length > tope;
+  const lista = (truncado ? filas.slice(0, tope) : filas).map(_filaVenta);
+  return {
+    filas: lista,
+    facturas: new Set(lista.map((f) => `${f.sede}|${f.factura}`)).size,
+    total: lista.reduce((s, f) => s + f.subtotal, 0),
+    truncado,
+    tope,
+  };
+};
+
 module.exports = {
-  getAnalisisAsesor, UMBRALES,
+  getAnalisisAsesor, getVentasDetalle, UMBRALES, TOPE_VENTAS_DETALLE,
   // Para la prueba: la aritmética, sin base de datos.
   _armarProductos, _armarPrecios, _armarCartera, _armarClientes, _hallazgos, _esGenerico,
 };

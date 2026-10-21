@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, Eye, Info, FileSpreadsheet, ArrowUp, ArrowDown, ArrowUpDown,
   Search, X, Lightbulb, Table2,
 } from 'lucide-react';
-import { getAnalisisAsesor } from '../../api/reportes.api';
+import { getAnalisisAsesor, getAnalisisAsesorVentas } from '../../api/reportes.api';
+import { formatCOP } from '../../utils/formatters';
 import { Spinner } from '../../components/ui/Spinner';
 import useSucursalStore from '../../store/sucursalStore';
 import { useAuth } from '../../context/useAuth';
@@ -249,6 +250,18 @@ export default function PanelAsesor({ desde, hasta }) {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Las ventas una a una llegan APARTE: pueden ser miles y solo se piden al
+  // abrir su pestaña (o al exportar). Misma clave base que el análisis, así la
+  // MutationCache global también las refresca.
+  const queryClient = useQueryClient();
+  const consultaVentas = {
+    queryKey: ['analisis-asesor', 'ventas', desde, hasta, alcance],
+    queryFn:  () => getAnalisisAsesorVentas(desde, hasta, alcance).then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000,
+  };
+  const ventas = useQuery({ ...consultaVentas, enabled: grupo === 'ventas' });
+  const datos = data ? { ...data, ventas_detalle: ventas.data } : null;
+
   const verTabla = (tabla) => {
     setGrupo(tabla.grupo);
     // La tabla aún no está pintada en este mismo clic: se espera un cuadro.
@@ -260,11 +273,14 @@ export default function PanelAsesor({ desde, hasta }) {
     setExportando(true);
     setErrorExcel('');
     try {
+      // Las ventas una a una se piden ahora si nadie abrió su pestaña: el Excel
+      // las lleva en su propia hoja.
+      const detalle = await queryClient.fetchQuery(consultaVentas);
       // El módulo de Excel pesa: se carga solo cuando alguien exporta.
       const { exportarAnalisisAsesorExcel } = await import('../../utils/exportarAnalisisAsesorExcel');
-      exportarAnalisisAsesorExcel(data);
+      exportarAnalisisAsesorExcel({ ...data, ventas_detalle: detalle });
     } catch {
-      setErrorExcel('No se pudo generar el Excel. Intenta de nuevo.');
+      setErrorExcel('No se pudo generar el Excel. Intenta de nuevo; si el período es muy largo, prueba con uno más corto.');
     } finally {
       setExportando(false);
     }
@@ -272,6 +288,7 @@ export default function PanelAsesor({ desde, hasta }) {
 
   const alertas = data ? data.hallazgos.filter((h) => h.nivel === 'alerta').length : 0;
   const clave   = `${desde}|${hasta}|${alcance}`;
+  const vd      = ventas.data;
 
   return (
     <div className="flex flex-col gap-4">
@@ -350,12 +367,35 @@ export default function PanelAsesor({ desde, hasta }) {
             ))}
           </div>
 
+          {/* Ventas una a una: llegan aparte, con su propia carga y su resumen. */}
+          {grupo === 'ventas' && ventas.isLoading && <Spinner className="py-16" />}
+          {grupo === 'ventas' && ventas.isError && (
+            <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
+              No se pudieron cargar las ventas. Intenta de nuevo; si el período es muy largo, prueba con uno más corto.
+            </div>
+          )}
+          {grupo === 'ventas' && vd && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-gray-500">
+                <strong className="text-gray-800">{vd.filas.length.toLocaleString('es-CO')}</strong> productos vendidos en{' '}
+                <strong className="text-gray-800">{vd.facturas.toLocaleString('es-CO')}</strong> facturas ·{' '}
+                <strong className="text-gray-800">{formatCOP(vd.total)}</strong>
+              </p>
+              {vd.truncado && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  El período tiene más de {vd.tope.toLocaleString('es-CO')} productos vendidos: se muestran los más recientes.
+                  Para verlos todos, acorta el rango de fechas.
+                </p>
+              )}
+            </div>
+          )}
+
           {grupo === 'hallazgos'
             ? <Hallazgos hallazgos={data.hallazgos} onVerTabla={verTabla} />
-            : TABLAS.filter((t) => t.grupo === grupo)
+            : (grupo !== 'ventas' || vd) && TABLAS.filter((t) => t.grupo === grupo)
               // «Por sede» no existe con una sola sede: no se pinta una tabla vacía.
               .filter((t) => t.id !== 'sedes' || data.sedes.length > 1)
-              .map((t) => <TablaAsesor key={`${t.id}|${clave}`} tabla={t} datos={data} />)}
+              .map((t) => <TablaAsesor key={`${t.id}|${clave}`} tabla={t} datos={datos} />)}
         </>
       )}
     </div>

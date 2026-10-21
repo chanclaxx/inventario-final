@@ -546,4 +546,7 @@ module.exports = {
   // Las MISMAS consultas alimentan el reporte por sede (reporteSede.service):
   // si cada uno filtrara a su manera, los dos documentos no cuadrarían.
   consultarLineas: _lineasFactura, consultarPrestamos: _prestamos,
+  // La línea de producto de una línea de factura (también la usa «Ventas una a
+  // una» de las tablas para asesoría): una sola regla para los tres reportes.
+  SQL_LINEA,
 };

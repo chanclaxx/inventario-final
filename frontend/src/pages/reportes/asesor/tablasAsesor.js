@@ -74,6 +74,7 @@ export const GRUPOS = [
   { id: 'proveedores', titulo: 'Proveedores' },
   { id: 'productos',   titulo: 'Productos' },
   { id: 'compras',     titulo: 'Compras y ventas' },
+  { id: 'ventas',      titulo: 'Ventas una a una' },
   { id: 'clientes',    titulo: 'Clientes y cartera' },
   { id: 'inventario',  titulo: 'Equipos en inventario' },
 ];
@@ -317,6 +318,44 @@ export const TABLAS = [
       c('facturas', 'Facturas', 'entero'),
       c('ventas', 'Ventas', 'moneda'),
       c('participacion_pct', '% de las ventas', 'pct'),
+    ],
+  },
+
+  // ── Ventas una a una ───────────────────────────────────────────────────────
+  // Llega APARTE del análisis (`GET /reportes/analisis/asesor/ventas`): la
+  // pantalla la mete en `datos.ventas_detalle` al abrir la pestaña o al
+  // exportar. Sin pedirla, la tabla no tiene filas y el Excel no saca la hoja.
+  {
+    id: 'ventas_detalle', grupo: 'ventas', hoja: 'Ventas',
+    titulo: 'Todas las ventas, una por una',
+    pregunta: '¿Qué se vendió exactamente, a quién, a cuánto y cuánto dejó?',
+    nota: 'Una fila por producto vendido (una factura con dos equipos son dos filas). Facturas no canceladas del período. Lo devuelto no cuenta: la cantidad y el valor son los que quedaron. Sin costo registrado no hay utilidad. Un obsequio vale $0 y su utilidad es menos lo que costó.',
+    filas: (d) => d.ventas_detalle?.filas ?? [],
+    orden: { clave: 'fecha', desc: true },
+    columnas: [
+      c('fecha', 'Fecha', 'fecha'),
+      c('factura', 'Factura'),
+      c('sede', 'Sede', 'texto', xl),
+      c('cliente', 'Cliente'),
+      c('cedula', 'Cédula', 'texto', xl),
+      c('celular', 'Celular', 'texto', xl),
+      c('producto', 'Producto'),
+      c('linea', 'Línea', 'texto', xl),
+      c('tipo', 'Tipo', 'texto', xl),
+      c('imei', 'IMEI'),
+      c('cantidad', 'Cant.', 'entero'),
+      c('devueltas', 'Devueltas', 'entero', xl),
+      c('precio', 'Precio', 'moneda'),
+      c('subtotal', 'Vendido', 'moneda'),
+      c('costo', 'Costo', 'moneda'),
+      c('utilidad', 'Utilidad', 'moneda'),
+      c('margen_pct', 'Margen', 'pct'),
+      c('forma_pago', 'Pago'),
+      c('medios_pago', 'Medios de pago', 'texto', xl),
+      c('registro', 'Registró'),
+      c('vendedor', 'Vendedor', 'texto', xl),
+      c('obsequio', 'Obsequio', 'texto', xl),
+      c('notas', 'Notas de la factura', 'texto', xl),
     ],
   },
 

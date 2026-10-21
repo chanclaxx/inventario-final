@@ -15,6 +15,10 @@ export const getAnalisis = (desde, hasta, agrupacion) =>
 // consultas de agregación y un período largo no cabe en los 30 s globales.
 export const getAnalisisAsesor = (desde, hasta, alcance = 'sede') =>
   api.get('/reportes/analisis/asesor', { params: { desde, hasta, alcance }, timeout: 120000 });
+// Las ventas una a una (una fila por producto vendido). Aparte del análisis
+// porque pueden ser miles: se piden al abrir esa pestaña o al exportar.
+export const getAnalisisAsesorVentas = (desde, hasta, alcance = 'sede') =>
+  api.get('/reportes/analisis/asesor/ventas', { params: { desde, hasta, alcance }, timeout: 120000 });
 export const getProyeccion = (meses) =>
   api.get('/reportes/proyeccion', { params: { meses } });
 export const exportarProyeccionPdf = (meses) =>
