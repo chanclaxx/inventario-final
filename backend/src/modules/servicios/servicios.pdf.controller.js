@@ -50,7 +50,8 @@ const getPdfRecepcion = async (req, res, next) => {
     // El encabezado es el de la sucursal de la orden, si tiene datos propios.
     const config = await configDocumento(negocioId, orden.sucursal_id, configNegocio);
 
-    generarPdfRecepcion({ orden, config, res });
+    const abonos = await repo.getAbonos(negocioId, id);
+    generarPdfRecepcion({ orden, abonos, config, res });
   } catch (err) {
     next(err);
   }

@@ -1798,6 +1798,21 @@ const aplicarMigraciones = async (client) => {
     if (sqlFase2) await migrar(client, 'Garantías con proveedores (fase 2)', sqlFase2);
   }
 
+  // Servicio técnico: abonos en cualquier etapa (devoluciones, anulación, ciclo)
+  // y el técnico interno que reparó. Ver
+  // migrations/20261025_servicio_abonos_tecnicos.sql. Bloque PROPIO: si fallara,
+  // Servicios sigue como siempre (`hayServicioAbonosV2()` / `hayTecnicosServicio()`).
+  {
+    let sqlServicio = null;
+    try {
+      sqlServicio = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261025_servicio_abonos_tecnicos.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Servicio técnico (abonos/técnicos): no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlServicio) await migrar(client, 'Servicio técnico: abonos y técnicos', sqlServicio);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

@@ -2,14 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import { createPortal } from 'react-dom';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
+import { precioCiclo, pagosVigentes } from '../utils/servicioCobro';
 
 // ─── Contenido de impresión ───────────────────────────────────────────────────
 
 function ContenidoComprobante({ orden, config, garantias }) {
   const precioFinal  = Number(orden.precio_final || 0);
   const totalAbonado = Number(orden.total_abonado || 0);
-  const saldo        = precioFinal - totalAbonado;
-  const abonos       = Array.isArray(orden.abonos) ? orden.abonos : [];
+  // El saldo es el del ciclo VIGENTE: en una garantía cobrable, contra su precio.
+  const saldo        = Math.max(0, (precioCiclo(orden) ?? precioFinal) - totalAbonado);
+  const abonos       = pagosVigentes(orden, Array.isArray(orden.abonos) ? orden.abonos : []);
   const precioGarantia = Number(orden.precio_garantia || 0);
   const tieneGarantia  = precioGarantia > 0;
 
@@ -99,8 +101,8 @@ function ContenidoComprobante({ orden, config, garantias }) {
           <div className="negrita">PAGOS REALIZADOS</div>
           {abonos.map((ab, i) => (
             <div key={ab.id || i} className="cs-fila">
-              <span>{ab.metodo} · {formatFechaHora(ab.fecha)}</span>
-              <span>{formatCOP(Number(ab.valor))}</span>
+              <span>{ab.tipo === 'devolucion' ? `Devolución (${ab.metodo})` : ab.metodo} · {formatFechaHora(ab.fecha)}</span>
+              <span>{ab.tipo === 'devolucion' ? '- ' : ''}{formatCOP(Number(ab.valor))}</span>
             </div>
           ))}
           <div className="cs-divisor" />

@@ -159,6 +159,21 @@ const CONFIG_GRUPOS = {
     };
   },
 },
+  // Servicio técnico: lo que se le DEVUELVE al cliente (el precio final quedó
+  // por debajo de lo abonado, o el equipo salió sin reparar con anticipo).
+  devolucionesServicio: {
+    icono:      Wrench,
+    color:      'red',
+    bgHeader:   'bg-amber-50',
+    textHeader: 'text-amber-700',
+    borderColor:'border-amber-100',
+    renderItem: (item) => ({
+      descripcion: ['Devolución', item.orden_id ? `#OS-${String(item.orden_numero ?? item.orden_id).padStart(4, '0')}` : '',
+        item.cliente_nombre || ''].filter(Boolean).join(' — '),
+      detalle:     item.metodo || null,
+      fecha:       item.fecha,
+    }),
+  },
   // Técnicos externos (Servicios → Técnicos): lo que se le paga a un técnico
   // SALE; lo que él devuelve de un anticipo ENTRA.
   pagosTecnico: {
@@ -750,6 +765,9 @@ function _buildItemsPorMetodo(grupos) {
   (grupos.abonosAcreedor?.items || []).forEach((item) =>
     add(item, `Abono a ${item.acreedor || 'Acreedor'}`, 'Egreso')
   );
+  (grupos.devolucionesServicio?.items || []).forEach((item) =>
+    add(item, `Devolución servicio #OS-${String(item.orden_numero ?? item.orden_id).padStart(4, '0')} — ${item.cliente_nombre || ''}`, 'Egreso')
+  );
   (grupos.pagosTecnico?.items || []).forEach((item) =>
     add(item, `${item.tipo === 'Anticipo' ? 'Anticipo' : 'Pago'} a ${item.tecnico_nombre || 'técnico'}`, 'Egreso')
   );
@@ -900,7 +918,7 @@ function ResumenGrupos({ grupos, cajaId, opciones, readOnly = false }) {
   const has = (keys) => keys.some((k) => g[k]?.items?.length > 0);
   const ingresoKeys = ['facturas', 'abonosCredito', 'abonosPrestamo', 'abonosServicio', 'abonosDomicilio', 'devolucionesTecnico'];
   // Retomas NO van en egresos: los pagos de factura ya vienen netos de retoma
-  const egresoKeys  = ['devoluciones', 'compras', 'abonosAcreedor', 'pagosTecnico'];
+  const egresoKeys  = ['devoluciones', 'devolucionesServicio', 'compras', 'abonosAcreedor', 'pagosTecnico'];
   const hayNada = Object.values(g).every((x) => !x?.items?.length);
 
   if (hayNada) return <EmptyState icon={Wallet} titulo="Sin movimientos" />;
@@ -1267,6 +1285,7 @@ export default function CajaPage() {
 
                 <p className="text-xs text-gray-400 font-medium px-1 mt-1">Egresos</p>
                 <GrupoMovimientos grupoKey="devoluciones"   grupo={grupos.devoluciones   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
+                <GrupoMovimientos grupoKey="devolucionesServicio" grupo={grupos.devolucionesServicio || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="compras"        grupo={grupos.compras        || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="abonosAcreedor" grupo={grupos.abonosAcreedor || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />
                 <GrupoMovimientos grupoKey="pagosTecnico"   grupo={grupos.pagosTecnico   || { items: [] }} cajaId={caja.id} opciones={opcionesGrupo} />

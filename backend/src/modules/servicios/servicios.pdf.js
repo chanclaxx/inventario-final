@@ -318,11 +318,25 @@ function seccionMotivo(doc, orden, y) {
 
 // ─── SECCIÓN: Totales y Pagos ─────────────────────────────────────────────────
 
-function seccionTotalesYPagos(doc, orden, abonos, y) {
-  const esGarantia  = orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia;
-  const totalCobro  = esGarantia
-    ? Number(orden.precio_garantia)
-    : Number(orden.precio_final || 0);
+/**
+ * Los pagos que cuentan en lo abonado de la orden: sin anulados y solo del
+ * ciclo vigente (al abrir una garantía cobrable lo abonado vuelve a 0). Los
+ * abonos anteriores a 20261025 no tienen ciclo y se muestran como siempre.
+ */
+const pagosVigentes = (orden, abonos) => abonos.filter((ab) => !ab.anulado
+  && (ab.ciclo === null || ab.ciclo === undefined || orden.ciclo === null || orden.ciclo === undefined
+    || Number(ab.ciclo) === Number(orden.ciclo)));
+
+function seccionTotalesYPagos(doc, orden, abonosTodos, y) {
+  // El precio del ciclo vigente lo calcula el repositorio (`precio_ciclo`): en
+  // una garantía cobrable es el de la garantía, aunque ya esté en «Listo».
+  const esGarantia  = orden.en_garantia === true
+    ? !!orden.garantia_cobrable
+    : orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia;
+  const totalCobro  = orden.precio_ciclo !== undefined && orden.precio_ciclo !== null
+    ? Number(orden.precio_ciclo)
+    : esGarantia ? Number(orden.precio_garantia) : Number(orden.precio_final || 0);
+  const abonos = pagosVigentes(orden, abonosTodos);
 
   if (totalCobro <= 0 && abonos.length === 0) return y;
 
@@ -353,12 +367,17 @@ function seccionTotalesYPagos(doc, orden, abonos, y) {
       if (i > 0) {
         hLine(doc, yPago - 4, { x1: MARGIN + 14, x2: PAGE_W - MARGIN - 14, color: C.grisBorde, width: 0.4 });
       }
-      const etiqueta = ab.metodo ? `${ab.metodo}` : 'Pago';
+      const devolucion = ab.tipo === 'devolucion';
+      const etiqueta = devolucion
+        ? `Devolución${ab.metodo ? ` (${ab.metodo})` : ''}`
+        : ab.metodo ? `${ab.metodo}` : 'Pago';
       const fecha    = ab.fecha ? ` · ${formatFechaHora(ab.fecha)}` : '';
       doc.font(FONT.normal).fontSize(8.5).fillColor(C.grisOscuro)
         .text(etiqueta + fecha, MARGIN + 14, yPago, { width: CONTENT_W * 0.6, lineBreak: false });
-      doc.font(FONT.bold).fontSize(8.5).fillColor(C.negro)
-        .text(formatCOP(ab.valor), MARGIN, yPago, { width: CONTENT_W - 14, align: 'right', lineBreak: false });
+      // Guion ASCII: Helvetica no tiene el menos tipográfico (sale como comillas).
+      doc.font(FONT.bold).fontSize(8.5).fillColor(devolucion ? C.naranja : C.negro)
+        .text(`${devolucion ? '- ' : ''}${formatCOP(ab.valor)}`, MARGIN, yPago,
+          { width: CONTENT_W - 14, align: 'right', lineBreak: false });
       yPago += 22;
     }
 
@@ -584,11 +603,34 @@ function seccionCostoEstimado(doc, orden, y) {
 }
 
 /**
+ * Lo que el cliente dejó al entregar el equipo (o después, si se reimprime): el
+ * papel tiene que decirlo, o el cliente pagó la mitad y su recibo no lo prueba.
+ */
+function seccionAbonosRecepcion(doc, orden, abonosTodos, y) {
+  const abonos = pagosVigentes(orden, abonosTodos).filter((ab) => ab.tipo !== 'devolucion');
+  const total = Number(orden.total_abonado || 0);
+  if (!abonos.length || total <= 0) return y;
+
+  y = labelSeccion(doc, y, 'Abonos recibidos');
+  for (const ab of abonos) {
+    y = fila(doc, y, `${ab.metodo || 'Pago'} · ${formatFechaHora(ab.fecha)}`, formatCOP(ab.valor));
+  }
+  y = fila(doc, y, 'Total abonado', formatCOP(total), { valorFont: FONT.bold, valorColor: C.verde });
+  const estimado = Number(orden.costo_estimado || 0);
+  if (estimado > 0) {
+    y = fila(doc, y, 'Saldo según el estimado', formatCOP(Math.max(0, estimado - total)), {
+      valorFont: FONT.bold, valorColor: C.negro,
+    });
+  }
+  return y + 12;
+}
+
+/**
  * Genera el PDF del recibo de recepción de una orden de servicio.
  *
- * @param {{ orden: object, config: object, res: object }} params
+ * @param {{ orden: object, abonos?: Array, config: object, res: object }} params
  */
-function generarPdfRecepcion({ orden, config = {}, res }) {
+function generarPdfRecepcion({ orden, abonos = [], config = {}, res }) {
   const numOS = String(orden.numero ?? orden.id).padStart(4, '0');
 
   res.setHeader('Content-Type', 'application/pdf');
@@ -618,6 +660,7 @@ function generarPdfRecepcion({ orden, config = {}, res }) {
   y = seccionEquipo(doc, orden, y);
   y = seccionDiagnostico(doc, orden, y);
   y = seccionCostoEstimado(doc, orden, y);
+  y = seccionAbonosRecepcion(doc, orden, abonos, y);
   y = seccionAvisoImportante(doc, y);
 
   // Línea de firma
@@ -637,4 +680,4 @@ function generarPdfRecepcion({ orden, config = {}, res }) {
   doc.end();
 }
 
-module.exports = { generarPdfServicio, generarPdfRecepcion };
+module.exports = { generarPdfServicio, generarPdfRecepcion, pagosVigentes };

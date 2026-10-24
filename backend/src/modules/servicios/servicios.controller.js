@@ -46,7 +46,7 @@ const crearOrden = async (req, res, next) => {
 
 const enReparacion = async (req, res, next) => {
   try {
-    const data = await service.enReparacion(req.user.negocio_id, req.params.id);
+    const data = await service.enReparacion(req.user.negocio_id, req.params.id, req.body || {});
     audit.registrar(req.user.negocio_id, req.user.id, 'Orden pasada a reparación', 'servicios', Number(req.params.id), {
       sucursal_id: data.sucursal_id ?? null,
       cliente:     data.nombre_cliente ?? null,
@@ -58,7 +58,7 @@ const enReparacion = async (req, res, next) => {
 
 const marcarListo = async (req, res, next) => {
   try {
-    const data = await service.marcarListo(req.user.negocio_id, req.params.id, req.body);
+    const data = await service.marcarListo(req.user.negocio_id, req.params.id, { ...req.body, usuario_id: req.user.id });
     audit.registrar(req.user.negocio_id, req.user.id, 'Orden lista para entrega', 'servicios', Number(req.params.id), {
       sucursal_id: data.sucursal_id ?? null,
     });
@@ -75,9 +75,59 @@ const registrarAbono = async (req, res, next) => {
     });
     audit.registrar(req.user.negocio_id, req.user.id, 'Abono a servicio', 'servicios', Number(req.params.id), {
       sucursal_id: data.sucursal_id ?? null,
-      monto:       Number(req.body.monto ?? 0),
+      monto:       Number(req.body.valor ?? 0),
+      metodo:      req.body.metodo ?? null,
     });
     res.json({ ok: true, data, message: 'Abono registrado correctamente' });
+  } catch (err) { next(err); }
+};
+
+const anularAbono = async (req, res, next) => {
+  try {
+    const data = await service.anularAbono(req.user.negocio_id, req.params.id, req.params.abonoId, {
+      motivo: req.body?.motivo, usuarioId: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Abono de servicio anulado', 'servicios', Number(req.params.id), {
+      sucursal_id: data.orden?.sucursal_id ?? null,
+      abono_id:    Number(req.params.abonoId),
+      valor:       Number(data.abono?.valor ?? 0),
+      motivo:      req.body?.motivo ?? null,
+    });
+    res.json({ ok: true, data, message: 'Abono anulado' });
+  } catch (err) { next(err); }
+};
+
+const asignarTecnico = async (req, res, next) => {
+  try {
+    const data = await service.asignarTecnico(req.user.negocio_id, req.params.id, req.body?.tecnico_id ?? null);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+// ─── Técnicos internos ───────────────────────────────────────────────────────
+
+const getTecnicos = async (req, res, next) => {
+  try {
+    const sucursalId = req.todasSucursales ? null : req.sucursal_id;
+    const data = await service.getTecnicos(req.user.negocio_id, {
+      sucursalId, todos: req.query.todos === '1',
+    });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const crearTecnico = async (req, res, next) => {
+  try {
+    const data = await service.crearTecnico(req.user.negocio_id, req.body || {});
+    audit.registrar(req.user.negocio_id, req.user.id, 'Técnico de servicio creado', 'servicios', data.id, { nombre: data.nombre });
+    res.status(201).json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const actualizarTecnico = async (req, res, next) => {
+  try {
+    const data = await service.actualizarTecnico(req.user.negocio_id, Number(req.params.tecnicoId), req.body || {});
+    res.json({ ok: true, data });
   } catch (err) { next(err); }
 };
 
@@ -137,6 +187,7 @@ const actualizarNotas = async (req, res, next) => {
 module.exports = {
   getOrdenes, getOrdenById, getResumenHoy,
   crearOrden, enReparacion, marcarListo,
-  registrarAbono, entregar, sinReparar,
+  registrarAbono, anularAbono, asignarTecnico, entregar, sinReparar,
   abrirGarantia, actualizarNotas,
+  getTecnicos, crearTecnico, actualizarTecnico,
 };

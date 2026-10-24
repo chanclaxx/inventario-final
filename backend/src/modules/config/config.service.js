@@ -194,6 +194,8 @@ const getConfig = async (negocioId) => {
   if (!require('../../config/columnas').hayGastos()) config.gastos_activo = '0';
   // Lo mismo con las garantías con proveedores.
   if (!require('../../config/columnas').hayReclamosGarantia()) config.reclamos_garantia_activo = '0';
+  // Y con la lista de técnicos internos de servicio técnico.
+  if (!require('../../config/columnas').hayTecnicosServicio()) config.servicios_tecnicos_activo = '0';
   return config;
 };
 
@@ -299,6 +301,17 @@ const saveConfig = async (negocioId, datos) => {
       if (!Number.isInteger(v) || v < r.min || v > r.max) {
         throw { status: 400, message: `${r.etiqueta} debe ser un número entero entre ${r.min} y ${r.max} días` };
       }
+    }
+  }
+
+  // Técnicos internos de servicio técnico (quién reparó cada orden).
+  if (datosProcesados.servicios_tecnicos_activo !== undefined) {
+    if (!['0', '1'].includes(String(datosProcesados.servicios_tecnicos_activo))) {
+      throw { status: 400, message: 'La lista de técnicos solo puede estar encendida (1) o apagada (0)' };
+    }
+    if (String(datosProcesados.servicios_tecnicos_activo) === '1'
+        && !require('../../config/columnas').hayTecnicosServicio()) {
+      throw { status: 400, message: 'Falta la actualización de la base para la lista de técnicos' };
     }
   }
 

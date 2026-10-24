@@ -57,6 +57,7 @@ const detectarColumnas = async () => {
   await _detectarGastos();
   await _detectarReclamosGarantia();
   await _detectarReclamosFase2();
+  await _detectarServicioV2();
   return _ubicacionDisponible;
 };
 
@@ -680,6 +681,41 @@ const hayPermisosGarantias = () => _permisosGarantiasDisponible;
 const _setReclamosGarantiaDisponible = (v) => { _reclamosGarantiaDisponible = !!v; };
 const _setPermisosGarantiasDisponible = (v) => { _permisosGarantiasDisponible = !!v; };
 
+// ── Servicio técnico: abonos en cualquier etapa y técnicos internos ─────────
+//
+// Ver migrations/20261025_servicio_abonos_tecnicos.sql. Dos banderas: las
+// columnas nuevas de los abonos y de la orden (las leen la caja, tesorería y el
+// propio módulo en cada abono) y la tabla de técnicos. Sin las columnas todo
+// emite el SQL de siempre: la caja del día no puede caerse por esta feature.
+let _servicioAbonosV2Disponible = false;
+let _tecnicosServicioDisponible = false;
+const _detectarServicioV2 = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'abonos_servicio'
+             AND column_name IN ('tipo', 'etapa', 'ciclo', 'anulado', 'anulado_motivo', 'anulado_por', 'anulado_en'))::int AS abonos,
+         (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'ordenes_servicio'
+             AND column_name IN ('ciclo', 'tecnico_id'))::int AS orden,
+         EXISTS (SELECT 1 FROM information_schema.tables
+                 WHERE table_schema = 'public' AND table_name = 'tecnicos_servicio') AS tecnicos`
+    );
+    const r = rows[0] || {};
+    _servicioAbonosV2Disponible = r.abonos === 7 && r.orden === 2;
+    _tecnicosServicioDisponible = _servicioAbonosV2Disponible && !!r.tecnicos;
+  } catch (err) {
+    _servicioAbonosV2Disponible = false;
+    _tecnicosServicioDisponible = false;
+    console.error('⚠️  No se pudo verificar servicio técnico v2 (queda como antes):', err.message);
+  }
+};
+const hayServicioAbonosV2 = () => _servicioAbonosV2Disponible;
+const hayTecnicosServicio = () => _tecnicosServicioDisponible;
+const _setServicioAbonosV2Disponible = (v) => { _servicioAbonosV2Disponible = !!v; };
+const _setTecnicosServicioDisponible = (v) => { _tecnicosServicioDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -714,4 +750,6 @@ module.exports = {
   hayReclamosGarantia, _setReclamosGarantiaDisponible,
   hayReclamosFase2, _setReclamosFase2Disponible,
   hayPermisosGarantias, _setPermisosGarantiasDisponible,
+  hayServicioAbonosV2, _setServicioAbonosV2Disponible,
+  hayTecnicosServicio, _setTecnicosServicioDisponible,
 };

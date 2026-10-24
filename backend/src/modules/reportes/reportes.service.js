@@ -375,7 +375,65 @@ const _getCarteraVencida = async (sucursalId) => {
 
 // ─── getServiciosRango ────────────────────────────────────────────────────────
 
+// Quién reparó cada orden: el técnico interno (lista opt-in de Servicios) o el
+// externo que devolvió el equipo reparado. Sin la feature, nada se nombra.
+const _sqlTecnicoOrden = () => {
+  const tecnicosSrv = require('../servicios/servicios.tecnicos');
+  const { hayTecnicosServicio } = require('../../config/columnas');
+  return {
+    cols: hayTecnicosServicio()
+      ? `, os.tecnico_id, ts.nombre AS tecnico_nombre, ${tecnicosSrv.sqlTecnicoExterno('os')} AS tecnico_externo`
+      : `, NULL::int AS tecnico_id, NULL::text AS tecnico_nombre, ${tecnicosSrv.sqlTecnicoExterno('os')} AS tecnico_externo`,
+    join: hayTecnicosServicio() ? 'LEFT JOIN tecnicos_servicio ts ON ts.id = os.tecnico_id' : '',
+  };
+};
+
+/**
+ * La tabla «Por técnico» del reporte de servicios. Se arma con las MISMAS filas
+ * (y las mismas cifras por orden) que el resto del reporte, así que suma lo
+ * mismo. Una orden es UNA fila aunque haya vuelto por garantía: si volvió por
+ * una garantía GRATIS (la misma falla), además cuenta como REPROCESO del
+ * técnico —la cifra que dice quién repara bien—, sin sacarla de lo entregado.
+ */
+const porTecnico = (cerrados, activos = []) => {
+  const grupos = new Map();
+  const clave = (o) => (o.tecnico_id ? `i${o.tecnico_id}`
+    : o.tecnico_externo ? `e${o.tecnico_externo}` : 'sin');
+  const grupo = (o) => {
+    const k = clave(o);
+    if (!grupos.has(k)) {
+      grupos.set(k, {
+        clave: k,
+        tecnico_id: o.tecnico_id || null,
+        nombre: o.tecnico_nombre || o.tecnico_externo || null,
+        externo: !o.tecnico_id && !!o.tecnico_externo,
+        entregadas: 0, sin_reparar: 0, reprocesos: 0, en_curso: 0,
+        ingresos: 0, costo: 0, utilidad: 0, sin_costo: 0, _dias: [],
+      });
+    }
+    return grupos.get(k);
+  };
+  for (const o of cerrados) {
+    const g = grupo(o);
+    if (o.es_garantia_gratis) g.reprocesos += 1;
+    if (o.categoria === 'diagnostico') g.sin_reparar += 1; else g.entregadas += 1;
+    g.ingresos += Number(o.ingresos || 0);
+    g.costo += Number(o.costo || 0);
+    if (o.utilidad === null || o.utilidad === undefined) {
+      if (o.categoria !== 'diagnostico') g.sin_costo += 1;
+    } else g.utilidad += Number(o.utilidad);
+    if (o.dias_reparacion !== null && o.dias_reparacion !== undefined) g._dias.push(Number(o.dias_reparacion));
+  }
+  for (const a of activos) grupo(a).en_curso += Number(a.cantidad || 0);
+  return [...grupos.values()].map(({ _dias, ...g }) => ({
+    ...g,
+    dias_promedio: _dias.length ? Math.round((_dias.reduce((s, d) => s + d, 0) / _dias.length) * 10) / 10 : null,
+  })).sort((a, b) => (a.clave === 'sin') - (b.clave === 'sin') || b.entregadas - a.entregadas || b.ingresos - a.ingresos);
+};
+
 const getServiciosRango = async (sucursalId, desde, hasta) => {
+  const tec = _sqlTecnicoOrden();
+  const { SQL_SALDO } = require('../servicios/servicios.repository');
 
   const { rows: cerradosRaw } = await pool.query(`
     SELECT
@@ -384,31 +442,37 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
       os.falla_reportada, os.notas_tecnico, os.motivo_sin_reparar,
       os.precio_final, os.costo_real, os.total_abonado,
       os.precio_garantia, os.costo_garantia, os.garantia_cobrable,
-      os.fecha_recepcion, os.fecha_entrega
+      os.fecha_recepcion, os.fecha_entrega,
+      (os.precio_garantia IS NOT NULL AND NOT os.garantia_cobrable) AS es_garantia_gratis,
+      (os.fecha_entrega::date - os.fecha_recepcion::date) AS dias_reparacion
+      ${tec.cols}
     FROM ordenes_servicio os
+    ${tec.join}
     WHERE os.sucursal_id = $1
       AND os.estado IN ('Entregado', 'Pendiente_pago', 'Sin_reparar')
       AND ${fechaBogota('os.fecha_entrega')} BETWEEN $2 AND $3
     ORDER BY os.fecha_entrega DESC
   `, [sucursalId, desde, hasta]);
 
+  // Saldo con la MISMA regla que la tarjeta de Servicios (servicios.repository):
+  // en una garantía cobrable se mide contra el precio de la garantía.
   const { rows: activosResumen } = await pool.query(`
     SELECT
       os.estado,
       COUNT(*)::int AS cantidad,
-      COALESCE(SUM(
-        CASE
-          WHEN os.estado = 'Garantia' AND os.garantia_cobrable AND os.precio_garantia IS NOT NULL
-          THEN os.precio_garantia - os.total_abonado
-          WHEN os.estado IN ('Listo', 'Pendiente_pago')
-          THEN COALESCE(os.precio_final, 0) - os.total_abonado
-          ELSE 0
-        END
-      ), 0) AS saldo_pendiente
+      COALESCE(SUM(${SQL_SALDO('os')}), 0) AS saldo_pendiente
     FROM ordenes_servicio os
     WHERE os.sucursal_id = $1
       AND os.estado IN ('Recibido', 'En_reparacion', 'Listo', 'Garantia')
     GROUP BY os.estado
+  `, [sucursalId]);
+  const { rows: activosTecnico } = await pool.query(`
+    SELECT COUNT(*)::int AS cantidad ${tec.cols}
+    FROM ordenes_servicio os
+    ${tec.join}
+    WHERE os.sucursal_id = $1
+      AND os.estado IN ('Recibido', 'En_reparacion', 'Listo', 'Garantia')
+    GROUP BY 2, 3, 4
   `, [sucursalId]);
 
   const cerrados = cerradosRaw.map((os) => {
@@ -467,6 +531,12 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
       saldo_pendiente:    saldoPendiente > 0 ? saldoPendiente : 0,
       fecha_recepcion:    os.fecha_recepcion,
       fecha_entrega:      os.fecha_entrega,
+      tecnico_id:         os.tecnico_id ?? null,
+      tecnico_nombre:     os.tecnico_nombre ?? null,
+      tecnico_externo:    os.tecnico_externo ?? null,
+      es_garantia_gratis: !!os.es_garantia_gratis,
+      dias_reparacion:    os.dias_reparacion === null || os.dias_reparacion === undefined
+        ? null : Number(os.dias_reparacion),
     };
   });
 
@@ -504,6 +574,11 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
       saldo_pendiente: saldoTotalActivos,
       por_estado:      activosPorEstado,
     },
+    // Solo si hay a quién atribuir algo: un negocio sin técnicos no ve la tabla.
+    por_tecnico: (() => {
+      const filas = porTecnico(cerrados, activosTecnico);
+      return filas.some((f) => f.clave !== 'sin') ? filas : null;
+    })(),
   };
 };
 
@@ -2901,7 +2976,7 @@ module.exports = {
   // Lo expone la prueba 57; la pantalla lo recibe dentro de getVentasRango.
   getObsequiosRango,
   getMoraRango,
-  getServiciosRango,
+  getServiciosRango, porTecnicoServicio: porTecnico,
   getAnalisis,
   getProyeccion,
   getVentasPorVendedor,

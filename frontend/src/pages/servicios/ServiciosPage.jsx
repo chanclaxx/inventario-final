@@ -5,8 +5,13 @@ import {
   getOrdenes, getOrdenById, getResumenHoy,
   crearOrden, marcarEnReparacion, marcarListo,
   registrarAbono, entregarOrden, sinReparar,
-  abrirGarantia,
+  abrirGarantia, anularAbonoServicio, asignarTecnicoOrden,
 } from '../../api/servicios.api';
+import {
+  precioCiclo, saldoCiclo, puedeAbonar, devolucionAlFijarPrecio, cuentaSinReparar,
+} from '../../utils/servicioCobro';
+import { SelectorMetodo, SelectorTecnico } from './cobro/piezasServicio';
+import { useTecnicosServicio, nombreTecnico } from './cobro/tecnicosServicio';
 import { buscarPorCedula, crearCliente, getFrecuentes, agregarFrecuente } from '../../api/clientes.api';
 import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
 import { ModalConflictoCedula }        from '../../components/ui/ModalConflictoCedula';
@@ -38,7 +43,7 @@ import {
   Wrench, Plus, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle, RefreshCw,
   ChevronDown, ChevronUp, User, Clock, Lock,
-  Loader2, Printer, Star, Search, X,
+  Loader2, Printer, Star, Search, X, HardHat, Ban,
 } from 'lucide-react';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -143,6 +148,11 @@ function CardOrden({ orden, onAccion, esAdmin = false, conTecnicos = false }) {
             <span className="flex items-center gap-1 text-xs text-gray-400">
               <Clock size={10} /> {formatFechaHora(orden.fecha_recepcion)}
             </span>
+            {nombreTecnico(orden) && (
+              <span className="flex items-center gap-1 text-xs text-gray-500">
+                <HardHat size={10} /> {nombreTecnico(orden)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -157,6 +167,12 @@ function CardOrden({ orden, onAccion, esAdmin = false, conTecnicos = false }) {
           }
           {saldo > 0 && ['Listo','Pendiente_pago','Garantia'].includes(orden.estado) && (
             <span className="text-xs font-semibold text-red-500">{formatCOP(saldo)}</span>
+          )}
+          {/* Todavía sin precio: lo que el cliente ya dejó. */}
+          {precioCiclo(orden) === null && Number(orden.total_abonado) > 0 && (
+            <span className="text-xs font-semibold text-green-600">
+              Abonó {formatCOP(Number(orden.total_abonado))}
+            </span>
           )}
           <button onClick={() => setExpandida((v) => !v)}
             className="p-1 rounded-lg text-gray-300 hover:text-gray-500 hover:bg-gray-50 mt-0.5">
@@ -178,9 +194,8 @@ function CardOrden({ orden, onAccion, esAdmin = false, conTecnicos = false }) {
           <p className="text-sm text-gray-600 pt-3 italic">{orden.falla_reportada}</p>
 
           {(() => {
-            const totalBarra = (orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia)
-              ? Number(orden.precio_garantia)
-              : Number(orden.precio_final || 0);
+            // Sin precio todavía, la barra se mide contra el estimado.
+            const totalBarra = precioCiclo(orden) ?? Number(orden.costo_estimado || 0);
             return totalBarra > 0 && orden.estado !== 'Sin_reparar' ? (
               <BarraCobro abonado={Number(orden.total_abonado) || 0} total={totalBarra} />
             ) : null;
@@ -217,6 +232,12 @@ function AccionesOrden({ orden, onAccion, conTecnicos = false }) {
       {/* El equipo es para el proveedor (lo vendimos y falló): pasa a su garantía. */}
       {orden.equipo_serial && ['Recibido', 'En_reparacion', 'Garantia'].includes(estado) && (
         <BotonGarantia origen={{ orden_servicio_id: orden.id }} variante="boton" texto="Garantía con proveedor" />
+      )}
+      {/* Se abona en cualquier momento: al recibir, mientras se repara o ya listo. */}
+      {['Recibido', 'En_reparacion', 'Listo'].includes(estado) && puedeAbonar(orden) && (
+        <Button size="sm" variant="secondary" onClick={() => onAccion('abono', orden)}>
+          <Plus size={13} /> Abono
+        </Button>
       )}
       {estado === 'Recibido' && (
         <>
@@ -271,7 +292,7 @@ function AccionesOrden({ orden, onAccion, conTecnicos = false }) {
       {estado === 'Garantia' && (
         <>
           <Button size="sm" onClick={() => onAccion('listo', orden)}>Marcar listo</Button>
-          {orden.garantia_cobrable && (
+          {puedeAbonar(orden) && (
             <Button size="sm" variant="secondary" onClick={() => onAccion('abono', orden)}>
               <Plus size={13} /> Abono
             </Button>
@@ -506,6 +527,7 @@ function ModalNuevaOrden({ onClose, onCreada }) {
     equipo_tipo: '', equipo_nombre: '', equipo_serial: '',
     falla_reportada: '', contrasena_equipo: '', tipo_contrasena: '', notas_tecnico: '', costo_estimado: '',
     checklist_equipo: [], patron_desbloqueo: [],
+    abono_valor: '', abono_metodo: 'Efectivo', tecnico_id: null,
   });
   const [buscandoCedula, setBuscandoCedula] = useState(false);
   const [error, setError] = useState('');
@@ -569,6 +591,11 @@ function ModalNuevaOrden({ onClose, onCreada }) {
         costo_estimado:    form.costo_estimado !== '' ? Number(form.costo_estimado) : null,
         checklist_equipo:  form.checklist_equipo.length > 0 ? form.checklist_equipo : null,
         patron_desbloqueo: form.patron_desbloqueo.length > 0 ? form.patron_desbloqueo : null,
+        // El abono va en la MISMA petición: o quedan la orden y el abono, o ninguno.
+        abono_inicial:     Number(form.abono_valor) > 0
+          ? { valor: Number(form.abono_valor), metodo: form.abono_metodo }
+          : null,
+        tecnico_id:        form.tecnico_id || null,
       });
     },
     onSuccess: (res) => {
@@ -639,6 +666,11 @@ function ModalNuevaOrden({ onClose, onCreada }) {
             <p className="text-xs text-gray-400 mt-1">
               {ordenCreada.cliente_nombre} — {ordenCreada.equipo_nombre || ordenCreada.equipo_tipo || 'Equipo'}
             </p>
+            {Number(ordenCreada.total_abonado) > 0 && (
+              <p className="text-sm font-semibold text-green-600 mt-2">
+                Abonó {formatCOP(Number(ordenCreada.total_abonado))}
+              </p>
+            )}
           </div>
           <div className="flex gap-2 w-full">
             <Button variant="secondary" className="flex-1" onClick={onClose}>
@@ -922,6 +954,28 @@ function ModalNuevaOrden({ onClose, onCreada }) {
               </div>
             )}
 
+            {/* El cliente puede dejar plata desde ya (la mitad, un anticipo…). */}
+            <div className="flex flex-col gap-2 bg-green-50/60 border border-green-100 rounded-xl p-3">
+              <label className="text-sm font-medium text-gray-700">
+                ¿Deja un abono? <span className="text-gray-400 font-normal">(opcional)</span>
+              </label>
+              <InputMoneda value={form.abono_valor} onChange={(val) => set('abono_valor', val)}
+                placeholder="0"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
+                  text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500" />
+              {Number(form.abono_valor) > 0 && (
+                <SelectorMetodo value={form.abono_metodo} onChange={(m) => set('abono_metodo', m)} label={null} />
+              )}
+              {Number(form.costo_estimado) > 0 && Number(form.abono_valor) > Number(form.costo_estimado) && (
+                <p className="text-xs text-amber-600">
+                  Es más que el estimado ({formatCOP(Number(form.costo_estimado))}). Si el precio final
+                  queda por debajo, al marcarla lista se le devuelve la diferencia.
+                </p>
+              )}
+            </div>
+
+            <SelectorTecnico value={form.tecnico_id} onChange={(v) => set('tecnico_id', v)} />
+
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">
                 Notas técnico <span className="text-gray-400 font-normal">(opcional)</span>
@@ -961,6 +1015,36 @@ function ModalNuevaOrden({ onClose, onCreada }) {
   );
 }
 
+// ─── Modal: En reparación (con la lista de técnicos encendida) ───────────────
+
+function ModalEnReparacion({ orden, onClose, onExito }) {
+  const [tecnicoId, setTecnicoId] = useState(orden.tecnico_id ?? null);
+  const [error, setError] = useState('');
+  const mut = useMutation({
+    mutationFn: () => marcarEnReparacion(orden.id, tecnicoId ? { tecnico_id: tecnicoId } : {}),
+    onSuccess:  () => { onExito(); onClose(); },
+    onError:    (err) => setError(err.response?.data?.error || 'Error'),
+  });
+  return (
+    <Modal open onClose={onClose} title="Pasar a reparación" size="sm">
+      <div className="flex flex-col gap-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+          <p className="text-sm font-semibold text-amber-800">{nombreEquipo(orden)}</p>
+          <p className="text-xs text-amber-600">{orden.cliente_nombre}</p>
+        </div>
+        <SelectorTecnico value={tecnicoId} onChange={setTecnicoId} label="¿Quién la toma?" />
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1" loading={mut.isPending} onClick={() => mut.mutate()}>
+            En reparación
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Modal: Marcar listo ──────────────────────────────────────────────────────
 
 function ModalMarcarListo({ orden, onClose, onExito }) {
@@ -983,27 +1067,39 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
   const [precioGarantia, setPrecioGarantia] = useState('');
   const [notas, setNotas] = useState(orden.notas_tecnico || '');
   const [error, setError] = useState('');
+  const [tecnicoId, setTecnicoId] = useState(orden.tecnico_id ?? null);
+  const [metodoDev, setMetodoDev] = useState('Efectivo');
+  const { activa: conTecnicos } = useTecnicosServicio();
+
+  // Lo abonado en este ciclo (en una garantía gratis no hay nada que comparar).
+  const yaAbonado = esGarantiaGratis ? 0 : Number(orden.total_abonado || 0);
+  const precioNuevo = esGarantiaCobr ? precioGarantia : precioFinal;
+  const devolver = !esGarantiaGratis && precioNuevo !== ''
+    ? devolucionAlFijarPrecio(yaAbonado, precioNuevo) : 0;
 
   const mutListo = useMutation({
     mutationFn: () => {
+      // Quién lo reparó y, si sobra plata, cómo se le devuelve: lo mismo en las tres ramas.
+      const comunes = {
+        notas_tecnico: notas || null,
+        ...(conTecnicos && tecnicoId ? { tecnico_id: tecnicoId } : {}),
+        ...(devolver > 0 ? { devolucion: { metodo: metodoDev } } : {}),
+      };
       if (esGarantiaCobr) {
         return marcarListo(orden.id, {
+          ...comunes,
           es_garantia:     true,
           precio_garantia: Number(precioGarantia),
           costo_garantia:  costoGarantia !== '' ? Number(costoGarantia) : null,
-          notas_tecnico:   notas || null,
         });
       }
       if (esGarantiaGratis) {
-        return marcarListo(orden.id, {
-          es_garantia_gratis: true,
-          notas_tecnico:      notas || null,
-        });
+        return marcarListo(orden.id, { ...comunes, es_garantia_gratis: true });
       }
       return marcarListo(orden.id, {
+        ...comunes,
         costo_real:    costoReal   !== '' ? Number(costoReal)   : null,
         precio_final:  precioFinal !== '' ? Number(precioFinal) : null,
-        notas_tecnico: notas || null,
       });
     },
     onSuccess: () => { onExito(); onClose(); },
@@ -1015,11 +1111,14 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
   const utilGarantia = costoGarantia !== '' && precioGarantia !== ''
     ? Number(precioGarantia) - Number(costoGarantia) : null;
 
-  const puedeGuardar = esGarantiaCobr
+  // Con la lista de técnicos encendida, hay que decir quién lo reparó (salvo
+  // que lo haya reparado un técnico externo: eso ya lo dice).
+  const faltaTecnico = conTecnicos && !tecnicoId && !orden.tecnico_externo;
+  const puedeGuardar = !faltaTecnico && (esGarantiaCobr
     ? precioGarantia !== ''
     : esGarantiaGratis
       ? true
-      : precioFinal !== '';
+      : precioFinal !== '');
 
   return (
     <Modal open onClose={onClose} title="Marcar como listo" size="sm">
@@ -1108,6 +1207,27 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
           </>
         )}
 
+        {yaAbonado > 0 && (
+          <div className="flex items-center justify-between bg-green-50 rounded-xl px-3 py-2">
+            <span className="text-xs text-green-600">El cliente ya abonó</span>
+            <span className="text-sm font-bold text-green-700">{formatCOP(yaAbonado)}</span>
+          </div>
+        )}
+
+        {/* El precio quedó por debajo de lo abonado: se le devuelve en este mismo paso. */}
+        {devolver > 0 && (
+          <div className="flex flex-col gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+            <p className="text-sm text-amber-800">
+              El precio queda por debajo de lo abonado: hay que devolverle{' '}
+              <strong>{formatCOP(devolver)}</strong>. Sale de la caja.
+            </p>
+            <SelectorMetodo value={metodoDev} onChange={setMetodoDev} label="¿Cómo se le devuelve?" />
+          </div>
+        )}
+
+        <SelectorTecnico value={tecnicoId} onChange={setTecnicoId} requerido
+          externo={orden.tecnico_externo || null} />
+
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">
             Notas del técnico <span className="text-gray-400 font-normal">(opcional)</span>
@@ -1139,15 +1259,19 @@ function ModalAbono({ orden, onClose, onExito }) {
   const [metodo, setMetodo] = useState('Efectivo');
   const [notas,  setNotas]  = useState('');
   const [error,  setError]  = useState('');
-  const metodosPago = useMetodosPago();
 
-  // Misma regla que el backend (servicios.repository.registrarAbono): en una
-  // garantía cobrable se cobra el precio de la GARANTÍA, no el de la reparación.
-  const totalCobro = (orden.estado === 'Garantia' && orden.garantia_cobrable && orden.precio_garantia)
-    ? Number(orden.precio_garantia) : Number(orden.precio_final || 0);
-  const saldo      = totalCobro - Number(orden.total_abonado || 0);
+  // Misma regla que el backend (servicios.repository.registrarAbono): el precio
+  // del ciclo vigente —en una garantía cobrable, el de la garantía—. Mientras no
+  // haya precio (recibido, en reparación) no hay tope: si al final sobra, se
+  // devuelve al marcarla lista. Solo se avisa si pasa el estimado.
+  const totalCobro = precioCiclo(orden);
+  const sinPrecio  = totalCobro === null;
+  const yaAbonado  = Number(orden.total_abonado || 0);
+  const saldo      = sinPrecio ? null : totalCobro - yaAbonado;
   const valorNum   = Number(valor || 0);
-  const excedeSaldo = valorNum > saldo;
+  const excedeSaldo = !sinPrecio && valorNum > saldo;
+  const estimado   = Number(orden.costo_estimado || 0);
+  const pasaEstimado = sinPrecio && estimado > 0 && yaAbonado + valorNum > estimado;
 
   const mutAbono = useMutation({
     mutationFn: () => registrarAbono(orden.id, { valor: valorNum, metodo, notas: notas || null }),
@@ -1165,20 +1289,42 @@ function ModalAbono({ orden, onClose, onExito }) {
   return (
     <Modal open onClose={onClose} title="Registrar abono" size="sm">
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-gray-50 rounded-xl px-3 py-2">
-            <p className="text-xs text-gray-400">Total</p>
-            <p className="text-sm font-bold text-gray-800">{formatCOP(Number(orden.precio_final))}</p>
-          </div>
-          <div className="bg-green-50 rounded-xl px-3 py-2">
-            <p className="text-xs text-green-500">Abonado</p>
-            <p className="text-sm font-bold text-green-700">{formatCOP(Number(orden.total_abonado))}</p>
-          </div>
-          <div className="bg-red-50 rounded-xl px-3 py-2">
-            <p className="text-xs text-red-400">Saldo</p>
-            <p className="text-sm font-bold text-red-600">{formatCOP(saldo)}</p>
-          </div>
+        <div className="bg-gray-50 rounded-xl px-3 py-2">
+          <p className="text-sm font-semibold text-gray-800">{nombreEquipo(orden)}</p>
+          <p className="text-xs text-gray-500">{orden.cliente_nombre} · {cfg(orden.estado).label}</p>
         </div>
+        {sinPrecio ? (
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-400">Estimado</p>
+              <p className="text-sm font-bold text-gray-800">{estimado > 0 ? formatCOP(estimado) : 'Sin estimado'}</p>
+            </div>
+            <div className="bg-green-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-green-500">Abonado</p>
+              <p className="text-sm font-bold text-green-700">{formatCOP(yaAbonado)}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-gray-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-gray-400">Total</p>
+              <p className="text-sm font-bold text-gray-800">{formatCOP(totalCobro)}</p>
+            </div>
+            <div className="bg-green-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-green-500">Abonado</p>
+              <p className="text-sm font-bold text-green-700">{formatCOP(yaAbonado)}</p>
+            </div>
+            <div className="bg-red-50 rounded-xl px-3 py-2">
+              <p className="text-xs text-red-400">Saldo</p>
+              <p className="text-sm font-bold text-red-600">{formatCOP(saldo)}</p>
+            </div>
+          </div>
+        )}
+        {sinPrecio && (
+          <p className="text-xs text-gray-400 -mt-2">
+            Todavía no hay precio final: se recibe lo que deje el cliente. Si al final sobra, se le devuelve.
+          </p>
+        )}
 
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">Valor del abono *</label>
@@ -1193,25 +1339,15 @@ function ModalAbono({ orden, onClose, onExito }) {
               El abono no puede superar {formatCOP(saldo)}
             </p>
           )}
+          {pasaEstimado && (
+            <p className="text-xs text-amber-600">
+              Con este abono el cliente deja {formatCOP(yaAbonado + valorNum)}, más que el estimado
+              ({formatCOP(estimado)}). Se puede registrar igual.
+            </p>
+          )}
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">Método</label>
-          <div className="flex gap-2 flex-wrap">
-            {metodosPago.map((m) => {
-              const mId    = m.id;
-              const mLabel = m.label;
-              return (
-                <button key={mId} onClick={() => setMetodo(mId)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
-                    ${metodo === mId ? 'bg-blue-50 border-blue-300 text-blue-700'
-                      : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-                  {mLabel}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <SelectorMetodo value={metodo} onChange={setMetodo} />
 
         <Input label="Notas (opcional)" placeholder="Observaciones..."
           value={notas} onChange={(e) => setNotas(e.target.value)} />
@@ -1242,10 +1378,8 @@ function ModalEntregar({ orden, onClose, onExito }) {
   const config = useConfig();
   const metodosPago = useMetodosPago();
 
-  const esGarantia = orden.estado === 'Garantia' && orden.garantia_cobrable;
-  const totalCobro = esGarantia
-    ? Number(orden.precio_garantia || 0)
-    : Number(orden.precio_final   || 0);
+  // El precio del ciclo vigente (en una garantía cobrable, el de la garantía).
+  const totalCobro = precioCiclo(orden) ?? 0;
   const abonado = Number(orden.total_abonado || 0);
   const saldo   = totalCobro - abonado;
   const yaPagado = saldo <= 0;
@@ -1435,12 +1569,17 @@ function ModalEntregar({ orden, onClose, onExito }) {
 function ModalSinReparar({ orden, onClose, onExito }) {
   const [motivo, setMotivo] = useState('');
   const [precio, setPrecio] = useState('');
+  const [metodo, setMetodo] = useState('Efectivo');
   const [error,  setError]  = useState('');
+  // El diagnóstico se cobra CONTRA lo ya abonado: sobra → se devuelve; falta → se cobra.
+  const cuenta = cuentaSinReparar(orden, precio);
 
   const mutSinReparar = useMutation({
     mutationFn: () => sinReparar(orden.id, {
       motivo,
       precio_diagnostico: precio !== '' ? Number(precio) : null,
+      metodo,
+      metodo_devolucion: metodo,
     }),
     onSuccess: () => { onExito(); onClose(); },
     onError:   (err) => setError(err.response?.data?.error || 'Error'),
@@ -1476,6 +1615,29 @@ function ModalSinReparar({ orden, onClose, onExito }) {
             className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
               text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
+
+        {(cuenta.abonado > 0 || cuenta.cobrar > 0) && (
+          <div className="flex flex-col gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+            {cuenta.abonado > 0 && (
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>Ya abonó</span><span className="font-semibold">{formatCOP(cuenta.abonado)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-xs text-gray-600">
+              <span>Diagnóstico</span><span className="font-semibold">{formatCOP(cuenta.diagnostico)}</span>
+            </div>
+            {cuenta.devolver > 0 && (
+              <p className="text-sm font-semibold text-amber-700">Devolverle {formatCOP(cuenta.devolver)} (sale de la caja)</p>
+            )}
+            {cuenta.cobrar > 0 && (
+              <p className="text-sm font-semibold text-green-700">Cobrarle {formatCOP(cuenta.cobrar)}</p>
+            )}
+            {(cuenta.devolver > 0 || cuenta.cobrar > 0) && (
+              <SelectorMetodo value={metodo} onChange={setMetodo}
+                label={cuenta.devolver > 0 ? '¿Cómo se le devuelve?' : '¿Cómo paga?'} />
+            )}
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 
@@ -1554,11 +1716,32 @@ function ModalGarantia({ orden, onClose, onExito }) {
 
 // ─── Modal: Detalle ───────────────────────────────────────────────────────────
 
-function ModalDetalleOrden({ ordenId, onClose, onImprimir }) {
+function ModalDetalleOrden({ ordenId, onClose, onImprimir, onCambio }) {
+  const queryClient = useQueryClient();
+  const { esAdminNegocio } = useAuth();
+  const esAdmin = esAdminNegocio();
+  const [anulando, setAnulando] = useState(null);   // id del abono que se está anulando
+  const [motivoAnular, setMotivoAnular] = useState('');
+  const [errorAccion, setErrorAccion] = useState('');
   const { data, isLoading } = useQuery({
     queryKey: ['orden-detalle', ordenId],
     queryFn:  () => getOrdenById(ordenId).then((r) => r.data.data),
     enabled:  !!ordenId,
+  });
+
+  const refrescar = () => {
+    queryClient.invalidateQueries({ queryKey: ['orden-detalle', ordenId] });
+    onCambio?.();
+  };
+  const mutAnular = useMutation({
+    mutationFn: ({ abonoId, motivo }) => anularAbonoServicio(ordenId, abonoId, motivo),
+    onSuccess:  () => { setAnulando(null); setMotivoAnular(''); setErrorAccion(''); refrescar(); },
+    onError:    (err) => setErrorAccion(err.response?.data?.error || 'No se pudo anular'),
+  });
+  const mutTecnico = useMutation({
+    mutationFn: (tecnicoId) => asignarTecnicoOrden(ordenId, tecnicoId),
+    onSuccess:  () => { setErrorAccion(''); refrescar(); },
+    onError:    (err) => setErrorAccion(err.response?.data?.error || 'No se pudo asignar el técnico'),
   });
 
   if (isLoading) return (
@@ -1569,7 +1752,12 @@ function ModalDetalleOrden({ ordenId, onClose, onImprimir }) {
   if (!data) return null;
 
   const estado = cfg(data.estado);
-  const saldo  = Number(data.precio_final || 0) - Number(data.total_abonado || 0);
+  const precio = precioCiclo(data);
+  const saldo  = saldoCiclo(data) ?? 0;
+  const ordenAbierta = ['Recibido', 'En_reparacion', 'Listo', 'Pendiente_pago', 'Garantia'].includes(data.estado);
+  // Solo un abono del ciclo vigente de una orden abierta se puede anular.
+  const anulable = (ab) => esAdmin && ordenAbierta && ab.tipo === 'abono' && !ab.anulado
+    && ab.ciclo !== null && ab.ciclo !== undefined && Number(ab.ciclo) === Number(data.ciclo);
 
   return (
     <Modal open onClose={onClose} title={`#OS-${String(data.numero ?? data.id).padStart(4,'0')}`} size="md">
@@ -1678,6 +1866,11 @@ function ModalDetalleOrden({ ordenId, onClose, onImprimir }) {
           </div>
         )}
 
+        {/* Quién la tiene / quién la reparó. Se puede cambiar en cualquier momento. */}
+        <SelectorTecnico value={data.tecnico_id ?? null} label="Técnico"
+          externo={data.tecnico_externo || null}
+          onChange={(v) => mutTecnico.mutate(v)} />
+
         <div className="grid grid-cols-2 gap-2">
           {data.costo_estimado && (
             <div className="bg-gray-50 rounded-xl px-3 py-2.5">
@@ -1725,19 +1918,22 @@ function ModalDetalleOrden({ ordenId, onClose, onImprimir }) {
           )}
         </div>
 
-        {data.precio_final && (
+        {(precio !== null && precio > 0) || Number(data.total_abonado) > 0 ? (
           <div>
             <BarraCobro
               abonado={Number(data.total_abonado) || 0}
-              total={Number(data.precio_final)}
+              total={precio ?? Number(data.costo_estimado || 0)}
             />
+            {precio === null && (
+              <p className="text-xs text-gray-400 mt-1">Sin precio final todavía.</p>
+            )}
             {saldo > 0 && (
               <p className="text-xs text-red-500 font-semibold mt-1">
                 Saldo: {formatCOP(saldo)}
               </p>
             )}
           </div>
-        )}
+        ) : null}
 
         {data.abonos?.length > 0 && (
           <div>
@@ -1747,22 +1943,63 @@ function ModalDetalleOrden({ ordenId, onClose, onImprimir }) {
             <div className="flex flex-col gap-1.5">
               {data.abonos.map((ab) => {
                 const abId = ab.id;
+                const devolucion = ab.tipo === 'devolucion';
                 return (
-                  <div key={abId}
-                    className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
-                    <div>
-                      <p className="text-xs text-gray-500">{formatFechaHora(ab.fecha)}</p>
-                      <p className="text-xs text-gray-400">{ab.metodo}</p>
+                  <div key={abId} className={`flex flex-col gap-1.5 rounded-xl px-3 py-2
+                    ${ab.anulado ? 'bg-gray-50 opacity-60' : devolucion ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-gray-500">
+                          {formatFechaHora(ab.fecha)}
+                          {ab.etapa && !devolucion && ab.etapa !== 'Listo' && ab.etapa !== 'Pendiente_pago'
+                            ? ` · al estar ${cfg(ab.etapa).label.toLowerCase()}` : ''}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {devolucion ? 'Devolución · ' : ''}{ab.metodo}
+                          {ab.usuario_nombre ? ` · ${ab.usuario_nombre}` : ''}
+                        </p>
+                        {ab.anulado && (
+                          <p className="text-xs text-red-500">
+                            Anulado{ab.anulado_por_nombre ? ` por ${ab.anulado_por_nombre}` : ''}: {ab.anulado_motivo}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <p className={`text-sm font-semibold ${ab.anulado ? 'line-through text-gray-400'
+                          : devolucion ? 'text-amber-700' : 'text-green-600'}`}>
+                          {devolucion ? '− ' : ''}{formatCOP(Number(ab.valor))}
+                        </p>
+                        {anulable(ab) && anulando !== ab.id && (
+                          <button type="button" title="Anular este abono"
+                            onClick={() => { setAnulando(ab.id); setMotivoAnular(''); setErrorAccion(''); }}
+                            className="p-1 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50">
+                            <Ban size={13} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm font-semibold text-green-600">
-                      {formatCOP(Number(ab.valor))}
-                    </p>
+                    {anulando === ab.id && (
+                      <div className="flex flex-col gap-1.5">
+                        <Input placeholder="¿Por qué se anula? (queda escrito)" value={motivoAnular}
+                          onChange={(e) => setMotivoAnular(e.target.value)} autoFocus />
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => setAnulando(null)}>Cancelar</Button>
+                          <Button size="sm" variant="danger" loading={mutAnular.isPending}
+                            disabled={motivoAnular.trim().length < 3}
+                            onClick={() => mutAnular.mutate({ abonoId: ab.id, motivo: motivoAnular.trim() })}>
+                            Anular {formatCOP(Number(ab.valor))}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
         )}
+
+        {errorAccion && <p className="text-sm text-red-500">{errorAccion}</p>}
 
         {data.motivo_sin_reparar && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
@@ -1866,6 +2103,15 @@ export default function ServiciosPage() {
   const [modalNueva,      setModalNueva]      = useState(false);
   const [accion,          setAccion]          = useState(null);
   const [cerradasVisible, setCerradasVisible] = useState(false);
+  // Técnicos internos (opt-in). El filtro vive en la URL (?tecnico=ID | sin):
+  // así se comparte el enlace «las órdenes de Juan».
+  const { activa: conTecnicosInternos, tecnicos: tecnicosInternos } = useTecnicosServicio();
+  const filtroTecnico = conTecnicosInternos ? (params.get('tecnico') || '') : '';
+  const setFiltroTecnico = (v) => {
+    const p = new URLSearchParams(params);
+    if (v) p.set('tecnico', v); else p.delete('tecnico');
+    setParams(p, { replace: true });
+  };
 
   const { data: resumen, isLoading: loadingResumen } = useQuery({
     queryKey: ['servicios-resumen-hoy'],
@@ -1874,10 +2120,11 @@ export default function ServiciosPage() {
   });
 
   const { data: ordenesData, isLoading: loadingOrdenes } = useQuery({
-    queryKey: ['ordenes-servicio', busqueda, filtroEstado],
+    queryKey: ['ordenes-servicio', busqueda, filtroEstado, filtroTecnico],
     queryFn:  () => getOrdenes({
       busqueda:  busqueda     || undefined,
       estado:    filtroEstado || undefined,
+      tecnico:   filtroTecnico || undefined,
     }).then((r) => r.data.data),
   });
 
@@ -1889,6 +2136,7 @@ export default function ServiciosPage() {
   const invalidar = () => {
     queryClient.invalidateQueries({ queryKey: ['ordenes-servicio'],      exact: false });
     queryClient.invalidateQueries({ queryKey: ['servicios-resumen-hoy']              });
+    queryClient.invalidateQueries({ queryKey: ['orden-detalle'],         exact: false });
   };
 
   const mutEnReparacion = useMutation({
@@ -1897,7 +2145,8 @@ export default function ServiciosPage() {
   });
 
   const handleAccion = (tipo, orden) => {
-    if (tipo === 'en-reparacion') { mutEnReparacion.mutate(orden.id); return; }
+    // Con la lista de técnicos, pasar a reparación pregunta quién la toma.
+    if (tipo === 'en-reparacion' && !conTecnicosInternos) { mutEnReparacion.mutate(orden.id); return; }
     setAccion({ tipo, orden });
   };
 
@@ -1977,6 +2226,16 @@ export default function ServiciosPage() {
                 </button>
               );
             })}
+            {conTecnicosInternos && (
+              <select value={filtroTecnico} onChange={(e) => setFiltroTecnico(e.target.value)}
+                aria-label="Filtrar por técnico"
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex-shrink-0
+                  ${filtroTecnico ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
+                <option value="">Todos los técnicos</option>
+                {tecnicosInternos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                <option value="sin">Sin técnico asignado</option>
+              </select>
+            )}
           </div>
         </div>
 
@@ -1984,7 +2243,7 @@ export default function ServiciosPage() {
           <Spinner className="py-12" />
         ) : ordenes.length === 0 ? (
           <EmptyState icon={Wrench} titulo="Sin órdenes"
-            descripcion={busqueda || filtroEstado
+            descripcion={busqueda || filtroEstado || filtroTecnico
               ? 'Sin resultados para ese filtro'
               : 'Crea la primera orden de servicio'} />
         ) : (
@@ -2049,6 +2308,9 @@ export default function ServiciosPage() {
       {modalNueva && (
         <ModalNuevaOrden onClose={() => setModalNueva(false)} onCreada={invalidar} />
       )}
+      {accion?.tipo === 'en-reparacion' && (
+        <ModalEnReparacion orden={accion.orden} onClose={cerrar} onExito={invalidar} />
+      )}
       {accion?.tipo === 'listo' && (
         <ModalMarcarListo orden={accion.orden} onClose={cerrar} onExito={invalidar} />
       )}
@@ -2065,7 +2327,7 @@ export default function ServiciosPage() {
         <ModalGarantia orden={accion.orden} onClose={cerrar} onExito={invalidar} />
       )}
       {accion?.tipo === 'detalle' && (
-        <ModalDetalleOrden ordenId={accion.orden.id} onClose={cerrar}
+        <ModalDetalleOrden ordenId={accion.orden.id} onClose={cerrar} onCambio={invalidar}
           onImprimir={(orden) => setAccion({
             tipo: ['Recibido', 'En_reparacion'].includes(orden.estado)
               ? 'reimprimir-recepcion'

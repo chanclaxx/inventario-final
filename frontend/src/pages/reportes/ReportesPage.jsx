@@ -844,6 +844,8 @@ const SeccionServicios = ({ servicios }) => {
         </div>
       )}
 
+      {servicios.por_tecnico?.length > 0 && <TablaPorTecnico filas={servicios.por_tecnico} />}
+
       {hayCerrados && (
         <div className="flex flex-col gap-2">
           {cerrados.map((s) => {
@@ -855,6 +857,55 @@ const SeccionServicios = ({ servicios }) => {
     </div>
   );
 };
+
+// Quién reparó qué en el período. Lo arma el backend con las MISMAS filas del
+// reporte (reportes.porTecnicoServicio); aquí solo se pinta. Los «reprocesos»
+// son garantías gratis: el equipo volvió por la misma falla.
+const TablaPorTecnico = ({ filas }) => (
+  <div className="flex flex-col gap-2">
+    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Por técnico</p>
+    <div className="overflow-x-auto border border-gray-100 rounded-xl">
+      <table className="w-full text-xs">
+        <thead className="bg-gray-50 text-gray-500">
+          <tr>
+            <th className="text-left font-medium px-3 py-2">Técnico</th>
+            <th className="text-right font-medium px-3 py-2">Entregadas</th>
+            <th className="text-right font-medium px-3 py-2">Sin reparar</th>
+            <th className="text-right font-medium px-3 py-2" title="Garantías gratis: volvió por la misma falla">Reprocesos</th>
+            <th className="text-right font-medium px-3 py-2">En curso</th>
+            <th className="text-right font-medium px-3 py-2">Cobrado</th>
+            <th className="text-right font-medium px-3 py-2">Utilidad</th>
+            <th className="text-right font-medium px-3 py-2">Días prom.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f) => (
+            <tr key={f.clave} className="border-t border-gray-50">
+              <td className="px-3 py-2 text-gray-700">
+                {f.nombre || <span className="text-gray-400 italic">Sin técnico asignado</span>}
+                {f.externo && <span className="ml-1 text-[10px] text-gray-400">(externo)</span>}
+              </td>
+              <td className="px-3 py-2 text-right text-gray-700">{f.entregadas}</td>
+              <td className="px-3 py-2 text-right text-gray-500">{f.sin_reparar || '—'}</td>
+              <td className={`px-3 py-2 text-right ${f.reprocesos > 0 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
+                {f.reprocesos || '—'}
+              </td>
+              <td className="px-3 py-2 text-right text-gray-500">{f.en_curso || '—'}</td>
+              <td className="px-3 py-2 text-right text-gray-700">{formatCOP(f.ingresos)}</td>
+              <td className="px-3 py-2 text-right font-semibold text-green-700">
+                {formatCOP(f.utilidad)}
+                {f.sin_costo > 0 && (
+                  <span className="block text-[10px] font-normal text-gray-400">{f.sin_costo} sin costo</span>
+                )}
+              </td>
+              <td className="px-3 py-2 text-right text-gray-500">{f.dias_promedio ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
 
 // ─────────────────────────────────────────────
 // UTILIDAD DE CRÉDITOS — componentes

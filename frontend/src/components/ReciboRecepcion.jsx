@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useConfigDocumento } from '../hooks/useConfigDocumento';
 import { createPortal } from 'react-dom';
 import { formatCOP, formatFechaHora } from '../utils/formatters';
+import { pagosVigentes } from '../utils/servicioCobro';
 
 // ─── Contenido de impresión ───────────────────────────────────────────────────
 
@@ -80,6 +81,32 @@ function ContenidoRecepcion({ orden, config }) {
           <div style={{ fontSize: '10px', marginTop: '2px' }}>
             * El precio final puede variar según el diagnóstico
           </div>
+        </>
+      )}
+
+      {/* Lo que el cliente dejó: el papel tiene que probarlo. */}
+      {Number(orden.total_abonado || 0) > 0 && (
+        <>
+          <div className="rr-divisor" />
+          <div className="negrita">ABONOS</div>
+          {(Array.isArray(orden.abonos) ? pagosVigentes(orden, orden.abonos) : [])
+            .filter((ab) => ab.tipo !== 'devolucion')
+            .map((ab, i) => (
+              <div key={ab.id || i} className="rr-fila">
+                <span>{ab.metodo} · {formatFechaHora(ab.fecha)}</span>
+                <span>{formatCOP(Number(ab.valor))}</span>
+              </div>
+            ))}
+          <div className="rr-fila negrita">
+            <span>Total abonado:</span>
+            <span>{formatCOP(Number(orden.total_abonado))}</span>
+          </div>
+          {Number(orden.costo_estimado || 0) > 0 && (
+            <div className="rr-fila">
+              <span>Saldo según estimado:</span>
+              <span>{formatCOP(Math.max(0, Number(orden.costo_estimado) - Number(orden.total_abonado)))}</span>
+            </div>
+          )}
         </>
       )}
 

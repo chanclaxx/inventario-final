@@ -41,6 +41,18 @@ const validarGarantia = [
   body('cobrable').isBoolean().withMessage('Indica si la garantía es cobrable'),
 ];
 
+// Un id que no es número es un 404, no un error de la base al castear.
+for (const p of ['id', 'abonoId', 'tecnicoId']) {
+  router.param(p, (req, res, next, v) => (/^\d+$/.test(v) && Number(v) > 0
+    ? next()
+    : res.status(404).json({ ok: false, error: 'No encontrado' })));
+}
+
+// Técnicos internos (literales ANTES de /:id). Ver servicios.tecnicos.js.
+router.get('/tecnicos',              requireModulo('servicios'), ctrl.getTecnicos);
+router.post('/tecnicos',             requireModulo('servicios'), requireNivel('admin_negocio'), ctrl.crearTecnico);
+router.patch('/tecnicos/:tecnicoId', requireModulo('servicios'), requireNivel('admin_negocio'), ctrl.actualizarTecnico);
+
 router.get('/',            requireModulo('servicios'), ctrl.getOrdenes);
 router.get('/resumen-hoy', requireModulo('servicios'), ctrl.getResumenHoy);
 router.get('/:id/pdf',           requireModulo('servicios'), pdfCtrl.getPdfServicio);
@@ -51,6 +63,10 @@ router.post('/',                    requireModulo('servicios'), validarOrden,   
 router.patch('/:id/en-reparacion',  requireModulo('servicios'),                             ctrl.enReparacion);
 router.patch('/:id/listo',          requireModulo('servicios'), validarListo,      validate, ctrl.marcarListo);
 router.post('/:id/abonos',          requireModulo('servicios'), validarAbono,      validate, ctrl.registrarAbono);
+router.patch('/:id/abonos/:abonoId/anular', requireModulo('servicios'), requireNivel('admin_negocio'),
+  body('motivo').isString().trim().isLength({ min: 3 }).withMessage('Escribe el motivo de la anulación'),
+  validate, ctrl.anularAbono);
+router.patch('/:id/tecnico',        requireModulo('servicios'),                             ctrl.asignarTecnico);
 router.patch('/:id/entregar',       requireModulo('servicios'),                             ctrl.entregar);
 router.patch('/:id/sin-reparar',    requireModulo('servicios'), validarSinReparar, validate, ctrl.sinReparar);
 router.patch('/:id/garantia',       requireModulo('servicios'), validarGarantia,   validate, ctrl.abrirGarantia);

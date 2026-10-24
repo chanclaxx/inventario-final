@@ -1,5 +1,11 @@
 const { pool } = require('../../config/db');
-const { hayTecnicos } = require('../../config/columnas');
+const { hayTecnicos, hayServicioAbonosV2 } = require('../../config/columnas');
+
+// Servicio técnico: con la migración de abonos (20261025) cada fila dice si es
+// un abono o una DEVOLUCIÓN y si se anuló. Sin ella, todo es abono activo.
+const _colsAbonoServicio = () => (hayServicioAbonosV2()
+  ? "ab.tipo, ab.anulado_motivo, NOT ab.anulado AS activo,"
+  : "'abono'::text AS tipo,");
 
 // Convierte un JS Date (UTC) al string de hora local Bogotá (UTC-5) sin zona horaria,
 // para usarlo como parámetro en queries contra columnas TIMESTAMP WITHOUT TIME ZONE.
@@ -250,7 +256,11 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   const totalCompras           = sum(cp);
   const totalAbonosAcreedor    = sum(aa);
   const totalRetomas           = sum(rt);
-  const totalAbonosServicio    = sum(sv);
+  // Servicio técnico: lo que entra (abonos) y lo que se le devuelve al cliente.
+  const svAbonos      = sv.filter((r) => r.tipo !== 'devolucion');
+  const svDevoluciones = sv.filter((r) => r.tipo === 'devolucion');
+  const totalAbonosServicio       = sum(svAbonos);
+  const totalDevolucionesServicio = sum(svDevoluciones);
   const totalDevoluciones      = dv
     .filter((d) => d.activo !== false)
     .reduce((s, d) => s + Number(d.valor || 0), 0);
@@ -283,7 +293,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   // Restarlas aquí descontaba dos veces. El grupo queda solo informativo.
   const totalIngresos      = totalIngresosBruto;
   const totalEgresos       = totalCompras + totalAbonosAcreedor + totalManualesEgreso + totalDevoluciones
-    + totalPagosTecnico;
+    + totalPagosTecnico + totalDevolucionesServicio;
 
   // ── Resumen por método de pago (entradas + salidas) ────────────────────
   const metodoMap = {};
@@ -301,7 +311,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   pf.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ac.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ap.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
-  sv.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
+  svAbonos.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   ad.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   moraCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
   interesCobros.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'ingreso'));
@@ -311,6 +321,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
   cp.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
   aa.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
   pagosTecnico.forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
+  svDevoluciones.filter((r) => r.activo !== false).forEach((r) => sumarAlMetodo(r.metodo, r.valor, 'egreso'));
 
   // Compatibilidad: metodosPago plano (solo ingresos) para no romper nada existente
   const metodosPago = {};
@@ -341,7 +352,7 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
       abonosServicio: {
         tipo:  'Ingreso',
         label: 'Servicio técnico',
-        items: sv,
+        items: svAbonos,
         total: totalAbonosServicio,
       },
       abonosDomicilio: {
@@ -381,6 +392,12 @@ const _buildResumen = ({ pf, ac, ap, cp, aa, mn, rt, dv, ad, sv, fd = [], mo = [
         label: 'Pagos a técnicos externos',
         items: pagosTecnico,
         total: totalPagosTecnico,
+      },
+      devolucionesServicio: {
+        tipo:  'Egreso',
+        label: 'Devoluciones de servicio técnico',
+        items: svDevoluciones,
+        total: totalDevolucionesServicio,
       },
       devolucionesTecnico: {
         tipo:  'Ingreso',
@@ -623,7 +640,7 @@ const getResumenDia = async (cajaId, sucursalId, negocioId) => {
     `, [cajaId]),
 
     pool.query(`
-      SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha, ${_colsAbonoServicio()}
              os.id AS orden_id, os.numero AS orden_numero, os.cliente_nombre,
              os.equipo_nombre, os.equipo_tipo,
              u.nombre AS usuario_nombre
@@ -836,7 +853,7 @@ const getResumenGlobal = async (negocioId) => {
     `, [negocioId, inicio, fin]),
 
     pool.query(`
-      SELECT ab.id, ab.valor, ab.metodo, ab.fecha,
+      SELECT ab.id, ab.valor, ab.metodo, ab.fecha, ${_colsAbonoServicio()}
              os.id AS orden_id, os.numero AS orden_numero, os.cliente_nombre,
              os.equipo_nombre, os.equipo_tipo,
              u.nombre AS usuario_nombre, su.nombre AS sucursal_nombre

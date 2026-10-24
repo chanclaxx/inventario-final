@@ -12,6 +12,7 @@ import { RedInternaConfig } from './RedInternaConfig';
 import { UsuariosAutorizados } from './UsuariosAutorizados';
 import { comprimirLogo } from '../../utils/logoDataUrl';
 import { VendedoresConfig }  from './VendedoresConfig';
+import { TecnicosServicioConfig } from './TecnicosServicioConfig';
 import { PasswordConfig }    from './PasswordConfig';
 import { MetodosPagoConfig } from './MetodosPagoConfig';
 import { TarifasConfig }    from './TarifasConfig';
@@ -72,7 +73,7 @@ const TABS_CATALOGO = [
   { id: 'mora',      label: 'Mora',      Icn: CalendarClock },
   { id: 'interes',   label: 'Interés',   Icn: Percent    },
   { id: 'borradores', label: 'Borradores', Icn: Bookmark },
-  { id: 'tecnicos',  label: 'Técnicos externos', Icn: Wrench },
+  { id: 'tecnicos',  label: 'Técnicos', Icn: Wrench },
   { id: 'gastos',    label: 'Gastos',    Icn: Receipt    },
 ];
 
@@ -1679,9 +1680,14 @@ function SeccionCatalogo({ valores, set }) {
       )}
 
       {tab === 'tecnicos' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-          <TecnicosConfig valores={valores} set={set} />
-        </div>
+        <>
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+            <TecnicosServicioConfig valores={valores} set={set} />
+          </div>
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+            <TecnicosConfig valores={valores} set={set} />
+          </div>
+        </>
       )}
 
       {tab === 'gastos' && (

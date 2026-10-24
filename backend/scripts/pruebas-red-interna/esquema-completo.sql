@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS ordenes_servicio (
   estado TEXT, falla_reportada TEXT, notas_tecnico TEXT, motivo_sin_reparar TEXT,
   precio_final NUMERIC, precio_garantia NUMERIC, costo_real NUMERIC,
   costo_garantia NUMERIC, garantia_cobrable BOOLEAN DEFAULT FALSE,
-  total_abonado NUMERIC DEFAULT 0,
+  total_abonado NUMERIC DEFAULT 0, costo_estimado NUMERIC,
   fecha_recepcion TIMESTAMP DEFAULT NOW(), fecha_entrega TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS abonos_servicio (

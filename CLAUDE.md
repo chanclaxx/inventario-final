@@ -1263,6 +1263,50 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > independencia de las sucursales y la 19 el doble clic —estática en el orden
 > de los candados, porque PGlite no simula concurrencia—).
 
+> **Servicio técnico: abonos en CUALQUIER etapa y el técnico que reparó**
+> (`servicios.repository`, `servicios.tecnicos.js`, `utils/servicioCobro.js`,
+> `pages/servicios/cobro/`, `20261025_servicio_abonos_tecnicos.sql`; pedido del
+> usuario, 25-oct-2026: «el cliente apenas entrega el celular da un abono o
+> transfiere la mitad»). Antes solo se abonaba en Listo / Pendiente / Garantía.
+> Ahora: abono al CREAR la orden (misma transacción: o quedan orden y abono, o
+> ninguno; el recibo de recepción —ticket y PDF— lo lista con el saldo según el
+> estimado) y botón «Abono» en Recibido, En reparación y Listo. **Sin precio no
+> hay tope** (decisión del usuario): solo se avisa si pasa el estimado. Si el
+> precio final queda por debajo de lo abonado, «Marcar listo» responde 409
+> `ABONADO_MAYOR_A_PRECIO` hasta que la pantalla mande `devolucion: {metodo}`,
+> y la diferencia se DEVUELVE en la misma transacción. **Sin reparar** cobra el
+> diagnóstico CONTRA lo abonado (decisión del usuario): sobra → devolución;
+> falta → abono por el método elegido (antes sobrescribía lo abonado y el
+> diagnóstico iba siempre en Efectivo).
+> `abonos_servicio` gana `tipo` ('abono' | 'devolucion', valor siempre
+> positivo), `etapa`, `ciclo` y anulación con motivo (solo admin, nunca se
+> borra; solo abonos del CICLO VIGENTE de una orden abierta —`ordenes_servicio.ciclo`
+> sube al abrir una garantía, donde lo abonado vuelve a 0—; los abonos viejos
+> tienen ciclo NULL y no se anulan). `total_abonado` se sigue manteniendo en la
+> transacción (sube/baja). Caja (sede y negocio: grupo nuevo
+> `devolucionesServicio`, egreso) y tesorería (la devolución es salida) ignoran
+> anulados; la factura al entregar arma sus pagos NETOS (`pagosNetos`).
+> **Arreglo de paso**: una garantía cobrable marcada lista pasaba a 'Listo' y
+> desde ahí saldo, abono y entrega se medían contra el precio de la reparación
+> ORIGINAL. Ahora todo usa `SQL_PRECIO_CICLO` / `precioCiclo` (en garantía =
+> `precio_garantia`, gratis = 0; antes de la primera garantía `precio_garantia`
+> es NULL), espejo en el navegador; la garantía gratis no crea factura de $0.
+> **Técnicos internos** (opt-in `servicios_tecnicos_activo`, ausente = apagado;
+> Ajustes → Catálogo → Técnicos, que también aloja los externos): lista propia
+> `tecnicos_servicio` (como vendedores; usuario opcional; sede o todas; se
+> desactivan), `ordenes_servicio.tecnico_id` asignable al crear, al pasar a
+> reparación y desde el detalle; **obligatorio al marcar listo** (decisión mía,
+> sin objeción) salvo que lo haya reparado un técnico EXTERNO, que se lee de
+> `equipos_tecnico` y no se copia. Filtro `?tecnico=ID|sin` en Servicios (en
+> la URL). Reportes → Ventas: tabla «Por técnico» (`porTecnicoServicio`, con
+> las MISMAS filas del reporte: entregadas, sin reparar, reprocesos = garantías
+> gratis, en curso, cobrado, utilidad, días); el nombre NO va en documentos del
+> cliente. Sin la migración (`hayServicioAbonosV2()` / `hayTecnicosServicio()`)
+> todo emite el SQL de siempre.
+> Prueba: `84-servicio-abonos-tecnicos` (126; la sección 1 es la de sin
+> migración, la 6 caja/tesorería/factura, la 9 el saldo de la garantía, la 14
+> navegador == backend == SQL). Probado también en navegador aislado.
+
 > **Garantías con proveedores — Proveedores → Garantías** (`modules/reclamos-garantia/`,
 > `20261023_reclamos_garantia.sql`, `pages/proveedores/garantias/`; opt-in
 > `reclamos_garantia_activo`, **ausente = apagado**, Ajustes → Catálogo → Compras;
@@ -1340,10 +1384,10 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > (f) **Estado de cuenta por proveedor** (`/proveedores/:id/estado-cuenta[/pdf]`):
 > lo abierto siempre + lo resuelto del período, con repuestas, reparadas,
 > recuperado, no cubiertas y días de respuesta; PDF o compartir.
-> Prueba: `83-garantias-proveedor` (163; la sección 1 es la de sin tablas, la 4
+> Prueba: `83-garantias-proveedor` (169; la sección 1 es la de sin tablas, la 4
 > el candado y los disponibles, la 6 y la 8 la venta que se deshace en contado y
 > crédito, la 11 que todo se anula, la 16 que el frontend no se separe, la 17 la
-> fase 2 sin su migración, la 18 las fotos y la 20 los avisos).
+> fase 2 sin su migración, la 18 las fotos, la 20 los avisos y la 23 lo hallado al probarlo en el navegador).
 
 > **Cargos financieros — mora e interés** (`mora/`, `utils/devengo.util.js`,
 > `utils/mora.util.js`, `utils/interes.util.js`): dos cargos **independientes**

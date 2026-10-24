@@ -1,5 +1,5 @@
 const { pool } = require('../../config/db');
-const { hayTecnicos } = require('../../config/columnas');
+const { hayTecnicos, hayServicioAbonosV2 } = require('../../config/columnas');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TESORERÍA — repositorio
@@ -121,13 +121,17 @@ const _unionEventos = () => `
       AND ${MATCH_METODO('at.metodo')}
 
     UNION ALL
-    -- Servicio técnico (≈ caja: abonos_servicio)
-    SELECT ab.fecha, 'entrada', ab.valor, 'servicio',
-           'Servicio #' || os.id || COALESCE(' — ' || os.cliente_nombre, ''),
+    -- Servicio técnico (≈ caja: abonos_servicio). Con la migración de abonos
+    -- (20261025) una DEVOLUCIÓN al cliente sale y un anulado no cuenta.
+    SELECT ab.fecha, ${hayServicioAbonosV2() ? "CASE WHEN ab.tipo = 'devolucion' THEN 'salida' ELSE 'entrada' END" : "'entrada'"},
+           ab.valor, 'servicio',
+           ${hayServicioAbonosV2() ? "CASE WHEN ab.tipo = 'devolucion' THEN 'Devolución servicio #' ELSE 'Servicio #' END" : "'Servicio #'"}
+             || os.id || COALESCE(' — ' || os.cliente_nombre, ''),
            ab.metodo, NULL::bigint AS mov_id
     FROM abonos_servicio ab
     JOIN ordenes_servicio os ON os.id = ab.orden_id
     WHERE os.sucursal_id = $2
+      ${hayServicioAbonosV2() ? 'AND NOT ab.anulado' : ''}
       AND ${MATCH_METODO('ab.metodo')}
 
     UNION ALL
