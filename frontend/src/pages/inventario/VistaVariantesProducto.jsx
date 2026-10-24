@@ -30,6 +30,8 @@ import { AvisoSoloListas } from '../../components/ui/AvisoSoloListas';
 import { ChipApartado } from './ChipApartado';
 import { ChipEnCamino } from './ChipEnCamino';
 import { useEnTransito } from '../../hooks/useEnTransito';
+import { useEnGarantia } from '../../hooks/useEnGarantia';
+import { ChipEnGarantia } from './ChipEnGarantia';
 import { usePuedeVerCostos, usePuedeVerCostoInventario } from '../../hooks/usePuedeVerCostos';
 import { ModalEtiquetas } from './ModalEtiquetas';
 
@@ -264,6 +266,8 @@ function TarjetaNodo({
   const stockBajo = !sinStock && nodo.stock_minimo > 0 && nodo.stock <= nodo.stock_minimo;
   // Lo que va en un envío de la red sin recibir: bloqueado en esta hoja.
   const enCamino = useEnTransito().get(itemKey);
+  // Lo que está en garantía con el proveedor ya salió de esta hoja.
+  const enGarantia = useEnGarantia().get(itemKey);
 
   const bg     = sinStock  ? 'bg-gray-50'      : stockBajo ? 'bg-amber-50/40' : 'bg-white';
   const border = sinStock  ? 'border-gray-200' : stockBajo ? 'border-amber-200' : 'border-green-100';
@@ -361,6 +365,7 @@ function TarjetaNodo({
         {!tieneHijos && itemKey && (
           <ChipEnCamino reserva={enCamino} stock={nodo.stock} />
         )}
+        {!tieneHijos && itemKey && <ChipEnGarantia reserva={enGarantia} />}
 
         {nodo.stock_minimo > 0 && (
           <div className="flex flex-col gap-1">

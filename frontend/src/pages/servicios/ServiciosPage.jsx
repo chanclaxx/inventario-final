@@ -31,6 +31,7 @@ import useSucursalStore from '../../store/sucursalStore';
 import api             from '../../api/axios.config';
 import { TabTecnicos }        from './tecnicos/TabTecnicos';
 import { ModalEnviarTecnico } from './tecnicos/ModalEnviarTecnico';
+import { BotonGarantia } from '../proveedores/garantias/BotonGarantia';
 import { puedeTecnicos }      from '../../utils/permisosTecnicos';
 import { contieneTexto }      from '../../utils/texto';
 import {
@@ -212,6 +213,10 @@ function AccionesOrden({ orden, onAccion, conTecnicos = false }) {
           title="Mandar el equipo de esta orden a un técnico externo">
           <Wrench size={13} /> Enviar a técnico
         </Button>
+      )}
+      {/* El equipo es para el proveedor (lo vendimos y falló): pasa a su garantía. */}
+      {orden.equipo_serial && ['Recibido', 'En_reparacion', 'Garantia'].includes(estado) && (
+        <BotonGarantia origen={{ orden_servicio_id: orden.id }} variante="boton" texto="Garantía con proveedor" />
       )}
       {estado === 'Recibido' && (
         <>

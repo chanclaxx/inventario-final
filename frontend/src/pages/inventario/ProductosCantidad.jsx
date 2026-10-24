@@ -14,6 +14,9 @@ import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado }                                  from './ChipApartado';
 import { ChipEnCamino }                                  from './ChipEnCamino';
 import { useEnTransito }                                 from '../../hooks/useEnTransito';
+import { useEnGarantia, enGarantiaDeProducto }           from '../../hooks/useEnGarantia';
+import { ChipEnGarantia }                                from './ChipEnGarantia';
+import { BotonGarantia }                                 from '../proveedores/garantias/BotonGarantia';
 import { ModalPinEliminacion }                           from './ModalPinEliminacion';
 import { ModalEditarProductoCantidad }                   from './ModalEditarProductoCantidad';
 import { ModalEtiquetas }                                from './ModalEtiquetas';
@@ -36,6 +39,9 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
   // Unidades que van en un envío de la red sin recibir: siguen en el stock,
   // pero bloqueadas hasta que se reciban o se anule el envío.
   const enCamino = useEnTransito().get(`cant-${p.id}`);
+  // Unidades en garantía con el proveedor: YA salieron del stock (todas sus
+  // variantes sumadas); el chip lo dice para que nadie las busque.
+  const enGarantia = enGarantiaDeProducto(useEnGarantia(), p.id);
   // Solo con listas (opt-in por sede): el precio es el de la lista, no `p.precio`.
   const precioVis = usePrecioVisible();
   const precioTarjeta = precioVis.de(p.precio, p);
@@ -95,6 +101,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           )}
           <ChipApartado itemKey={`cant-${p.id}`} stock={p.stock} className="mt-1" />
           <ChipEnCamino reserva={enCamino} stock={p.stock} className="mt-1" />
+          <ChipEnGarantia reserva={enGarantia} className="mt-1" />
           {p.dias_en_inventario != null && (
             <UltimaVentaBadge
               tieneVentas={p.ultima_venta != null}
@@ -105,6 +112,7 @@ function TarjetaProducto({ p, esAdmin, onAgregar, onReducir, onEditar, variantes
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
+          {p.stock > 0 && <BotonGarantia origen={{ producto_id: p.id }} variante="icono" />}
           {onEtiquetar && p.codigo && (
             <button
               onClick={(e) => { e.stopPropagation(); onEtiquetar(p); }}

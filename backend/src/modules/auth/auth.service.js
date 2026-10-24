@@ -35,6 +35,8 @@ const _buildPayload = (usuario) => ({
   permisos_reportes:           usuario.rol === 'admin_negocio' ? null : (usuario.permisos_reportes ?? null),
   // Registrar gastos (Reportes → Gastos). Nace con la feature: ausente = no.
   permisos_gastos:             usuario.rol === 'admin_negocio' ? null : (usuario.permisos_gastos ?? null),
+  // Garantías con proveedores (Ajustes → Usuarios). null = permisos base del rol.
+  permisos_garantias:          usuario.rol === 'admin_negocio' ? null : (usuario.permisos_garantias ?? null),
   // IDs de sucursales que el usuario puede ver en modo lectura (no admin)
   sucursales_vista:            usuario.rol === 'admin_negocio' ? null : (usuario.sucursales_vista ?? []),
 });
@@ -56,6 +58,7 @@ const QUERY_USUARIO_BASE = `
     to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
     to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
     to_jsonb(u) -> 'permisos_gastos' AS permisos_gastos,
+    to_jsonb(u) -> 'permisos_garantias' AS permisos_garantias,
     u.sucursales_vista
   FROM usuarios u
   JOIN negocios n ON n.id = u.negocio_id

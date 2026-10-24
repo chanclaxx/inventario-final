@@ -572,7 +572,8 @@ seccion('8. Estática: lo que no puede separarse ni aparecer');
   ok('el detalle de la compra y el registro montan la misma pieza',
     leer(FRONT, 'src/pages/proveedores/ProveedoresPage.jsx').includes('<ArchivosCompra compraId={compraId} />')
     && leer(FRONT, 'src/pages/proveedores/ModalCompra.jsx').includes('<ArchivosCompra compraId={compraRegistrada.id} />'));
-  ok('el Service Worker no cachea la descarga', leer(FRONT, 'vite.config.js').includes('prestamos|compras\\/archivos)'));
+  // En la lista de NetworkOnly, sin importar qué otras rutas se le sumen después.
+  ok('el Service Worker no cachea la descarga', /prestamos\|compras\\\/archivos[|)]/.test(leer(FRONT, 'vite.config.js')));
 }
 
 console.error = consolaError;

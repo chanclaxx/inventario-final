@@ -192,6 +192,8 @@ const getConfig = async (negocioId) => {
   if (!hayArchivosCompra()) config[CLAVE_ARCHIVOS_COMPRA] = '0';
   // Sin las tablas, el centro de gastos no existe aunque la clave diga '1'.
   if (!require('../../config/columnas').hayGastos()) config.gastos_activo = '0';
+  // Lo mismo con las garantías con proveedores.
+  if (!require('../../config/columnas').hayReclamosGarantia()) config.reclamos_garantia_activo = '0';
   return config;
 };
 
@@ -274,6 +276,29 @@ const saveConfig = async (negocioId, datos) => {
     }
     if (String(datosProcesados.gastos_activo) === '1' && !require('../../config/columnas').hayGastos()) {
       throw { status: 503, message: 'El centro de gastos todavía no está instalado en la base de datos' };
+    }
+  }
+
+  // Garantías con proveedores (Proveedores → Garantías): opt-in, ausente =
+  // apagado, y el umbral de «demorada» con el MISMO rango del middleware.
+  if (datosProcesados.reclamos_garantia_activo !== undefined) {
+    if (!['0', '1'].includes(String(datosProcesados.reclamos_garantia_activo))) {
+      throw { status: 400, message: 'Garantías con proveedores solo puede estar encendido (1) o apagado (0)' };
+    }
+    if (String(datosProcesados.reclamos_garantia_activo) === '1'
+        && !require('../../config/columnas').hayReclamosGarantia()) {
+      throw { status: 503, message: 'Las garantías con proveedores todavía no están instaladas en la base de datos' };
+    }
+  }
+  {
+    const { RANGOS: RANGOS_RECLAMOS } = require('../../middlewares/reclamosGarantia.middleware');
+    for (const [clave, r] of Object.entries(RANGOS_RECLAMOS)) {
+      const raw = datosProcesados[clave];
+      if (raw === undefined || raw === '' || raw === null) continue;
+      const v = Number(raw);
+      if (!Number.isInteger(v) || v < r.min || v > r.max) {
+        throw { status: 400, message: `${r.etiqueta} debe ser un número entero entre ${r.min} y ${r.max} días` };
+      }
     }
   }
 
@@ -583,6 +608,10 @@ const saveConfig = async (negocioId, datos) => {
 
   if (Object.keys(datosProcesados).some((k) => k.startsWith('tecnicos_'))) {
     require('../../middlewares/tecnicos.middleware').invalidarCache(negocioId);
+  }
+
+  if (Object.keys(datosProcesados).some((k) => k.startsWith('reclamos_garantia_'))) {
+    require('../../middlewares/reclamosGarantia.middleware').invalidarCache(negocioId);
   }
 
   // Y lo mismo para los borradores de venta: su middleware cachea 60s, y apagar

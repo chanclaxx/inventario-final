@@ -1,6 +1,6 @@
 const { pool } = require('../../config/db');
 const costoRed = require('../../utils/costoRed.util');
-const { hayListasPrecios, hayTecnicos } = require('../../config/columnas');
+const { hayListasPrecios, hayTecnicos, hayReclamosGarantia } = require('../../config/columnas');
 const { selPreciosNodo: selPreciosSql } = require('../../utils/listasPreciosSql.util');
 const {
   JOINS_ORIGEN_RETOMA, COLUMNAS_ORIGEN_RETOMA, NEGOCIO_RETOMA,
@@ -378,6 +378,9 @@ const buscarSerialPorCodigoExacto = async (codigo, negocioId, sucursalId) => {
       -- Igual que prestado: viaja para que el escáner diga POR QUÉ no se agrega.
       ${hayTecnicos() ? `, (SELECT t.nombre FROM equipos_tecnico et JOIN tecnicos t ON t.id = et.tecnico_id
           WHERE et.serial_id = s.id AND et.estado = 'En_tecnico' LIMIT 1) AS en_tecnico_nombre` : ''}
+      ${hayReclamosGarantia() ? `, (SELECT COALESCE(rg.numero, rg.id) FROM reclamos_garantia_lineas rgl
+          JOIN reclamos_garantia rg ON rg.id = rgl.reclamo_id
+          WHERE rgl.serial_id = s.id AND NOT rgl.cerrada AND NOT rg.anulado LIMIT 1) AS en_garantia_numero` : ''}
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
     JOIN sucursales       su ON su.id = ps.sucursal_id
@@ -413,6 +416,50 @@ const getTecnicosPorIMEI = async (imei, negocioId) => {
     ORDER BY s.fecha
   `, [negocioId, imei]);
   return rows;
+};
+
+// Garantías con proveedores de un IMEI (ver migrations/20261023_reclamos_garantia.sql).
+// Dos caras: el equipo que FUE a garantía (línea del caso) y el que ENTRÓ como
+// reposición de otro (movimiento con su IMEI). Por el IMEI congelado, igual que
+// técnicos: la historia sigue al equipo aunque cambie de fila.
+const getGarantiasPorIMEI = async (imei, negocioId) => {
+  if (!hayReclamosGarantia()) return { casos: [], reposiciones: [] };
+  const [{ rows: casos }, { rows: reposiciones }] = await Promise.all([
+    pool.query(`
+      SELECT l.id AS linea_id, l.cerrada, l.cantidad_cliente, l.cantidad,
+             r.id AS reclamo_id, COALESCE(r.numero, r.id) AS numero, r.fecha, r.falla, r.origen_tipo,
+             r.cliente_nombre, r.anulado, pr.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre,
+             COALESCE(e.numero, e.id) AS envio_numero, e.fecha AS envio_fecha,
+             (SELECT json_agg(json_build_object(
+                       'tipo', m.tipo, 'lado', m.lado, 'destino', m.destino, 'fecha', m.fecha,
+                       'imei', m.imei, 'nombre_producto', m.nombre_producto,
+                       'garantia_hasta', to_char(m.garantia_hasta, 'YYYY-MM-DD'))
+                     ORDER BY m.fecha)
+              FROM reclamos_garantia_movimientos m
+              WHERE m.linea_id = l.id AND NOT m.anulado) AS movimientos
+      FROM reclamos_garantia_lineas l
+      JOIN reclamos_garantia r    ON r.id = l.reclamo_id
+      LEFT JOIN proveedores pr    ON pr.id = r.proveedor_id
+      LEFT JOIN sucursales su     ON su.id = r.sucursal_id
+      LEFT JOIN envios_garantia e ON e.id = l.envio_id
+      WHERE r.negocio_id = $1 AND UPPER(BTRIM(l.imei)) = UPPER(BTRIM($2))
+      ORDER BY r.fecha
+    `, [negocioId, imei]),
+    pool.query(`
+      SELECT m.fecha, m.lado, m.tipo, to_char(m.garantia_hasta, 'YYYY-MM-DD') AS garantia_hasta,
+             COALESCE(r.numero, r.id) AS numero, l.imei AS imei_anterior, l.nombre_producto,
+             r.cliente_nombre, pr.nombre AS proveedor_nombre, su.nombre AS sucursal_nombre
+      FROM reclamos_garantia_movimientos m
+      JOIN reclamos_garantia_lineas l ON l.id = m.linea_id
+      JOIN reclamos_garantia r        ON r.id = m.reclamo_id
+      LEFT JOIN proveedores pr        ON pr.id = r.proveedor_id
+      LEFT JOIN sucursales su         ON su.id = r.sucursal_id
+      WHERE r.negocio_id = $1 AND NOT m.anulado AND m.tipo IN ('reposicion', 'cambio')
+        AND UPPER(BTRIM(m.imei)) = UPPER(BTRIM($2))
+      ORDER BY m.fecha
+    `, [negocioId, imei]),
+  ]);
+  return { casos, reposiciones };
 };
 
 const getHistorialCantidad = async (productoId, negocioId) => {
@@ -841,7 +888,7 @@ const buscarAbonosTotales = async ({ fechaDesde, fechaHasta, tipo }, negocioId, 
 
 module.exports = {
   buscarSerialPorIMEI, getVentasPorIMEI, getRetomasPorIMEI, getClientePorNombre,
-  getPrestamosPorIMEI, getTrasladosPorIMEI, getTecnicosPorIMEI,
+  getPrestamosPorIMEI, getTrasladosPorIMEI, getTecnicosPorIMEI, getGarantiasPorIMEI,
   buscarSeriales, buscarCantidad, buscarCantidadPorCodigo, buscarSerialPorCodigoExacto,
   getHistorialCantidad,
   buscarComprasPorIMEI, buscarComprasPorTexto,

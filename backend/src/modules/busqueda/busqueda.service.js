@@ -29,12 +29,13 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
     };
   }
 
-  const [ventas, retomas, prestamos, traslados, tecnicos] = await Promise.all([
+  const [ventas, retomas, prestamos, traslados, tecnicos, garantias] = await Promise.all([
     repo.getVentasPorIMEI(serial.imei, negocioId),
     repo.getRetomasPorIMEI(serial.imei, negocioId),
     repo.getPrestamosPorIMEI(serial.imei, negocioId),
     repo.getTrasladosPorIMEI(serial.imei, negocioId),
     repo.getTecnicosPorIMEI(serial.imei, negocioId),
+    repo.getGarantiasPorIMEI(serial.imei, negocioId),
   ]);
 
   // ── De quién se compró (compra a cliente o retoma) ─────────────────────────
@@ -181,6 +182,42 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
         costo:          admin ? t.costo : undefined,
       },
     })),
+    // Garantías con el proveedor: el caso (cuándo entró, a quién se le
+    // reclamó, qué respondió) y, si este equipo llegó en lugar de otro, de qué
+    // garantía vino. Sin costos: es la misma historia para todos los roles.
+    ...garantias.casos.map((g) => ({
+      tipo:          'garantia',
+      fecha:         g.fecha,
+      referencia_id: g.reclamo_id,
+      detalle: {
+        numero:       g.numero,
+        falla:        g.falla,
+        proveedor:    g.proveedor_nombre,
+        cliente:      g.cliente_nombre,
+        origen:       g.origen_tipo,
+        envio:        g.envio_numero,
+        envio_fecha:  g.envio_fecha,
+        abierta:      !g.cerrada && !g.anulado,
+        anulada:      g.anulado,
+        movimientos:  g.movimientos || [],
+        sucursal:     g.sucursal_nombre,
+      },
+    })),
+    ...garantias.reposiciones.map((g) => ({
+      tipo:          'garantia_entrada',
+      fecha:         g.fecha,
+      referencia_id: g.numero,
+      detalle: {
+        numero:         g.numero,
+        como:           g.tipo,
+        imei_anterior:  g.imei_anterior,
+        producto:       g.nombre_producto,
+        proveedor:      g.proveedor_nombre,
+        cliente:        g.cliente_nombre,
+        garantia_hasta: g.garantia_hasta,
+        sucursal:       g.sucursal_nombre,
+      },
+    })),
     ...ventas.map((v) => ({
       tipo:           'venta',
       fecha:          v.fecha,
@@ -197,7 +234,21 @@ const buscarPorIMEI = async (query, negocioId, rol) => {
     })),
   ].sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
 
-  return { serial, historial };
+  // Si lo último que le pasó al equipo es una garantía con el proveedor, el
+  // «Vendido»/«Disponible» de la cabecera mentiría: o está afuera en garantía
+  // (no se vende) o el proveedor se lo quedó (vendido = true, pero no se vendió).
+  const ultimo = historial[historial.length - 1];
+  let estadoGarantia = null;
+  if (ultimo?.tipo === 'garantia' && !ultimo.detalle.anulada) {
+    const prov = ultimo.detalle.movimientos.filter((m) => m.lado === 'proveedor');
+    if (ultimo.detalle.abierta && !serial.vendido) estadoGarantia = 'En garantía';
+    else if (serial.vendido && prov.some((m) => m.tipo === 'rechazo' && m.destino === 'baja')) estadoGarantia = 'De baja';
+    else if (serial.vendido && prov.some((m) => ['reposicion', 'nota_credito', 'reembolso_proveedor'].includes(m.tipo))) {
+      estadoGarantia = 'Lo tiene el proveedor';
+    }
+  }
+
+  return { serial: estadoGarantia ? { ...serial, estado_garantia: estadoGarantia } : serial, historial };
 };
 
 // ─── Búsqueda por nombre ──────────────────────────────────────────────────────

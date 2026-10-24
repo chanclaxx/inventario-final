@@ -19,6 +19,9 @@ import { preciosDeNodo } from '../../utils/listasPrecios';
 import { ChipApartado } from './ChipApartado';
 import { ChipEnCamino } from './ChipEnCamino';
 import { useEnTransito } from '../../hooks/useEnTransito';
+import { useEnGarantia } from '../../hooks/useEnGarantia';
+import { ChipEnGarantia } from './ChipEnGarantia';
+import { BotonGarantia } from '../proveedores/garantias/BotonGarantia';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -148,6 +151,7 @@ function ModalNodo({ open, onClose, titulo, tipos = [], datoInicial, onGuardar, 
 function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin, onAgregar }) {
   const queryClient = useQueryClient();
   const enCamino = useEnTransito().get(`cant-${producto.id}-v-${variante.id}`);
+  const enGarantia = useEnGarantia().get(`cant-${producto.id}-v-${variante.id}`);
   const [editando, setEditando] = useState(false);
   const [errorM,   setErrorM]   = useState('');
 
@@ -189,9 +193,14 @@ function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin
           className="mt-1"
         />
         <ChipEnCamino reserva={enCamino} stock={variante.stock} className="mt-1" />
+        <ChipEnGarantia reserva={enGarantia} className="mt-1" />
       </div>
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
+        {variante.stock > 0 && (
+          <BotonGarantia variante="icono"
+            origen={{ producto_id: producto.id, atributo_id: atributo.id, variante_id: variante.id }} />
+        )}
         {esAdmin && (
           <>
             <button onClick={() => setEditando(true)}
@@ -231,6 +240,7 @@ function FilaVariante({ variante, atributo, producto, sucursalId, tipos, esAdmin
 function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
   const queryClient = useQueryClient();
   const enCamino = useEnTransito().get(`cant-${producto.id}-a-${atributo.id}`);
+  const enGarantia = useEnGarantia().get(`cant-${producto.id}-a-${atributo.id}`);
   const [expandido,     setExpandido]     = useState(true);
   const [modalVariante, setModalVariante] = useState(false);
   const [editando,      setEditando]      = useState(false);
@@ -330,6 +340,7 @@ function FilaAtributo({ atributo, producto, sucursalId, tipos, esAdmin }) {
             className="mt-1"
           />
           <ChipEnCamino reserva={enCamino} stock={atributo.stock} className="mt-1" />
+          <ChipEnGarantia reserva={enGarantia} className="mt-1" />
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">

@@ -326,4 +326,51 @@ const puedeRegistrarGastos = (user) => {
 
 const puedeVerGastos = (user) => puedeRegistrarGastos(user) || puedeVerReportesCompletos(user);
 
-module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS, puedeVerReportesCompletos, requireNivelOReportesCompletos, puedeRegistrarGastos, puedeVerGastos };
+/**
+ * Garantías con proveedores — `permisos_garantias`, una llave por acción:
+ *   ver        → la pestaña Proveedores → Garantías y el detalle de un caso
+ *   recibir    → abrir un caso (recibir la unidad dañada) desde cualquier documento
+ *   cliente    → resolver con el cliente entregándole otra unidad
+ *   reembolsar → devolverle la plata al cliente (mueve caja y deshace la venta)
+ *   enviar     → armar y anular envíos hacia el proveedor
+ *   resolver   → registrar la respuesta del proveedor (repone, repara, nota
+ *                crédito, devuelve plata, no lo cubre)
+ *   anular     → anular un caso o un movimiento ya registrado
+ *
+ * Misma regla que `permisos_tecnicos`: null / ausente = permisos BASE DEL ROL,
+ * nunca "no puede", y cada llave se mira por separado. La base la eligió el
+ * negocio: el supervisor hace todo menos anular; el vendedor, que es quien está
+ * en el mostrador, recibe la unidad y le entrega otra al cliente.
+ */
+const BASE_GARANTIAS = {
+  supervisor: { ver: true, recibir: true, cliente: true, reembolsar: true,  enviar: true,  resolver: true,  anular: false },
+  vendedor:   { ver: true, recibir: true, cliente: true, reembolsar: false, enviar: false, resolver: false, anular: false },
+};
+
+const MENSAJES_GARANTIAS = {
+  ver:        'No tienes permiso para ver las garantías con proveedores',
+  recibir:    'No tienes permiso para recibir productos en garantía',
+  cliente:    'No tienes permiso para entregarle otra unidad al cliente',
+  reembolsar: 'No tienes permiso para devolverle dinero al cliente',
+  enviar:     'No tienes permiso para enviar garantías al proveedor',
+  resolver:   'No tienes permiso para registrar la respuesta del proveedor',
+  anular:     'No tienes permiso para anular garantías',
+};
+
+const puedeGarantias = (user, accion) => {
+  if (!user) return false;
+  if (user.rol === 'admin_negocio') return true;
+  const permisos = user.permisos_garantias;
+  if (permisos && typeof permisos === 'object' && typeof permisos[accion] === 'boolean') {
+    return permisos[accion];
+  }
+  return BASE_GARANTIAS[user.rol]?.[accion] === true;
+};
+
+const requirePermisoGarantias = (accion) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  if (puedeGarantias(req.user, accion)) return next();
+  return res.status(403).json({ ok: false, error: MENSAJES_GARANTIAS[accion] || 'Sin permiso' });
+};
+
+module.exports = { requireRole, requireNivel, requireSucursal, assertBelongsToNegocio, requirePermisoProveedores, requirePermisoFacturas, requirePermisoVerCompras, requirePermisoExportarInventario, requirePermisoExportarNegocio, requirePermisoPreciosLista, requirePermisoTecnicos, puedeTecnicos, BASE_TECNICOS, puedeVerReportesCompletos, requireNivelOReportesCompletos, puedeRegistrarGastos, puedeVerGastos, puedeGarantias, requirePermisoGarantias, BASE_GARANTIAS, MENSAJES_GARANTIAS };

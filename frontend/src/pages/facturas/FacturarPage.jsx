@@ -17,6 +17,7 @@ import { ModalCancelarFactura } from './ModalCancelarFactura';
 import { useSucursalKey }       from '../../hooks/useSucursalKey';
 import { ModalImprimirFactura }   from '../../components/ui/ModalImprimirFactura';
 import { ModalDocumentoEnvio }    from '../red-interna/documentos/ModalDocumentoEnvio';
+import { BotonGarantia }          from '../proveedores/garantias/BotonGarantia';
 import useSucursalStore         from '../../store/sucursalStore';
 import api                      from '../../api/axios.config';
 
@@ -188,6 +189,10 @@ function ModalDetalle({ facturaId, onClose, onAbrirImprimir, onEditar }) {
                   {devuelta > 0 && !totalDev && <p className="text-xs text-orange-500">{devuelta} devuelto{devuelta > 1 ? 's' : ''}</p>}
                   {totalDev && <p className="text-xs text-green-600">Devuelto completamente</p>}
                   {esAdminNegocio() && l.proveedor_nombre && <p className="text-xs text-amber-600 font-medium mt-0.5">{l.proveedor_nombre}</p>}
+                  {/* Garantía con el proveedor: la unidad vuelve y se le responde al cliente. */}
+                  {f?.estado !== 'Cancelada' && !totalDev && (l.imei || l.producto_id) && (
+                    <BotonGarantia origen={{ linea_factura_id: l.id }} className="mt-1" />
+                  )}
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-xs text-gray-400">{neta} x {formatCOP(l.precio)}</p>

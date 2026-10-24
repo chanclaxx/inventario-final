@@ -10,6 +10,8 @@ import { ChipGarantia }                                  from '../proveedores/in
 import { ChipApartado }              from './ChipApartado';
 import { ChipEnCamino }              from './ChipEnCamino';
 import { useEnTransito }             from '../../hooks/useEnTransito';
+import { ChipEnGarantia }            from './ChipEnGarantia';
+import { BotonGarantia }             from '../proveedores/garantias/BotonGarantia';
 import { Button }                    from '../../components/ui/Button';
 import { Spinner }                   from '../../components/ui/Spinner';
 import { EmptyState }                from '../../components/ui/EmptyState';
@@ -132,7 +134,10 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
   // La base no deja venderlo (trigger de reserva); esto lo dice antes.
   const reservaCamino = useEnTransito().get(serial.imei);
   const enCamino = !!reservaCamino && !serial.vendido;
-  const bloqueado = prestado || enTecnico || enCamino;
+  // En garantía con el proveedor: no cuenta en el stock y la base no deja
+  // venderlo (trigger fn_serial_en_garantia); esto lo dice antes.
+  const enGarantia = !!serial.en_garantia_numero && !serial.vendido;
+  const bloqueado = prestado || enTecnico || enCamino || enGarantia;
 
   // Un equipo ya vendido o prestado no puede estar apartado para nadie: el
   // chip sobraría y confundiría.
@@ -168,6 +173,7 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
           )}
           {puedeApartarse && <ChipApartado itemKey={serial.imei} tipo="serial" />}
           {enCamino && <ChipEnCamino reserva={reservaCamino} tipo="serial" />}
+          {enGarantia && <ChipEnGarantia reserva={{ cantidad: 1, casos: [serial.en_garantia_numero] }} tipo="serial" />}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-400">Entrada: {formatFecha(serial.fecha_entrada)}</span>
@@ -214,6 +220,12 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
             Recíbelo en Servicios → Técnicos para poder venderlo.
           </p>
         )}
+        {enGarantia && (
+          <p className="text-xs text-rose-700 mt-0.5">
+            En garantía{serial.en_garantia_proveedor ? ` con ${serial.en_garantia_proveedor}` : ''} desde {formatFecha(serial.en_garantia_desde)}.
+            No cuenta en el stock hasta que el proveedor responda (Proveedores → Garantías).
+          </p>
+        )}
         {serial.nota && <NotaStrip nota={serial.nota} className="mt-1" />}
       </div>
 
@@ -227,6 +239,8 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
             onGuardar={(texto) => onGuardarNota(serial, texto)}
           />
         )}
+        {/* Salió dañado del inventario: a garantía con el proveedor. */}
+        {!serial.vendido && !bloqueado && <BotonGarantia origen={{ serial_id: serial.id }} variante="icono" />}
         <button
           onClick={(e) => { e.stopPropagation(); onEliminar(serial); }}
           className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
@@ -237,7 +251,8 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
         <Button
           size="sm"
           disabled={bloqueado}
-          title={enTecnico ? 'No se puede vender — está donde el técnico'
+          title={enGarantia ? 'No se puede vender — está en garantía con el proveedor'
+            : enTecnico ? 'No se puede vender — está donde el técnico'
             : enCamino ? 'No se puede vender — va en camino en un envío sin recibir'
             : prestado ? 'No se puede vender — está prestado' : 'Agregar al carrito'}
           onClick={(e) => { e.stopPropagation(); onAgregar(serial); }}
@@ -245,7 +260,7 @@ function TarjetaSerial({ serial, precio, onAgregar, onEliminar, onEditar, onGuar
         >
           {bloqueado ? <Lock size={14} /> : <Plus size={14} />}
           <span className="hidden sm:inline">
-            {enTecnico ? 'En técnico' : enCamino ? 'En camino' : prestado ? 'Prestado' : 'Agregar'}
+            {enGarantia ? 'En garantía' : enTecnico ? 'En técnico' : enCamino ? 'En camino' : prestado ? 'Prestado' : 'Agregar'}
           </span>
         </Button>
       </div>
@@ -557,6 +572,7 @@ function SelectorModeloMovil({ productos, lineas, productoSeleccionado, onSelecc
                                         · {p.prestados} prest.
                                       </span>
                                     )}
+                                    <ChipEnGarantia reserva={{ cantidad: Number(p.en_garantia) || 0 }} />
                                     {p.dias_en_inventario != null && (
                                       <AntiguedadBadge dias={p.dias_en_inventario} />
                                     )}
@@ -632,6 +648,7 @@ function GrupoLinea({ nombre, productos, productoSeleccionado, onSeleccionar, on
                       · {p.prestados} prest.
                     </span>
                   )}
+                  <ChipEnGarantia reserva={{ cantidad: Number(p.en_garantia) || 0 }} />
                   {p.dias_en_inventario != null && (
                     <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}
@@ -923,10 +940,14 @@ export function ProductosSerial({ onAgregarProducto }) {
 
   const serialesFiltrados = filtrarPorScope(seriales, busquedaSerial, scopeBusqueda);
 
-  const disponibles       = serialesFiltrados.filter((s) => !s.vendido && !s.prestado);
+  // Lo que está en garantía con el proveedor no es vendible: va aparte, como
+  // los prestados (el número de arriba tiene que dar lo mismo que la tarjeta).
+  const enGarantiaSerial  = (s) => !!s.en_garantia_numero && !s.vendido;
+  const disponibles       = serialesFiltrados.filter((s) => !s.vendido && !s.prestado && !enGarantiaSerial(s));
+  const enGarantiaLista   = serialesFiltrados.filter((s) => !s.prestado && enGarantiaSerial(s));
   const prestados         = serialesFiltrados.filter((s) =>  s.prestado && !s.vendido);
   const vendidos          = serialesFiltrados.filter((s) =>  s.vendido);
-  const serialesOrdenados = [...disponibles, ...prestados, ...vendidos];
+  const serialesOrdenados = [...disponibles, ...enGarantiaLista, ...prestados, ...vendidos];
 
   const handleSeleccionar = (p) => {
     setProductoSeleccionado(p);
@@ -1044,6 +1065,9 @@ export function ProductosSerial({ onAgregarProducto }) {
           {prestados.length > 0 && (
             <span className="text-xs text-blue-500 font-medium">· {prestados.length} prestado(s)</span>
           )}
+          {enGarantiaLista.length > 0 && (
+            <span className="text-xs text-rose-600 font-medium">· {enGarantiaLista.length} en garantía</span>
+          )}
           {busquedaSerial && (
             <span className="text-xs text-gray-400 ml-auto">
               {serialesOrdenados.length} de {seriales.length} resultado{serialesOrdenados.length !== 1 ? 's' : ''}
@@ -1123,6 +1147,7 @@ export function ProductosSerial({ onAgregarProducto }) {
                   {Number(p.prestados) > 0 && (
                     <span className="text-xs text-blue-500 font-medium">· {p.prestados} prest.</span>
                   )}
+                  <ChipEnGarantia reserva={{ cantidad: Number(p.en_garantia) || 0 }} />
                   {p.dias_en_inventario != null && (
                     <AntiguedadBadge dias={p.dias_en_inventario} />
                   )}

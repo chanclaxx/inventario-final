@@ -56,6 +56,11 @@ const errorHandler = (err, req, res, next) => {
     return res.status(409).json({ ok: false, error: err.message, code: 'EQUIPO_EN_TECNICO' });
   }
 
+  // El candado de garantías con proveedores (trigger fn_serial_en_garantia).
+  if (err.code === 'GP001') {
+    return res.status(409).json({ ok: false, error: err.message, code: 'EQUIPO_EN_GARANTIA' });
+  }
+
   if (err.code === '23505') {
     return res.status(409).json({ ok: false, error: mensajeDuplicado(err) });
   }

@@ -15,6 +15,7 @@ const { asignarNumeroDocumento } = require('../../utils/numeracion.util');
 const { calcularCostoPromedio }  = require('../../utils/costoPromedio.util');
 const { copiarCodigoSiLibre }    = require('../../utils/codigoAuto.util');
 const { exigirNoEnTecnico }      = require('../../utils/serialEnTecnico.util');
+const { exigirNoEnGarantia }     = require('../../utils/serialEnGarantia.util');
 const precioMinimo            = require('../../utils/precioMinimo.util');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -901,6 +902,8 @@ const despachar = async (req, {
         // trigger de técnicos no lo ve: sin esto el local descubriría al recibir
         // que la bodega le mandó un equipo que está donde un técnico.
         await exigirNoEnTecnico(client, s.id, s.imei);
+        // Lo mismo con una garantía abierta con el proveedor.
+        await exigirNoEnGarantia(client, s.id, s.imei);
 
         const { rows: dup } = await client.query(`
           SELECT lr.id FROM lineas_remision lr

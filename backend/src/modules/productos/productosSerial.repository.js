@@ -1,5 +1,6 @@
 const { pool } = require('../../config/db');
-const { hayUbicacion, hayListasPrecios, hayTecnicos } = require('../../config/columnas');
+const { hayUbicacion, hayListasPrecios, hayTecnicos, hayReclamosGarantia } = require('../../config/columnas');
+const { sqlNoEnGarantia } = require('../../utils/serialEnGarantia.util');
 const {
   JOINS_ORIGEN_RETOMA, COLUMNAS_ORIGEN_RETOMA, NEGOCIO_RETOMA,
 } = require('../../utils/retomaOrigen.util');
@@ -29,7 +30,12 @@ const findAll = async (sucursalId, negocioId, lineaId) => {
       ${selPrecios('ps')}
       su.nombre  AS sucursal_nombre,
       lp.nombre  AS linea_nombre,
-      COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false) AS disponibles,
+      -- Lo que está en garantía con el proveedor no es vendible: no cuenta
+      -- como disponible y sale aparte (sin las tablas, la condición es TRUE).
+      COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false
+                            AND ${sqlNoEnGarantia('s')}) AS disponibles,
+      ${hayReclamosGarantia() ? `COUNT(s.id) FILTER (WHERE s.vendido = false AND s.prestado = false
+                            AND NOT ${sqlNoEnGarantia('s')}) AS en_garantia,` : ''}
       -- Días de la unidad disponible más antigua (la que lleva más tiempo sin venderse)
       (CURRENT_DATE - MIN(s.fecha_entrada)
         FILTER (WHERE s.vendido = false AND s.prestado = false))::int AS dias_en_inventario
@@ -166,7 +172,20 @@ const getSeriales = async (productoId, vendido) => {
       tec.tecnico_nombre AS en_tecnico_nombre,
       tec.fecha          AS en_tecnico_desde,
       tec.salida_numero  AS en_tecnico_salida` : ''}
+      ${hayReclamosGarantia() ? `,
+      -- ¿Está en garantía con el proveedor? El trigger ya impide venderlo.
+      gar.numero AS en_garantia_numero,
+      gar.fecha  AS en_garantia_desde,
+      gar.proveedor_nombre AS en_garantia_proveedor` : ''}
     FROM seriales s
+    ${hayReclamosGarantia() ? `LEFT JOIN LATERAL (
+      SELECT COALESCE(rg.numero, rg.id) AS numero, rg.fecha, prv.nombre AS proveedor_nombre
+      FROM reclamos_garantia_lineas rgl
+      JOIN reclamos_garantia rg ON rg.id = rgl.reclamo_id
+      LEFT JOIN proveedores prv ON prv.id = rg.proveedor_id
+      WHERE rgl.serial_id = s.id AND NOT rgl.cerrada AND NOT rg.anulado
+      LIMIT 1
+    ) gar ON TRUE` : ''}
     ${hayTecnicos() ? `LEFT JOIN LATERAL (
       SELECT t.nombre AS tecnico_nombre, st.fecha, COALESCE(st.numero, st.id) AS salida_numero
       FROM equipos_tecnico et
@@ -400,7 +419,7 @@ const findComprasCliente = async (negocioId, q) => {
 const contarSerialesDetalle = async (productoId) => {
   const { rows } = await pool.query(`
     SELECT
-      COUNT(*) FILTER (WHERE vendido = false AND prestado = false) AS disponibles,
+      COUNT(*) FILTER (WHERE vendido = false AND prestado = false AND ${sqlNoEnGarantia('seriales')}) AS disponibles,
       COUNT(*) FILTER (WHERE prestado = true  AND vendido = false) AS prestados,
       COUNT(*) FILTER (WHERE vendido = true)                       AS vendidos,
       COUNT(*)                                                      AS total

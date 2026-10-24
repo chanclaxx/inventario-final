@@ -454,6 +454,18 @@ seccion('9. Hallazgos');
   ok('sin datos, los hallazgos no inventan', !sinNada.hallazgos.some((x) => /undefined|NaN/.test(x.titulo + x.detalle)));
 }
 
+// Garantías con proveedores (20261023): un caso del período, para que sus dos
+// tablas tengan filas en el contrato. Va por cantidad y DESPUÉS de las
+// secciones de arriba: no cambia ningún stock ni suma ya comprobada.
+await db.exec(leer(RAIZ, 'migrations/20261023_reclamos_garantia.sql'));
+columnas._setReclamosGarantiaDisponible(true);
+{
+  const { id: REC } = await uno(`INSERT INTO reclamos_garantia (negocio_id, sucursal_id, proveedor_id, origen_tipo, falla, fecha)
+    VALUES (1, 1, $1, 'inventario', 'Se despega', $2) RETURNING id`, [B, ts(10)]);
+  await q(`INSERT INTO reclamos_garantia_lineas (reclamo_id, negocio_id, sucursal_id, tipo, producto_id, nombre_producto, cantidad, costo_unitario)
+    VALUES ($1, 1, 1, 'cantidad', $2, 'Estuche A', 2, 3500)`, [REC, P_A]);
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 seccion('10. ★ El contrato con la pantalla');
 const defs = await import(pathToFileURL(path.join(FRONT, 'src/pages/reportes/asesor/tablasAsesor.js')).href);
@@ -471,7 +483,7 @@ const conVentas = async (o) => ({
     for (const col of t.columnas) if (!(col.clave in filas[0])) faltan.push(`${t.id}.${col.clave}`);
   }
   ok('★ cada columna de cada tabla existe en lo que manda el backend', faltan.length === 0, faltan.join(', '));
-  es('catorce tablas (con las ventas una a una)', defs.TABLAS.length, 14);
+  es('dieciséis tablas (con las ventas una a una y las dos de garantías)', defs.TABLAS.length, 16);
   ok('cada hallazgo lleva a una tabla definida', n.hallazgos.every((h) => defs.tablaPorId(h.tabla)));
   const senalesUsadas = new Set(defs.TABLAS.flatMap((t) => t.filas(n).flatMap((f) => f.senales || [])));
   ok('★ toda señal que manda el backend tiene texto y explicación en la pantalla',
@@ -511,7 +523,7 @@ seccion('11. El Excel, generado de verdad y releído');
   const celda = (hoja, r, c) => wb.Sheets[hoja][X.utils.encode_cell({ r, c })];
 
   es('la primera hoja es el Resumen', wb.SheetNames[0], 'Resumen');
-  es('…y hay una por tabla con datos (14, con «Ventas»)', wb.SheetNames.length, 15);
+  es('…y hay una por tabla con datos (16, con «Ventas» y las garantías)', wb.SheetNames.length, 17);
   {
     const tv = defs.tablaPorId('ventas_detalle');
     es('la hoja Ventas trae TODAS sus columnas', tv.columnas.map((_, c) => celda('Ventas', 4, c)?.v), tv.columnas.map((col) => col.titulo));

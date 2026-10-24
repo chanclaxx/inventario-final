@@ -6,8 +6,9 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Badge }   from '../../components/ui/Badge';
-import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench, BarChart2, Wallet } from 'lucide-react';
+import { Plus, Pencil, UserX, UserCheck, Users, ShieldCheck, Truck, PackageSearch, FileDown, Eye, ReceiptText, Wrench, BarChart2, Wallet, ShieldAlert } from 'lucide-react';
 import { LLAVES_TECNICOS, BASE_TECNICOS, permisosEfectivosTecnicos } from '../../utils/permisosTecnicos';
+import { LLAVES_GARANTIAS, BASE_GARANTIAS, permisosEfectivosGarantias } from '../../utils/permisosGarantias';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ const FORM_INICIAL = {
   permisos_tecnicos:           null,
   permisos_reportes:           null,
   permisos_gastos:             null,
+  permisos_garantias:          null,
   sucursales_vista:            [],
 };
 
@@ -522,6 +524,56 @@ function SelectorPermisosTecnicos({ permisos, onChange, rol }) {
   );
 }
 
+// ─── SelectorPermisosGarantias ───────────────────────────────────────────────
+//
+// Garantías con proveedores. Misma regla que técnicos: null = permisos base del
+// rol (supervisor todo menos anular; vendedor recibe y le entrega otra unidad
+// al cliente), y personalizar congela lo que el rol ya daba.
+function SelectorPermisosGarantias({ permisos, onChange, rol }) {
+  const personalizado = permisos !== null && permisos !== undefined;
+  const efectivos = permisosEfectivosGarantias(rol, permisos);
+  const base = BASE_GARANTIAS[rol] || {};
+  const textoBase = LLAVES_GARANTIAS.filter((l) => base[l.id]).map((l) => l.label.toLowerCase()).join(', ');
+
+  return (
+    <div className="flex flex-col gap-3 bg-rose-50 border border-rose-100 rounded-xl p-3.5">
+      <div className="flex items-center gap-2">
+        <ShieldAlert size={13} className="text-rose-600 flex-shrink-0" />
+        <p className="text-xs font-semibold text-rose-700 uppercase tracking-wide">Garantías con proveedores</p>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <CheckboxCustom
+          checked={personalizado}
+          onChange={() => onChange(personalizado ? null : permisosEfectivosGarantias(rol, null))}
+          color="indigo"
+        />
+        <span className="text-sm text-gray-700">Definir permiso para este usuario</span>
+      </label>
+      {personalizado ? (
+        <div className="ml-6 flex flex-col gap-2">
+          {LLAVES_GARANTIAS.map((l) => (
+            <label key={l.id} className="flex items-center gap-2.5 cursor-pointer select-none">
+              <CheckboxCustom
+                checked={efectivos[l.id]}
+                onChange={() => onChange({ ...efectivos, [l.id]: !efectivos[l.id] })}
+                color="indigo"
+              />
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm text-gray-700">{l.label}</span>
+                <span className="text-xs text-gray-400">{l.desc}</span>
+              </div>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+          Permisos del rol: {textoBase || 'ninguno'}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── SelectorPermisosReportes ─────────────────────────────────────────────────
 //
 // «Ver todos los reportes»: abre las pestañas que hoy son solo del admin
@@ -892,6 +944,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           permisos_tecnicos:           editando.permisos_tecnicos           ?? null,
           permisos_reportes:           editando.permisos_reportes           ?? null,
           permisos_gastos:             editando.permisos_gastos             ?? null,
+          permisos_garantias:          editando.permisos_garantias          ?? null,
           sucursales_vista:            editando.sucursales_vista            ?? [],
         }
       : FORM_INICIAL
@@ -918,6 +971,9 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
   // La casilla de gastos existe solo con el centro de gastos encendido.
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: fetchConfig, staleTime: 60_000 });
   const mostrarPermGastos = mostrarPermReportes && config?.gastos_activo === '1';
+  // Garantías con proveedores: solo con la función encendida (se entra desde
+  // varias pantallas, así que no cuelga de un módulo).
+  const mostrarPermGarantias = form.rol !== 'admin_negocio' && config?.reclamos_garantia_activo === '1';
 
   // Lista de proveedores para el selector "ver solo algunos"
   const { data: proveedoresLista = [] } = useQuery({
@@ -940,6 +996,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       permisos_tecnicos:    null,
       permisos_reportes:    null,
       permisos_gastos:      null,
+      permisos_garantias:   null,
       sucursales_vista:     [],
     }));
   };
@@ -976,6 +1033,7 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
       payload.permisos_tecnicos          = null;
       payload.permisos_reportes          = null;
       payload.permisos_gastos            = null;
+      payload.permisos_garantias         = null;
       payload.sucursales_vista           = [];
     }
     onGuardar(payload);
@@ -1097,6 +1155,15 @@ function ModalUsuario({ open, onClose, editando, sucursales, onGuardar, cargando
           <SelectorPermisosTecnicos
             permisos={form.permisos_tecnicos}
             onChange={(p) => set('permisos_tecnicos', p)}
+            rol={form.rol}
+          />
+        )}
+
+        {/* Garantías con proveedores (solo con la función encendida) */}
+        {mostrarPermGarantias && (
+          <SelectorPermisosGarantias
+            permisos={form.permisos_garantias}
+            onChange={(p) => set('permisos_garantias', p)}
             rol={form.rol}
           />
         )}

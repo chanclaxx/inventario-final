@@ -5,7 +5,7 @@ import {
   ShoppingCart, RotateCcw, CheckCircle2, XCircle,
   MapPin, User, Phone, CreditCard, Tag, Loader2,
   AlertCircle, Box, Layers, ScanLine, ChevronDown, ChevronUp,
-  TrendingUp, RefreshCw, Truck, Wrench,
+  TrendingUp, RefreshCw, Truck, Wrench, ShieldAlert, PackageCheck,
 } from 'lucide-react';
 import { buscarPorIMEI, buscarProductos, getHistorialCantidad } from '../../api/busqueda.api';
 import { ChipGarantia } from '../proveedores/indicadoresOrden';
@@ -33,6 +33,9 @@ const EstadoBadge = ({ estado }) => {
 };
 
 const SerialEstado = ({ serial }) => {
+  if (serial.estado_garantia) {
+    return <span className="text-xs font-semibold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">{serial.estado_garantia}</span>;
+  }
   if (serial.vendido)  return <span className="text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Vendido</span>;
   if (serial.prestado) return <span className="text-xs font-semibold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Prestado</span>;
   return <span className="text-xs font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Disponible</span>;
@@ -47,6 +50,8 @@ const tipoConfig = {
   retoma:   { color: 'bg-purple-500', icon: RotateCcw,     label: 'Retoma (entrada usada)'},
   venta:    { color: 'bg-green-500',  icon: ShoppingCart,  label: 'Venta'                 },
   tecnico:  { color: 'bg-amber-600',  icon: Wrench,        label: 'Técnico externo'       },
+  garantia: { color: 'bg-rose-500',   icon: ShieldAlert,   label: 'Garantía con proveedor' },
+  garantia_entrada: { color: 'bg-emerald-600', icon: PackageCheck, label: 'Entró por una garantía' },
 };
 
 const ESTADO_TECNICO = {
@@ -70,6 +75,55 @@ function EventoTecnico({ d }) {
         {d.fecha_regreso && <span>Volvió: {formatFecha(d.fecha_regreso)}</span>}
         {d.garantia_hasta && <span>Garantía hasta {d.garantia_hasta}</span>}
         {d.costo != null && Number(d.costo) > 0 && <span>Costo: <span className="font-medium text-gray-700">{formatCOP(d.costo)}</span></span>}
+        {d.sucursal && <span className="flex items-center gap-1"><MapPin size={11} />{d.sucursal}</span>}
+      </div>
+    </div>
+  );
+}
+
+// Garantía con el proveedor: cuándo entró, a quién se le reclamó y qué pasó.
+const TEXTO_MOV_GARANTIA = {
+  cambio:              (m) => `Al cliente se le entregó otro equipo${m.imei ? ` (${m.imei})` : ''}`,
+  reembolso:           () => 'Al cliente se le devolvió el dinero',
+  reposicion:          (m) => `El proveedor lo repuso${m.imei ? ` con el ${m.imei}` : ''}`,
+  reparacion:          (m) => `El proveedor lo reparó${m.garantia_hasta ? ` (garantía hasta ${m.garantia_hasta})` : ''}`,
+  nota_credito:        () => 'El proveedor dio nota crédito',
+  reembolso_proveedor: () => 'El proveedor devolvió el dinero',
+  rechazo:             (m) => `El proveedor no lo cubrió (${m.destino === 'baja' ? 'se dio de baja' : 'volvió al inventario'})`,
+};
+
+function EventoGarantia({ d }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-semibold text-sm text-gray-800">Garantía #{d.numero}</span>
+        {d.proveedor && <span className="text-xs text-gray-500">con {d.proveedor}</span>}
+        {d.abierta && <span className="text-xs font-semibold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">Abierta</span>}
+        {d.anulada && <span className="text-xs font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Anulada</span>}
+      </div>
+      {d.falla && <p className="text-sm text-gray-600">{d.falla}</p>}
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+        {d.cliente && <span>Cliente: {d.cliente}</span>}
+        {d.envio && <span>Envío #{d.envio}{d.envio_fecha ? ` · ${formatFecha(d.envio_fecha)}` : ''}</span>}
+        {d.sucursal && <span className="flex items-center gap-1"><MapPin size={11} />{d.sucursal}</span>}
+      </div>
+      {(d.movimientos || []).map((m, i) => (
+        <p key={i} className="text-xs text-gray-600">• {formatFecha(m.fecha)}: {(TEXTO_MOV_GARANTIA[m.tipo] || (() => m.tipo))(m)}</p>
+      ))}
+    </div>
+  );
+}
+
+function EventoGarantiaEntrada({ d }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-sm text-gray-700">
+        {d.como === 'cambio' ? 'Se le entregó a ' : 'Lo repuso '}
+        <span className="font-semibold">{d.como === 'cambio' ? (d.cliente || 'el cliente') : (d.proveedor || 'el proveedor')}</span>
+        {' '}en la garantía #{d.numero}, en lugar del {d.imei_anterior || 'equipo dañado'}.
+      </p>
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+        {d.garantia_hasta && <span>Garantía del proveedor hasta {d.garantia_hasta}</span>}
         {d.sucursal && <span className="flex items-center gap-1"><MapPin size={11} />{d.sucursal}</span>}
       </div>
     </div>
@@ -247,6 +301,8 @@ const detalleComponentes = {
   retoma:   EventoRetoma,
   venta:    EventoVenta,
   tecnico:  EventoTecnico,
+  garantia: EventoGarantia,
+  garantia_entrada: EventoGarantiaEntrada,
 };
 
 function LineaTiempo({ historial }) {

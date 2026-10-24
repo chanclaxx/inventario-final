@@ -4,6 +4,8 @@ const obsequios = require('../../utils/obsequios.util');
 const reportes  = require('./reportes.service');
 const acreedoresRepo = require('../acreedores/acreedores.repository');
 const { SQL_LINEA } = require('../prestamos/reporteEmpleado.service');
+const { sqlNoEnGarantia: noEnGarantia } = require('../../utils/serialEnGarantia.util');
+const { hayReclamosGarantia } = require('../../config/columnas');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ANÁLISIS PARA ASESORÍA — las tablas con las que un asesor comercial revisa el
@@ -63,6 +65,9 @@ const UMBRALES = {
   cartera_vieja_dias:         60,   // deuda de cliente con más de N días
   abc_a_pct:                  80,   // clase A: los productos que suman este % de la utilidad
   abc_b_pct:                  95,
+  garantias_pct:               3,   // unidades en garantía sobre las compradas del período
+  garantias_minimas:           2,   // …y al menos tantas, para no acusar por una sola
+  garantia_demora_dias:       15,   // una garantía con el proveedor más de N días sin respuesta
 };
 
 const HOY_SQL = `(NOW() AT TIME ZONE 'America/Bogota')::date`;
@@ -184,6 +189,7 @@ const _stockPorNodo = async (sedes) => {
       FROM productos_serial ps
       LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
       LEFT JOIN seriales se ON se.producto_id = ps.id AND se.vendido = false AND se.prestado = false
+                           AND ${noEnGarantia('se')}
       LEFT JOIN LATERAL (
         SELECT ${costoRed.sqlValorInternoEnStock('se.id', 'ps.sucursal_id')} AS valor
       ) vi ON TRUE
@@ -223,6 +229,7 @@ const _equiposEnStock = async (sedes) => {
       ) vi
       WHERE se.vendido = false AND se.prestado = false
         AND ps.activo = true AND ps.sucursal_id = ANY($1::int[])
+        AND ${noEnGarantia('se')}
     ) u
     GROUP BY nombre
   `, [sedes]);
@@ -338,6 +345,79 @@ const _equiposPorProveedor = async (sedes, desde, hasta, negocioId) => {
   `, [sedes, desde, hasta, negocioId]);
   return rows;
 };
+
+// ── Garantías con proveedores (Proveedores → Garantías) ──────────────────────
+// Lo que salió dañado y se le reclamó a cada proveedor en el período (por la
+// fecha del caso), con lo que respondió. Todo DERIVADO de las tablas de la
+// garantía: lo pendiente, lo repuesto, lo recuperado y lo que no cubrió. Sin
+// la función instalada, nada (y las tablas no salen).
+const _AGREGADO_RESPUESTAS = `
+  LEFT JOIN LATERAL (
+    SELECT SUM(x.cantidad) FILTER (WHERE x.tipo = 'reposicion')                     AS repuestas,
+           SUM(x.cantidad) FILTER (WHERE x.tipo = 'reparacion')                     AS reparadas,
+           SUM(x.cantidad) FILTER (WHERE x.tipo = 'rechazo')                        AS no_cubiertas,
+           SUM(x.cantidad) FILTER (WHERE x.tipo = 'rechazo' AND x.destino = 'baja') AS bajas,
+           SUM(x.valor)    FILTER (WHERE x.tipo IN ('nota_credito', 'reembolso_proveedor')) AS recuperado,
+           MIN(x.fecha)                                                             AS primera_respuesta
+    FROM reclamos_garantia_movimientos x
+    WHERE x.linea_id = l.id AND x.lado = 'proveedor' AND NOT x.anulado
+  ) m ON TRUE`;
+
+const _garantiasPorProveedor = (sedes, desde, hasta) => (hayReclamosGarantia()
+  ? _tolerante('garantías por proveedor', async () => {
+    const { rows } = await pool.query(`
+      SELECT r.proveedor_id, COALESCE(pr.nombre, 'Sin proveedor definido') AS nombre,
+             COUNT(DISTINCT r.id)::int                                                   AS casos,
+             COALESCE(SUM(l.cantidad), 0)::int                                           AS unidades,
+             COALESCE(SUM(l.cantidad - l.cantidad_resuelta) FILTER (WHERE NOT l.cerrada), 0)::int AS pendientes,
+             COALESCE(SUM(l.cantidad - l.cantidad_resuelta)
+               FILTER (WHERE NOT l.cerrada AND l.envio_id IS NULL), 0)::int              AS por_enviar,
+             COALESCE(SUM(m.repuestas), 0)::int    AS repuestas,
+             COALESCE(SUM(m.reparadas), 0)::int    AS reparadas,
+             COALESCE(SUM(m.no_cubiertas), 0)::int AS no_cubiertas,
+             COALESCE(SUM(m.recuperado), 0)        AS recuperado,
+             COALESCE(SUM(l.cantidad * l.costo_unitario), 0)                             AS costo_reclamado,
+             COALESCE(SUM(m.bajas * l.costo_unitario), 0)                                AS perdido,
+             ROUND(AVG(GREATEST(0, m.primera_respuesta::date - e.fecha::date))
+               FILTER (WHERE m.primera_respuesta IS NOT NULL AND e.fecha IS NOT NULL))::int AS dias_respuesta,
+             COALESCE(SUM(l.cantidad - l.cantidad_resuelta)
+               FILTER (WHERE NOT l.cerrada AND e.fecha IS NOT NULL
+                         AND (${HOY_SQL} - e.fecha::date) >= ${UMBRALES.garantia_demora_dias}), 0)::int AS demoradas
+      FROM reclamos_garantia_lineas l
+      JOIN reclamos_garantia r    ON r.id = l.reclamo_id
+      LEFT JOIN proveedores pr    ON pr.id = r.proveedor_id
+      LEFT JOIN envios_garantia e ON e.id = l.envio_id
+      ${_AGREGADO_RESPUESTAS}
+      WHERE r.sucursal_id = ANY($1::int[]) AND NOT r.anulado AND DATE(r.fecha) BETWEEN $2 AND $3
+      GROUP BY r.proveedor_id, pr.nombre
+    `, [sedes, desde, hasta]);
+    return rows;
+  }, [])
+  : Promise.resolve([]));
+
+const _garantiasPorProducto = (sedes, desde, hasta) => (hayReclamosGarantia()
+  ? _tolerante('garantías por producto', async () => {
+    const { rows } = await pool.query(`
+      SELECT l.tipo, l.nombre_producto AS producto,
+             COUNT(DISTINCT r.id)::int                                            AS casos,
+             COALESCE(SUM(l.cantidad), 0)::int                                    AS unidades,
+             COUNT(DISTINCT r.proveedor_id)::int                                  AS proveedores,
+             string_agg(DISTINCT pr.nombre, ', ')                                 AS proveedores_nombres,
+             COALESCE(SUM(l.cantidad - l.cantidad_resuelta) FILTER (WHERE NOT l.cerrada), 0)::int AS pendientes,
+             COALESCE(SUM(m.no_cubiertas), 0)::int                                AS no_cubiertas,
+             COALESCE(SUM(l.cantidad * l.costo_unitario), 0)                      AS costo_reclamado,
+             (array_agg(r.falla ORDER BY r.fecha DESC))[1]                        AS ultima_falla
+      FROM reclamos_garantia_lineas l
+      JOIN reclamos_garantia r ON r.id = l.reclamo_id
+      LEFT JOIN proveedores pr ON pr.id = r.proveedor_id
+      ${_AGREGADO_RESPUESTAS}
+      WHERE r.sucursal_id = ANY($1::int[]) AND NOT r.anulado AND DATE(r.fecha) BETWEEN $2 AND $3
+      GROUP BY l.tipo, l.nombre_producto
+      ORDER BY unidades DESC
+    `, [sedes, desde, hasta]);
+    return rows;
+  }, [])
+  : Promise.resolve([]));
 
 const _novedadesPorProveedor = (negocioId, desde, hasta) => _tolerante('novedades de proveedor', async () => {
   const { rows } = await pool.query(`
@@ -708,8 +788,9 @@ const _armarPrecios = (compras) => {
   return filas.sort((a, b) => b.sobrecosto - a.sobrecosto || Number(b.comparable) - Number(a.comparable) || b.valor - a.valor);
 };
 
-const _armarProveedores = ({ compras, equipos, deudas, novedades, precios }) => {
+const _armarProveedores = ({ compras, equipos, deudas, novedades, precios, garantias = [] }) => {
   const totalValor = compras.reduce((s, c) => s + n0(c.valor), 0);
+  const gar = new Map(garantias.filter((g) => g.proveedor_id != null).map((g) => [Number(g.proveedor_id), g]));
   const eq  = new Map(equipos.map((e) => [Number(e.proveedor_id), e]));
   const deu = new Map(deudas.map((d) => [Number(d.proveedor_id), d]));
   const nov = new Map();
@@ -768,6 +849,13 @@ const _armarProveedores = ({ compras, equipos, deudas, novedades, precios }) => 
       // La cuenta HOY (es del negocio, no del período ni de la sede)
       deuda: d ? Math.max(0, n0(d.saldo)) : 0,
       deuda_vencida: d ? n0(d.saldo_vencido) : 0,
+      // Garantías del período: cuánto de lo que te vende sale dañado.
+      garantias_unidades: n0(gar.get(id)?.unidades),
+      garantias_pct: gar.get(id) ? r1(pct(n0(gar.get(id).unidades), compradas)) : null,
+      garantias_pendientes: n0(gar.get(id)?.pendientes),
+      garantias_recuperado: n0(gar.get(id)?.recuperado),
+      garantias_no_cubiertas: n0(gar.get(id)?.no_cubiertas),
+      garantias_dias_respuesta: n(gar.get(id)?.dias_respuesta),
     };
     const s = [];
     if (fila.participacion_pct !== null && fila.participacion_pct > UMBRALES.concentracion_proveedor_pct) s.push('concentracion');
@@ -781,9 +869,45 @@ const _armarProveedores = ({ compras, equipos, deudas, novedades, precios }) => 
     if (fila.equipos_utilidad !== null && vendidos > 0 && fila.equipos_utilidad < 0) s.push('perdida');
     if (fila.deuda_vencida > 0) s.push('deuda_vencida');
     if (fila.novedades > 0) s.push('novedades');
+    if (fila.garantias_unidades >= UMBRALES.garantias_minimas
+        && fila.garantias_pct !== null && fila.garantias_pct > UMBRALES.garantias_pct) s.push('garantias');
     return { ...fila, senales: s };
   }).sort((a, b) => b.valor - a.valor);
 };
+
+// Una fila por proveedor con garantías en el período, aunque no se le haya
+// comprado en el período (la garantía puede ser de una compra vieja): por eso
+// es tabla propia y no solo columnas de «Proveedores».
+const _armarGarantias = (garantias, compras) => {
+  const comp = new Map(compras.map((c) => [Number(c.proveedor_id), n0(c.unidades_compradas)]));
+  return garantias.map((g) => {
+    const compradas = g.proveedor_id != null ? comp.get(Number(g.proveedor_id)) : undefined;
+    const fila = {
+      proveedor_id: g.proveedor_id, proveedor: g.nombre,
+      casos: n0(g.casos), unidades: n0(g.unidades),
+      compradas: compradas ?? null,
+      pct_compradas: compradas ? r1(pct(n0(g.unidades), compradas)) : null,
+      pendientes: n0(g.pendientes), por_enviar: n0(g.por_enviar), demoradas: n0(g.demoradas),
+      repuestas: n0(g.repuestas), reparadas: n0(g.reparadas), no_cubiertas: n0(g.no_cubiertas),
+      recuperado: n0(g.recuperado), costo_reclamado: n0(g.costo_reclamado), perdido: n0(g.perdido),
+      dias_respuesta: n(g.dias_respuesta),
+    };
+    const s = [];
+    if (fila.unidades >= UMBRALES.garantias_minimas && fila.pct_compradas !== null
+        && fila.pct_compradas > UMBRALES.garantias_pct) s.push('garantias');
+    if (fila.demoradas > 0) s.push('garantia_demorada');
+    if (fila.no_cubiertas > 0) s.push('no_cubre');
+    return { ...fila, senales: s };
+  }).sort((a, b) => b.unidades - a.unidades);
+};
+
+const _armarGarantiasProductos = (filas) => filas.map((g) => ({
+  tipo: g.tipo, producto: g.producto, casos: n0(g.casos), unidades: n0(g.unidades),
+  proveedores: n0(g.proveedores), proveedores_nombres: g.proveedores_nombres || '',
+  pendientes: n0(g.pendientes), no_cubiertas: n0(g.no_cubiertas),
+  costo_reclamado: n0(g.costo_reclamado), ultima_falla: g.ultima_falla || '',
+  senales: n0(g.no_cubiertas) > 0 ? ['no_cubre'] : [],
+}));
 
 const _armarMeses = ({ ventasMes, comprasMes }) => {
   const mapa = new Map();
@@ -1026,6 +1150,20 @@ const _hallazgos = (d) => {
       `De ${p.equipos} equipos comprados se han vendido ${p.equipos_vendidos} (${p.equipos_vendidos_pct} %). `
       + `Quedan ${p.equipos_sin_vender} por ${$(p.valor_sin_vender)}, con ${p.dias_sin_vender ?? 0} días en promedio desde la compra.`);
   }
+  for (const g of (d.garantias || []).filter((x) => x.senales.includes('garantias')).slice(0, 3)) {
+    poner('alerta', 'garantias', `De lo que le compraste a ${g.proveedor}, el ${g.pct_compradas} % salió en garantía`,
+      `${plural(g.unidades, 'unidad', 'unidades')} en ${plural(g.casos, 'caso', 'casos')} sobre ${g.compradas} compradas en el período. `
+      + `Por encima del ${UMBRALES.garantias_pct} % conviene revisar la calidad de lo que entrega.`
+      + (g.no_cubiertas ? ` No cubrió ${plural(g.no_cubiertas, 'unidad', 'unidades')}.` : ''));
+  }
+  {
+    const dem = (d.garantias || []).filter((x) => x.demoradas > 0);
+    if (dem.length) {
+      const total = dem.reduce((s, x) => s + x.demoradas, 0);
+      poner('atencion', 'garantias', `${plural(total, 'unidad lleva', 'unidades llevan')} más de ${UMBRALES.garantia_demora_dias} días con el proveedor sin respuesta`,
+        `${dem.map((x) => `${x.proveedor} (${x.demoradas})`).join(', ')}. Es mercancía que no se puede vender mientras tanto: llama a reclamar.`);
+    }
+  }
   for (const p of proveedores.filter((x) => x.senales.includes('devoluciones')).slice(0, 3)) {
     poner('atencion', 'proveedores', `A ${p.proveedor} le devolviste el ${p.devuelto_pct} % de lo comprado`,
       `${plural(p.unidades_devueltas, 'unidad devuelta', 'unidades devueltas')} por ${$(p.valor_devuelto)}. Por encima del ${UMBRALES.devoluciones_pct} % conviene revisar la calidad de lo que entrega.`);
@@ -1201,15 +1339,19 @@ const getAnalisisAsesor = async (negocioId, { sucursalIds, desde, hasta, todoElN
     _ventasPorDiaYHora(sedeIds, desde, hasta),
     _clientes(sedeIds, desde, hasta),
   ]);
-  const [carteraFilas, equiposFilas] = await Promise.all([
+  const [carteraFilas, equiposFilas, garantiasProv, garantiasProd] = await Promise.all([
     _cartera(sedeIds),
     _equiposEnStock(sedeIds),
+    _garantiasPorProveedor(sedeIds, desde, hasta),
+    _garantiasPorProducto(sedeIds, desde, hasta),
   ]);
 
   const { productos, variantes } = _armarProductos({ ventas, stock, compras, dias, hoy });
   const lineas          = _armarLineas(productos, dias);
   const precios_compra  = _armarPrecios(compras);
-  const proveedores     = _armarProveedores({ compras: comprasProv, equipos: equiposProv, deudas: saldos, novedades, precios: precios_compra });
+  const proveedores     = _armarProveedores({ compras: comprasProv, equipos: equiposProv, deudas: saldos, novedades, precios: precios_compra, garantias: garantiasProv });
+  const garantias       = _armarGarantias(garantiasProv, comprasProv);
+  const garantias_productos = _armarGarantiasProductos(garantiasProd);
   const meses           = _armarMeses({ ventasMes, comprasMes });
   const sedesTabla      = _armarSedes(ventasMes, sedes);
   const cuando          = _armarCuando(diaHora);
@@ -1258,6 +1400,7 @@ const getAnalisisAsesor = async (negocioId, { sucursalIds, desde, hasta, todoElN
     sedes: sedesTabla,
     cuando,
     clientes, cartera, equipos_stock,
+    garantias, garantias_productos,
   };
   return { ...datos, hallazgos: _hallazgos(datos) };
 };

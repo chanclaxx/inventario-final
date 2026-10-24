@@ -101,6 +101,9 @@ const garantiasPorVencer = async (negocioId, dias = 15) => {
           AND ps.sucursal_id = c.sucursal_id
           AND NOT se.vendido
           AND NOT se.prestado
+          -- Ya en garantía con el proveedor: el reclamo es justo lo que este
+          -- aviso pide hacer (sin las tablas, la condición es TRUE).
+          AND ${require('../../utils/serialEnGarantia.util').sqlNoEnGarantia('se')}
         LIMIT 1
       ) viva ON TRUE
       WHERE su.negocio_id = $1
@@ -420,7 +423,65 @@ const enviosSinRecibir = async (negocioId, dias = 2) => {
   }
 };
 
+// ── 8. Garantías con proveedores ─────────────────────────────────────────────
+//
+// Tres preguntas, todas DERIVADAS de las tablas de la garantía y solo si el
+// negocio encendió la función (el middleware lee su config y su umbral):
+//   · Demoradas: una unidad con el proveedor hace más de N días sin respuesta.
+//   · Clientes esperando: le debemos una unidad (o el dinero) a alguien.
+//   · Listos para entregar: el proveedor YA respondió por esa unidad y el
+//     cliente sigue esperando — es lo único urgente: está la solución en la
+//     tienda y el cliente no lo sabe.
+//   · Por enviar hace días: lo dañado que nadie ha mandado.
+// Los días se restan en SQL, en hora de Bogotá.
+const reclamosPendientes = async (negocioId) => {
+  const vacio = { activo: false, demoradas: { items: [], total: 0 }, esperando: { items: [], total: 0 },
+    listos: { items: [], total: 0 }, por_enviar: { total: 0, dias_max: 0 } };
+  if (!negocioId) return vacio;
+  try {
+    const { getConfigReclamos } = require('../../middlewares/reclamosGarantia.middleware');
+    const cfg = await getConfigReclamos(negocioId);
+    if (!cfg.activo) return vacio;
+    const hoy = hoyBogota();
+    const { rows } = await pool.query(`
+      SELECT l.id, l.nombre_producto, l.imei, l.cantidad, l.cantidad_cliente, l.cantidad_resuelta, l.cerrada,
+             l.envio_id, r.id AS reclamo_id, COALESCE(r.numero, r.id) AS numero, r.cliente_nombre,
+             r.origen_tipo, r.sucursal_id, su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
+             ($2::date - r.fecha::date)::int AS dias_caso,
+             CASE WHEN e.fecha IS NOT NULL THEN ($2::date - e.fecha::date)::int END AS dias_afuera,
+             EXISTS (SELECT 1 FROM reclamos_garantia_movimientos m
+                     WHERE m.linea_id = l.id AND m.lado = 'proveedor' AND NOT m.anulado
+                       AND m.tipo IN ('reposicion', 'reparacion')) AS volvio_unidad
+      FROM reclamos_garantia_lineas l
+      JOIN reclamos_garantia r   ON r.id = l.reclamo_id
+      JOIN sucursales su         ON su.id = r.sucursal_id
+      LEFT JOIN proveedores pr   ON pr.id = r.proveedor_id
+      LEFT JOIN envios_garantia e ON e.id = l.envio_id
+      WHERE r.negocio_id = $1 AND NOT r.anulado
+        AND (NOT l.cerrada OR (r.origen_tipo <> 'inventario' AND l.cantidad_cliente < l.cantidad))
+      ORDER BY r.fecha
+      LIMIT 500
+    `, [negocioId, hoy]);
+    const demoradas = rows.filter((x) => !x.cerrada && x.envio_id && x.dias_afuera >= cfg.dias_demora)
+      .sort((a, b) => b.dias_afuera - a.dias_afuera);
+    const esperando = rows.filter((x) => x.origen_tipo !== 'inventario' && x.cantidad_cliente < x.cantidad);
+    const listos = esperando.filter((x) => x.volvio_unidad);
+    const porEnviar = rows.filter((x) => !x.cerrada && !x.envio_id && x.dias_caso >= 3);
+    return {
+      activo: true,
+      umbrales: { dias_demora: cfg.dias_demora },
+      demoradas: { items: demoradas.slice(0, 50), total: demoradas.length },
+      esperando: { items: esperando.slice(0, 50), total: esperando.length },
+      listos: { items: listos.slice(0, 50), total: listos.length },
+      por_enviar: { total: porEnviar.length, dias_max: Math.max(0, ...porEnviar.map((x) => x.dias_caso)) },
+    };
+  } catch (err) {
+    return _fallo('reclamosPendientes', negocioId, err, vacio);
+  }
+};
+
 module.exports = {
+  reclamosPendientes,
   enviosRedVencidos, enviosSinRecibir,
   garantiasPorVencer, pedidosAtrasados, entradasSinConfirmar, cajasSinCerrar,
   tecnicosPendientes,

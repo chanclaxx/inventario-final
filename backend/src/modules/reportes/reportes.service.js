@@ -2413,6 +2413,31 @@ const getInventarioMenosDeuda = async (negocioId, sucursalId = null, valorSede =
 
 // ─── getValorInventario ───────────────────────────────────────────────────────
 
+// Lo que está en garantía con el proveedor NO es inventario vendible: un serial
+// abierto en un reclamo se saca de los disponibles (por cantidad ya salió del
+// stock al apartarse). Se informa APARTE, a su costo congelado, para que el
+// negocio sepa cuánto tiene afuera. Sin las tablas, TRUE y null: lo de siempre.
+const _noEnGarantia = (alias) => require('../../utils/serialEnGarantia.util').sqlNoEnGarantia(alias);
+const _enGarantia = async (sucursalId) => {
+  if (!require('../../config/columnas').hayReclamosGarantia()) return null;
+  const { rows } = await pool.query(`
+    SELECT COALESCE(SUM(l.cantidad - l.cantidad_resuelta), 0)::int                                 AS unidades,
+           COALESCE(SUM((l.cantidad - l.cantidad_resuelta) * l.costo_unitario), 0)::numeric        AS costo_total,
+           COALESCE(SUM(l.cantidad - l.cantidad_resuelta) FILTER (WHERE l.costo_unitario IS NULL), 0)::int AS sin_costo,
+           COALESCE(SUM(l.cantidad - l.cantidad_resuelta) FILTER (WHERE l.envio_id IS NOT NULL), 0)::int   AS con_proveedor,
+           COUNT(DISTINCT l.reclamo_id)::int                                                       AS casos
+    FROM reclamos_garantia_lineas l
+    JOIN reclamos_garantia r ON r.id = l.reclamo_id
+    WHERE l.sucursal_id = $1 AND NOT l.cerrada AND NOT r.anulado
+  `, [sucursalId]);
+  const x = rows[0];
+  if (!x || !Number(x.unidades)) return null;
+  return {
+    unidades: Number(x.unidades), costo_total: Number(x.costo_total), sin_costo: Number(x.sin_costo),
+    con_proveedor: Number(x.con_proveedor), casos: Number(x.casos),
+  };
+};
+
 // `soloTotales` se salta la lista de lo que no tiene costo (la consulta más
 // pesada): la pide `getInventarioMenosDeuda` para las OTRAS sedes, de las que
 // solo necesita la cifra. Sin la opción responde exactamente lo de siempre.
@@ -2445,6 +2470,8 @@ const getValorInventario = async (sucursalId, { soloTotales = false } = {}) => {
         AND se.prestado    = false
         AND ps.activo      = true
         AND ps.sucursal_id = $1
+        -- En garantía con el proveedor: no es vendible y va aparte (en_garantia).
+        AND ${_noEnGarantia('se')}
     `, [sucursalId]),
 
     // Productos cantidad SIN atributos activos (sin variantes) — comportamiento original
@@ -2574,6 +2601,7 @@ const getValorInventario = async (sucursalId, { soloTotales = false } = {}) => {
       LEFT JOIN lineas_producto lp ON lp.id = ps.linea_id
       WHERE se.vendido = false AND se.prestado = false
         AND ps.activo = true AND ps.sucursal_id = $1
+        AND ${_noEnGarantia('se')}
         AND se.costo_compra IS NULL
         -- Una unidad consignada SÍ tiene costo —el valor interno—, aunque la
         -- bodega no haya registrado el suyo. Listarla aquí mandaba al local a
@@ -2621,6 +2649,9 @@ const getValorInventario = async (sucursalId, { soloTotales = false } = {}) => {
       precio_venta_total: serialVenta     + cantidadVenta,
     },
     sin_costo_items: sinCostoResult.rows,
+    // Aparte y SIN sumar a los totales: no es vendible hasta que el proveedor
+    // responda. null sin garantías abiertas (la pantalla no pinta nada).
+    en_garantia: soloTotales ? null : await _enGarantia(sucursalId),
   };
 };
 

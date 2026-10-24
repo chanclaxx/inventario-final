@@ -1768,6 +1768,36 @@ const aplicarMigraciones = async (client) => {
     if (sqlGastos) await migrar(client, 'Centro de gastos', sqlGastos);
   }
 
+  // Garantías con proveedores (Proveedores → Garantías). Ver
+  // migrations/20261023_reclamos_garantia.sql. Se lee el mismo archivo: lleva
+  // PL/pgSQL (el candado del serial). Bloque PROPIO: si fallara, ventas,
+  // préstamos e inventario siguen igual — el trigger no existiría y
+  // `hayReclamosGarantia()` apaga la feature entera.
+  {
+    let sqlReclamos = null;
+    try {
+      sqlReclamos = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261023_reclamos_garantia.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Garantías con proveedores: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlReclamos) await migrar(client, 'Garantías con proveedores', sqlReclamos);
+  }
+
+  // Garantías con proveedores, fase 2: fotos del producto dañado y la orden de
+  // servicio de origen. Ver migrations/20261024_reclamos_garantia_fase2.sql.
+  // Bloque PROPIO: si fallara, la fase 1 sigue igual (`hayReclamosFase2()`).
+  {
+    let sqlFase2 = null;
+    try {
+      sqlFase2 = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261024_reclamos_garantia_fase2.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Garantías fase 2: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlFase2) await migrar(client, 'Garantías con proveedores (fase 2)', sqlFase2);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

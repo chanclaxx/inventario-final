@@ -25,6 +25,10 @@ const TABLAS = {
   // porque un pedido puede responderse con varias remisiones (o con ninguna).
   pedido_interno: 'pedidos_internos',
   salida_tecnico: 'salidas_tecnico',
+  // Garantías con proveedores: el caso y la caja que sale hacia el proveedor
+  // se numeran aparte (un envío junta unidades de varios casos).
+  reclamo_garantia: 'reclamos_garantia',
+  envio_garantia:   'envios_garantia',
 };
 
 // Cache: una vez detectada la infraestructura no se vuelve a consultar.

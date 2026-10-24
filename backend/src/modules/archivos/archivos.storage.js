@@ -198,12 +198,15 @@ const SIN_ALMACENAMIENTO = 'El almacenamiento de documentos no está configurado
  * La ruta lleva un UUID: nunca pisa otro archivo ni depende del nombre que
  * escribió el usuario. Lanza { status, message }.
  */
-const subir = async (buffer, { negocioId, compraId, ext, mime }) => {
+// `carpeta` (opcional) agrupa archivos que no son de una compra —las fotos de
+// una garantía—; sin ella la ruta es la de siempre.
+const subir = async (buffer, { negocioId, compraId, carpeta = null, ext, mime }) => {
   const prov = proveedorActivo();
   if (!prov) throw { status: 503, message: SIN_ALMACENAMIENTO };
 
   const bucket = prov.bucket();
-  const path = `negocio_${negocioId}/compra_${compraId}/${crypto.randomUUID()}.${ext}`;
+  const sub = carpeta ? String(carpeta).replace(/[^a-z0-9_-]/gi, '') : `compra_${compraId}`;
+  const path = `negocio_${negocioId}/${sub}/${crypto.randomUUID()}.${ext}`;
   try {
     await prov.subir({ bucket, path, buffer, mime });
   } catch (err) {

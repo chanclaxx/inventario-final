@@ -29,6 +29,8 @@ const mutationCache = new MutationCache({
     // cambia al despachar, recibir, anular o devolver, desde varias pantallas.
     // Solo se vuelve a pedir si hay un chip montado.
     queryClient.invalidateQueries({ queryKey: ['red-en-transito'], exact: false })
+    // Lo que está en garantía con el proveedor (chip «En garantía» del inventario).
+    queryClient.invalidateQueries({ queryKey: ['garantias-en-inventario'], exact: false })
   },
 })
 

@@ -5,7 +5,7 @@ const { PERMISOS_BASE, resolverModulos } = require('../../config/modulos');
 const crypto = require('crypto');
 const { enviarRecuperacionPassword } = require('../email/email.service');
 
-const { hayTecnicos, hayPermisosReportes, hayPermisosGastos } = require('../../config/columnas');
+const { hayTecnicos, hayPermisosReportes, hayPermisosGastos, hayPermisosGarantias } = require('../../config/columnas');
 
 // Solo las cuatro llaves conocidas y solo booleanos: lo demás se descarta, para
 // que un payload raro no termine guardado y leído como permiso.
@@ -66,6 +66,22 @@ const _guardarPermisosGastos = async (negocioId, id, rol, modulos, permisos, ant
     negocioId, id, _normalizarPermisosGastos(deseado, rol, modulos));
 };
 
+// Garantías con proveedores: las siete llaves conocidas y solo booleanos, como
+// técnicos. null = permisos base del rol; el admin siempre se guarda en NULL.
+const LLAVES_GARANTIAS = ['ver', 'recibir', 'cliente', 'reembolsar', 'enviar', 'resolver', 'anular'];
+const _normalizarPermisosGarantias = (p) => {
+  if (!p || typeof p !== 'object') return null;
+  const limpio = {};
+  for (const k of LLAVES_GARANTIAS) if (typeof p[k] === 'boolean') limpio[k] = p[k];
+  return Object.keys(limpio).length ? limpio : null;
+};
+
+const _guardarPermisosGarantias = async (negocioId, id, rol, permisos) => {
+  if (!hayPermisosGarantias() || permisos === undefined) return;
+  await usuariosRepo.updatePermisosGarantias(
+    negocioId, id, rol === 'admin_negocio' ? null : _normalizarPermisosGarantias(permisos));
+};
+
 const getUsuarios = (negocioId) => usuariosRepo.findAll(negocioId);
 
 const getUsuarioById = async (negocioId, id) => {
@@ -77,6 +93,7 @@ const getUsuarioById = async (negocioId, id) => {
 const crearUsuario = async (negocioId, {
   nombre, email, password, rol, sucursal_id, modulos_permitidos, permisos_proveedores, permisos_edicion_productos,
   permisos_facturas, sucursales_vista, permisos_tecnicos, permisos_reportes, permisos_gastos,
+  permisos_garantias,
 }) => {
   if (rol === 'admin_negocio' && sucursal_id) {
     throw { status: 400, message: 'El admin de negocio no puede tener sucursal asignada' };
@@ -150,6 +167,7 @@ const crearUsuario = async (negocioId, {
     await _guardarPermisosTecnicos(negocioId, creado.id, rol, permisos_tecnicos);
     await _guardarPermisosReportes(negocioId, creado.id, rol, modulosAGuardar, permisos_reportes, undefined);
     await _guardarPermisosGastos(negocioId, creado.id, rol, modulosAGuardar, permisos_gastos, undefined);
+    await _guardarPermisosGarantias(negocioId, creado.id, rol, permisos_garantias);
     return creado;
   } catch (err) {
     if (err.constraint === 'usuarios_email_key') {
@@ -229,6 +247,7 @@ const actualizarUsuario = async (negocioId, id, datos) => {
     datos.permisos_reportes, existe.permisos_reportes ?? null);
   await _guardarPermisosGastos(negocioId, id, rolFinal, modulosAGuardar,
     datos.permisos_gastos, existe.permisos_gastos ?? null);
+  await _guardarPermisosGarantias(negocioId, id, rolFinal, datos.permisos_garantias);
   return actualizado;
 };
 
@@ -324,7 +343,7 @@ const getActividadUsuarios = (negocioId, filtros) =>
   usuariosRepo.getActividad(negocioId, filtros);
 
 module.exports = {
-  _normalizarPermisosReportes, _normalizarPermisosGastos,
+  _normalizarPermisosReportes, _normalizarPermisosGastos, _normalizarPermisosGarantias,
   getUsuarios, getUsuarioById, crearUsuario,
   actualizarUsuario, cambiarPassword, cambiarPasswordTemporal,
   resetearPassword, solicitarRecuperacion, getActividadUsuarios,

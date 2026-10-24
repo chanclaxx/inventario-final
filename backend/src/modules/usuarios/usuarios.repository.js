@@ -12,6 +12,7 @@ const findAll = async (negocioId) => {
            to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
            to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
            to_jsonb(u) -> 'permisos_gastos' AS permisos_gastos,
+           to_jsonb(u) -> 'permisos_garantias' AS permisos_garantias,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -33,6 +34,7 @@ const findById = async (negocioId, id) => {
            to_jsonb(u) -> 'permisos_tecnicos' AS permisos_tecnicos,
            to_jsonb(u) -> 'permisos_reportes' AS permisos_reportes,
            to_jsonb(u) -> 'permisos_gastos' AS permisos_gastos,
+           to_jsonb(u) -> 'permisos_garantias' AS permisos_garantias,
            s.nombre AS sucursal_nombre
     FROM usuarios u
     LEFT JOIN sucursales s ON s.id = u.sucursal_id
@@ -171,6 +173,14 @@ const updatePermisosGastos = async (negocioId, id, permisos) => {
   );
 };
 
+// Garantías con proveedores: misma escritura aparte, solo con `hayPermisosGarantias()`.
+const updatePermisosGarantias = async (negocioId, id, permisos) => {
+  await pool.query(
+    'UPDATE usuarios SET permisos_garantias = $1::jsonb WHERE id = $2 AND negocio_id = $3',
+    [permisos ? JSON.stringify(permisos) : null, id, negocioId]
+  );
+};
+
 const updatePassword = async (negocioId, id, password_hash) => {
   const { rowCount } = await pool.query(
     'UPDATE usuarios SET password_hash = $1 WHERE id = $2 AND negocio_id = $3',
@@ -302,7 +312,7 @@ const getActividad = async (negocioId, { usuario_id, fecha_desde, fecha_hasta, t
 };
 
 module.exports = {
-  updatePermisosTecnicos, updatePermisosReportes, updatePermisosGastos,
+  updatePermisosTecnicos, updatePermisosReportes, updatePermisosGastos, updatePermisosGarantias,
   findAll, findById, findByEmail,
   create, update, updatePassword,
   crearTokenRecuperacion, findAdminByEmail,

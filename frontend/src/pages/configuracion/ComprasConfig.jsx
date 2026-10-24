@@ -1,6 +1,6 @@
 import {
   ToggleLeft, ToggleRight, ClipboardList, Info, AlertTriangle,
-  ShieldCheck, Barcode, CheckCircle2, Tag, Paperclip,
+  ShieldCheck, Barcode, CheckCircle2, Tag, Paperclip, ShieldAlert,
 } from 'lucide-react';
 
 // El mismo ejemplo que `EJEMPLO` en backend/src/utils/codigoProveedor.util.js.
@@ -25,6 +25,9 @@ const EJEMPLO_CODIGO_PROVEEDOR = 'DIS-900-CAL-001';
 //                              que traduce las referencias DEL proveedor)
 //   compras_archivos_activo   (manifiesto de importación y demás papeles,
 //                              adjuntos a la compra; ausente = apagado)
+//   reclamos_garantia_activo · reclamos_garantia_dias_demora
+//                             (garantías con proveedores: la unidad dañada
+//                              sale al proveedor; ausente = apagado)
 //
 // Sin el primer flag el backend responde 404 y la pestaña Órdenes no aparece:
 // para ese negocio el módulo no existe y el flujo de compra sigue siendo el de
@@ -142,6 +145,7 @@ export function ComprasConfig({ valores, set }) {
   const activas     = valores.ordenes_compra_activas    === '1';
   const modoCargo   = valores.ordenes_compra_modo_cargo === 'orden' ? 'orden' : 'recepcion';
   const garantia    = valores.garantia_proveedor_activa === '1';
+  const reclamos    = valores.reclamos_garantia_activo  === '1';
   const codigos     = valores.codigos_proveedor_activos === '1';
   const codigoInterno = valores.codigo_producto_activo  === '1';
   const detalleNodo   = valores.ordenes_compra_detalle_nodo === '1';
@@ -325,6 +329,57 @@ export function ComprasConfig({ valores, set }) {
               </p>
               <p className="text-xs text-blue-700">
                 • El reloj arranca cuando recibes, no cuando pides.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-gray-100" />
+
+      {/* ── Garantías con proveedores (reclamos) ──────────────────────────── */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <ShieldAlert size={18} className="text-gray-400" />
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Garantías con proveedores</h3>
+            <p className="text-xs text-gray-400">
+              Lo que sale dañado —de una venta, un préstamo o el inventario— y se le reclama al proveedor.
+            </p>
+          </div>
+        </div>
+        <Toggle
+          label="Llevar las garantías con proveedores"
+          description="Añade la pestaña Garantías en Proveedores y el botón «Garantía» en facturas, préstamos e inventario"
+          enabled={reclamos}
+          onChange={(val) => set('reclamos_garantia_activo', val ? '1' : '0')}
+        />
+        {reclamos && (
+          <div className="flex flex-col gap-4 border-l-2 border-blue-100 pl-4">
+            <CampoDias
+              label="Marcar como demorada después de"
+              description="Una unidad que lleva más de estos días con el proveedor sin respuesta"
+              placeholder="15"
+              valor={valores.reclamos_garantia_dias_demora ?? ''}
+              onChange={(v) => set('reclamos_garantia_dias_demora', v)}
+            />
+            <div className="bg-blue-50 rounded-xl p-4 flex flex-col gap-1.5">
+              <p className="text-xs font-medium text-blue-800">Cómo funciona</p>
+              <p className="text-xs text-blue-700">
+                • La unidad dañada vuelve al inventario y sale a garantía: <b>no cuenta en el stock</b> y el
+                inventario lo avisa hasta que el proveedor responda.
+              </p>
+              <p className="text-xs text-blue-700">
+                • Al cliente se le entrega otra unidad (sale del stock), se le devuelve el dinero (se deshace la
+                venta de esa línea) o queda esperando.
+              </p>
+              <p className="text-xs text-blue-700">
+                • El proveedor repone, repara, da nota crédito, devuelve dinero o no lo cubre. Lo que vuelve
+                sale a la venta con la garantía que elijas.
+              </p>
+              <p className="text-xs text-blue-700">
+                • Un local de la red le devuelve a la bodega, y la bodega le reclama al proveedor.
+                Quién puede hacer qué se ajusta en Equipo → Usuarios.
               </p>
             </div>
           </div>

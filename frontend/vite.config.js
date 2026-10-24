@@ -58,7 +58,10 @@ export default defineConfig({
             // `compras/archivos` es la descarga de un documento adjunto a una compra
             // (hasta 15 MB): un manifiesto de importación no tiene por qué quedar
             // copiado en la caché del navegador.
-            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas|prestamos|compras\/archivos)/i,
+            //
+            // `garantias-proveedor` mueve stock, caja y la cuenta del proveedor: una
+            // respuesta recién registrada no puede seguirse viendo pendiente.
+            urlPattern: /^https:\/\/inventario-final-production\.up\.railway\.app\/api\/(reportes|facturas|dashboard|tesoreria|inventario|etiquetas|prestamos|compras\/archivos|garantias-proveedor)/i,
             handler: 'NetworkOnly',
           },
           {

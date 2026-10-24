@@ -55,6 +55,8 @@ const detectarColumnas = async () => {
   await _detectarArchivosCompra();
   await _detectarPermisosReportes();
   await _detectarGastos();
+  await _detectarReclamosGarantia();
+  await _detectarReclamosFase2();
   return _ubicacionDisponible;
 };
 
@@ -616,6 +618,68 @@ const hayPermisosGastos = () => _permisosGastosDisponible;
 const _setGastosDisponible = (v) => { _gastosDisponible = !!v; };
 const _setPermisosGastosDisponible = (v) => { _permisosGastosDisponible = !!v; };
 
+// ── Garantías con proveedores ────────────────────────────────────────────────
+//
+// Ver migrations/20261023_reclamos_garantia.sql. Dos banderas, como gastos: las
+// CUATRO tablas (abren las rutas y dejan que el inventario las nombre) y la
+// columna de permisos de `usuarios` (solo decide si el guardado de un usuario
+// la escribe; la lectura va por to_jsonb). Con media estructura, apagada: el
+// listado de seriales nombra estas tablas y una ausente tumbaría el inventario.
+const TABLAS_RECLAMOS = ['reclamos_garantia', 'envios_garantia',
+  'reclamos_garantia_lineas', 'reclamos_garantia_movimientos'];
+let _reclamosGarantiaDisponible = false;
+let _permisosGarantiasDisponible = false;
+const _detectarReclamosGarantia = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+         AND table_name = ANY($1::text[])`,
+      [TABLAS_RECLAMOS]
+    );
+    const encontradas = new Set(rows.map((r) => r.table_name));
+    _reclamosGarantiaDisponible = TABLAS_RECLAMOS.every((t) => encontradas.has(t));
+    const { rows: col } = await pool.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'usuarios'
+         AND column_name = 'permisos_garantias'`
+    );
+    _permisosGarantiasDisponible = col.length > 0;
+    if (!_reclamosGarantiaDisponible) {
+      console.warn('⚠️  Tablas de garantías con proveedores ausentes: la feature queda desactivada.');
+    }
+  } catch (err) {
+    _reclamosGarantiaDisponible = false;
+    _permisosGarantiasDisponible = false;
+    console.error('⚠️  No se pudieron verificar las tablas de garantías (feature desactivada):', err.message);
+  }
+};
+// Fase 2 (migrations/20261024_reclamos_garantia_fase2.sql): las fotos y la
+// orden de servicio de origen. Bandera propia: sin ella la fase 1 sigue igual.
+let _reclamosFase2Disponible = false;
+const _detectarReclamosFase2 = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         EXISTS (SELECT 1 FROM information_schema.tables
+                 WHERE table_schema = 'public' AND table_name = 'reclamos_garantia_archivos') AS tabla,
+         EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'reclamos_garantia'
+                   AND column_name = 'orden_servicio_id') AS columna`
+    );
+    _reclamosFase2Disponible = !!(rows[0]?.tabla && rows[0]?.columna);
+  } catch (err) {
+    _reclamosFase2Disponible = false;
+    console.error('⚠️  No se pudo verificar la fase 2 de garantías (fotos apagadas):', err.message);
+  }
+};
+const hayReclamosFase2 = () => _reclamosGarantiaDisponible && _reclamosFase2Disponible;
+const _setReclamosFase2Disponible = (v) => { _reclamosFase2Disponible = !!v; };
+const hayReclamosGarantia = () => _reclamosGarantiaDisponible;
+const hayPermisosGarantias = () => _permisosGarantiasDisponible;
+const _setReclamosGarantiaDisponible = (v) => { _reclamosGarantiaDisponible = !!v; };
+const _setPermisosGarantiasDisponible = (v) => { _permisosGarantiasDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -647,4 +711,7 @@ module.exports = {
   hayArchivosCompra, _setArchivosCompraDisponible,
   hayPermisosReportes, _setPermisosReportesDisponible,
   hayGastos, _setGastosDisponible, hayPermisosGastos, _setPermisosGastosDisponible,
+  hayReclamosGarantia, _setReclamosGarantiaDisponible,
+  hayReclamosFase2, _setReclamosFase2Disponible,
+  hayPermisosGarantias, _setPermisosGarantiasDisponible,
 };

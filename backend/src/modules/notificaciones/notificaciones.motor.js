@@ -123,7 +123,7 @@ const recolectar = async (negocioId) => {
   const u = await _umbrales(negocioId);
 
   const [cartera, proveedores, plan, stock, borradores,
-    garantias, pedidos, entradas, cajas, tecnicos, red, sinRecibir] = await Promise.all([
+    garantias, pedidos, entradas, cajas, tecnicos, red, sinRecibir, reclamos] = await Promise.all([
     alertas.cartera(negocioId),
     alertas.carteraProveedores(negocioId),
     alertas.planPorVencer(negocioId),
@@ -136,6 +136,7 @@ const recolectar = async (negocioId) => {
     operaciones.tecnicosPendientes(negocioId),
     operaciones.enviosRedVencidos(negocioId),
     operaciones.enviosSinRecibir(negocioId),
+    operaciones.reclamosPendientes(negocioId),
   ]);
 
   const senales = [];
@@ -313,6 +314,46 @@ const recolectar = async (negocioId) => {
     }));
   }
 
+  // ── Garantías con proveedores ─────────────────────────────────────────────
+  // Lo urgente es el cliente cuya unidad YA volvió del proveedor: la solución
+  // está en la tienda y él no lo sabe. Lo demás (demoradas, gente esperando,
+  // lo que nadie ha enviado) es seguimiento y va en el resumen.
+  if (reclamos?.listos?.total) {
+    const x = reclamos.listos.items[0];
+    senales.push(_senal({
+      clave: 'garantias_listas_cliente', prioridad: 'urgente', categoria: 'reclamos',
+      titulo: `${_plural(reclamos.listos.total, 'cliente ya puede recibir', 'clientes ya pueden recibir')} su garantía`,
+      cuerpo: `El proveedor ya respondió. ${x.cliente_nombre ? `Por ejemplo, ${x.cliente_nombre} (garantía #${x.numero}).` : ''} Avísales.`,
+      url: '/proveedores?tab=garantias&filtro=cliente_pendiente', n: reclamos.listos.total,
+    }));
+  }
+  if (reclamos?.demoradas?.total) {
+    const peor = reclamos.demoradas.items[0];
+    senales.push(_senal({
+      clave: 'garantias_demoradas', categoria: 'reclamos',
+      titulo: `${_plural(reclamos.demoradas.total, 'garantía demorada', 'garantías demoradas')} con proveedores`,
+      cuerpo: `La más vieja lleva ${_plural(peor.dias_afuera, 'día', 'días')} con ${peor.proveedor_nombre || 'el proveedor'}.`,
+      url: '/proveedores?tab=garantias&filtro=demoradas', n: reclamos.demoradas.total,
+    }));
+  }
+  const esperandoSinListos = (reclamos?.esperando?.total || 0) - (reclamos?.listos?.total || 0);
+  if (esperandoSinListos > 0) {
+    senales.push(_senal({
+      clave: 'garantias_clientes_esperando', categoria: 'reclamos',
+      titulo: `${_plural(esperandoSinListos, 'cliente espera', 'clientes esperan')} su garantía`,
+      cuerpo: 'Les debes una unidad o el dinero mientras el proveedor responde.',
+      url: '/proveedores?tab=garantias&filtro=cliente_pendiente', n: esperandoSinListos,
+    }));
+  }
+  if (reclamos?.por_enviar?.total) {
+    senales.push(_senal({
+      clave: 'garantias_por_enviar', categoria: 'reclamos',
+      titulo: `${_plural(reclamos.por_enviar.total, 'garantía sin enviar', 'garantías sin enviar')} al proveedor`,
+      cuerpo: `La más vieja lleva ${_plural(reclamos.por_enviar.dias_max, 'día', 'días')} en la tienda: mientras no salga, el proveedor no responde.`,
+      url: '/proveedores?tab=garantias&filtro=por_enviar', n: reclamos.por_enviar.total,
+    }));
+  }
+
   // ── El plan ───────────────────────────────────────────────────────────────
   // Urgente cuando faltan 3 días o menos: pasado el vencimiento la app se
   // bloquea y no se puede ni facturar.
@@ -370,7 +411,7 @@ const recolectar = async (negocioId) => {
     normales: senales.filter((s) => s.prioridad === 'normal'),
     // El detalle crudo, para la pantalla de Avisos. El push nunca lo lleva: en
     // una pantalla bloqueada no van nombres de clientes con sus montos.
-    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos, red, sin_recibir: sinRecibir },
+    detalle: { cartera, proveedores, garantias, pedidos, entradas, cajas, stock, borradores, plan, tecnicos, red, sin_recibir: sinRecibir, reclamos },
     umbrales: u,
   };
 };

@@ -58,6 +58,11 @@ export function useEscanerCarrito({
       return;
     }
 
+    if (serial.en_garantia_numero) {
+      setScanMsg({ tipo: 'error', texto: `${serial.imei} está en garantía con el proveedor (garantía #${serial.en_garantia_numero})` });
+      return;
+    }
+
     if (serial.prestado) {
       setScanMsg({
         tipo:  'error',

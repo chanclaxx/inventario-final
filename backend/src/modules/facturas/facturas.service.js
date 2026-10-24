@@ -1092,8 +1092,6 @@ const editarFactura = async (negocioId, id, {
 // lineasDevolver: [{ linea_id: Number, cantidad_devolver: Number }]
 
 const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
-  const creditosRepo = require('../creditos/creditos.repository');
-
   const factura = await facturasRepo.findByIdYNegocio(facturaId, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
@@ -1105,7 +1103,30 @@ const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const resultado = await devolverLineasCreditoEnTx(client, factura, lineasDevolver);
+    await client.query('COMMIT');
+    return resultado;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
 
+/**
+ * El núcleo de la devolución parcial a crédito, dentro de una transacción ajena.
+ *
+ * Lo usa también la garantía con proveedores cuando al cliente se le devuelve
+ * el valor de una línea a crédito: ahí la unidad YA volvió al inventario al
+ * recibirla (y salió a garantía), así que `restaurarStock: false` evita
+ * devolverla dos veces. El resto —bajar el crédito, anular lo pagado de más,
+ * cancelar o saldar— es exactamente lo de siempre.
+ */
+const devolverLineasCreditoEnTx = async (client, factura, lineasDevolver, { restaurarStock = true } = {}) => {
+  const creditosRepo = require('../creditos/creditos.repository');
+  const facturaId = factura.id;
+  {
     const credito = await creditosRepo.findByFacturaId(client, facturaId);
     if (!credito) throw { status: 404, message: 'Crédito asociado no encontrado' };
     if (credito.estado === 'Cancelado') throw { status: 400, message: 'El crédito ya está cancelado' };
@@ -1127,7 +1148,9 @@ const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
       }
 
       // Restaurar stock / serial
-      if (linea.imei) {
+      if (!restaurarStock) {
+        // La unidad ya está donde tiene que estar (ver arriba).
+      } else if (linea.imei) {
         await client.query(
           `UPDATE seriales SET vendido = false, fecha_salida = NULL
            WHERE imei = $1
@@ -1193,8 +1216,6 @@ const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
       }
     }
 
-    await client.query('COMMIT');
-
     return {
       total_devuelto:    totalDevuelto,
       cancelada:         todasDevueltas,
@@ -1202,16 +1223,11 @@ const devolverLineasCredito = async (negocioId, facturaId, lineasDevolver) => {
       nuevo_valor_total: nuevoValorTotal,
       nuevo_saldo:       Math.max(0, nuevoSaldo),
     };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
   }
 };
 
 module.exports = {
   getFacturas, getFacturasRecientes, buscarFacturas, buscarDespachos,
   getFacturaById, crearFactura, cancelarFactura, editarFactura,
-  devolverLineasCredito,
+  devolverLineasCredito, devolverLineasCreditoEnTx,
 };

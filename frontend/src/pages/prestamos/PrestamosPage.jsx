@@ -53,6 +53,7 @@ import api                                      from '../../api/axios.config';
 import useSucursalStore                         from '../../store/sucursalStore';
 import { contieneTexto }                        from '../../utils/texto';
 import { useAuth }                              from '../../context/useAuth';
+import { BotonGarantia }                        from '../proveedores/garantias/BotonGarantia';
 import {
   getProductosSerial, getProductosCantidad,
 }                                               from '../../api/productos.api';
@@ -1620,6 +1621,10 @@ function TarjetaPrestamoDetalle({ prestamo, onAbonar, onDevolver, onImprimir, on
               <Button size="sm" variant="secondary" onClick={() => onDevolver(prestamo)}>
                 <CheckCircle size={14} /> Devuelto
               </Button>
+            )}
+            {/* Llegó dañado: garantía con el proveedor (se le entrega otra unidad). */}
+            {prestamo.cedula !== 'AJUSTE' && (prestamo.imei || prestamo.producto_id) && (
+              <BotonGarantia origen={{ prestamo_id: prestamo.id }} variante="boton" />
             )}
             {saldoAFavor > 0 && saldo > 0 && (
               <button

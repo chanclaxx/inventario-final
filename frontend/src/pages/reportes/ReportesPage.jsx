@@ -2095,6 +2095,24 @@ const PanelInventario = () => {
       </div>
       <InventarioMenosDeuda datos={data.menos_deuda} />
 
+      {/* Garantías con proveedores: lo dañado que está afuera (o por salir) NO
+          entra en las cifras de arriba, porque no se puede vender. Se dice
+          aparte, a su costo, para que no parezca que desapareció. */}
+      {data.en_garantia && (
+        <div className="bg-rose-50 border border-rose-100 rounded-xl px-4 py-3 flex flex-col gap-1">
+          <p className="text-xs font-semibold text-rose-800">
+            Además: {data.en_garantia.unidades} unidad(es) en garantía con proveedores ({data.en_garantia.casos} caso(s))
+            {data.en_garantia.costo_total > 0 ? ` · ${formatCOP(data.en_garantia.costo_total)} en costo` : ''}
+          </p>
+          <p className="text-xs text-rose-700">
+            No están incluidas arriba: no se pueden vender hasta que el proveedor responda.
+            {' '}{data.en_garantia.con_proveedor} ya salieron hacia el proveedor
+            {data.en_garantia.sin_costo > 0 ? ` · ${data.en_garantia.sin_costo} sin costo registrado` : ''}.
+            {' '}Detalle en Proveedores → Garantías.
+          </p>
+        </div>
+      )}
+
       {/* En un LOCAL de la red, parte de la vitrina es mercancía de la bodega y
           está valorada al valor interno de la remisión: es exactamente lo que
           el local le debe por ella. En la bodega y en un negocio sin red este

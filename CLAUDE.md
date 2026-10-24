@@ -1263,6 +1263,88 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > independencia de las sucursales y la 19 el doble clic —estática en el orden
 > de los candados, porque PGlite no simula concurrencia—).
 
+> **Garantías con proveedores — Proveedores → Garantías** (`modules/reclamos-garantia/`,
+> `20261023_reclamos_garantia.sql`, `pages/proveedores/garantias/`; opt-in
+> `reclamos_garantia_activo`, **ausente = apagado**, Ajustes → Catálogo → Compras;
+> pedido del usuario, 23-oct-2026). NO es el módulo `garantias` (los textos de la
+> factura del cliente): por eso las tablas son `reclamos_garantia*` y la ruta
+> `/api/garantias-proveedor`. Un CASO tiene **dos caminos independientes**: con el
+> CLIENTE (otra unidad · devolverle el dinero · espera) y con el PROVEEDOR (por
+> enviar → ENVÍO, la caja con su guía → repone · repara · nota crédito · devuelve
+> dinero · no lo cubre → vuelve o se da de baja). Origen: factura, préstamo o
+> inventario; **un despacho o traslado no es origen** (decisión del usuario): el
+> local le devuelve a la bodega por la devolución de siempre y la bodega reclama
+> desde su inventario. Entrada única `ModalNuevaGarantia` (3 pasos), abierta por
+> `BotonGarantia` desde la línea de la factura, el préstamo, el serial, el
+> producto (si tiene tallas ofrece sus hojas) o la pestaña.
+> **Decisiones del usuario, y dónde viven** (`reclamosGarantia.service`):
+> (1) la unidad de una venta o préstamo **vuelve al inventario y sale a garantía**
+> (`_apartar`): un serial deja de estar vendido/prestado y lo bloquea el trigger
+> `fn_serial_en_garantia` (GP001 → 409, criterio de técnicos; el despacho de la
+> red pregunta con `exigirNoEnGarantia`); por cantidad las dos escrituras se
+> anulan y el stock no se toca; desde el inventario se descuenta del nodo HOJA.
+> **No cuenta en el stock**: `findAll`/`contarSerialesDetalle` lo sacan de los
+> disponibles (`sqlNoEnGarantia`) y el inventario pinta `ChipEnGarantia`
+> (`useEnGarantia`, mismas claves que `useEnTransito`); (2) devolver el dinero
+> **deshace la venta de la línea** (`cantidad_devuelta`): contado = egreso en la
+> caja de la sede (exige caja abierta); crédito = `devolverLineasCreditoEnTx`
+> con `restaurarStock: false` (la unidad ya volvió); en un préstamo activo no se
+> devuelve dinero desde aquí; (3) la unidad que se entrega al cliente sale del
+> stock vendible (en un préstamo, el préstamo pasa al IMEI nuevo); (4) lo que el
+> proveedor repone o repara vuelve normal con **garantía elegible** (la de la
+> compra, N días o ninguna; `movimientos.garantia_hasta`, y la procedencia de un
+> IMEI repuesto la lee primero); (5) **permisos por usuario**
+> (`usuarios.permisos_garantias`, null = base del rol; llaves `ver`, `recibir`,
+> `cliente`, `reembolsar`, `enviar`, `resolver`, `anular`; supervisor todo menos
+> anular, vendedor recibe y entrega otra unidad; copia en
+> `utils/permisosGarantias.js`; Ajustes → Usuarios solo con la función encendida).
+> **Qué se escribe y qué se deriva**: los movimientos se escriben (se anulan con
+> motivo, nunca se borran); el estado de cada camino se deriva
+> (`SQL_ESTADO_PROVEEDOR`/`SQL_ESTADO_CLIENTE`); `cantidad_cliente`,
+> `cantidad_resuelta` y `cerrada` se mantienen en la misma transacción (el
+> candado lee `cerrada` en cada venta). **El orden importa**: al resolver se
+> cierra la línea ANTES de tocar el serial; al reabrir (anular), se toca el
+> serial ANTES de reabrir. El costo se congela en la línea; la nota crédito es un
+> Abono `metodo 'Garantía'` al cargo de la compra (lo que sobra, a favor); la
+> plata va en `movimientos_caja` con `referencia_tipo` `garantia_cliente` /
+> `garantia_proveedor`, que caja y tesorería ya leen como movimientos manuales
+> (sin ramas nuevas). La unidad que se quedó el proveedor (o de baja) queda
+> `vendido = true`, nunca se borra. Documentos: comprobante del caso para el
+> cliente (**sin costos**) y guía del envío para el proveedor (valor solo si ve
+> costos), en POS/PDF/compartir (`ModalDocumentoGarantia`, `reclamosGarantia.pdf`).
+> **Fase 2** (24-oct-2026; `20261024_reclamos_garantia_fase2.sql`, bandera propia
+> `hayReclamosFase2()` — sin ella la fase 1 queda igual):
+> (a) **Avisos** (`operaciones.reclamosPendientes`, categoría `reclamos`, NO
+> `garantias`, que es la del aviso de garantía del proveedor por vencer):
+> URGENTE solo «el cliente ya puede recibir» (el proveedor repuso o reparó y el
+> cliente sigue esperando); demoradas (umbral `reclamos_garantia_dias_demora`),
+> clientes esperando y por enviar hace 3+ días van al resumen. Los enlaces abren
+> `/proveedores?tab=garantias&filtro=…` (Proveedores lee `?tab=` y la pestaña
+> `?filtro=` al montar). El aviso de garantía por vencer ya no cuenta unidades
+> que están en un reclamo. (b) **Reportes**: `getValorInventario` saca de los
+> seriales lo que está en garantía y lo informa aparte (`en_garantia`, sin sumar
+> a los totales); el análisis para asesoría usa el mismo filtro (Σ productos ==
+> inventario) y gana las tablas «Garantías» (por proveedor, aunque no se le haya
+> comprado en el período) y «Garantías por producto», columnas en Proveedores,
+> la señal `garantias` (> `UMBRALES.garantias_pct` de lo comprado) y dos
+> hallazgos. (c) **Fotos** (`reclamosGarantia.archivos.js`, tabla
+> `reclamos_garantia_archivos`): el MISMO almacenamiento privado de los
+> documentos de compra (`storage.subir` ganó `carpeta`), solo imágenes y PDF,
+> huella comprobada al bajar, sin borrado; se adjuntan al recibir (después de
+> crear el caso) y desde el detalle; `GET /config` dice `fotos_activas`.
+> (d) **Búsqueda**: la historia del IMEI muestra el caso (`garantia`) y, en el
+> equipo nuevo, de qué garantía vino (`garantia_entrada`). (e) **Orden de
+> Servicios → garantía** (botón en la orden con serial; candidato por
+> `orden_servicio_id`, la liga queda en `reclamos_garantia.orden_servicio_id`;
+> un equipo que no salió de nuestro inventario lo dice en vez de reclamar).
+> (f) **Estado de cuenta por proveedor** (`/proveedores/:id/estado-cuenta[/pdf]`):
+> lo abierto siempre + lo resuelto del período, con repuestas, reparadas,
+> recuperado, no cubiertas y días de respuesta; PDF o compartir.
+> Prueba: `83-garantias-proveedor` (163; la sección 1 es la de sin tablas, la 4
+> el candado y los disponibles, la 6 y la 8 la venta que se deshace en contado y
+> crédito, la 11 que todo se anula, la 16 que el frontend no se separe, la 17 la
+> fase 2 sin su migración, la 18 las fotos y la 20 los avisos).
+
 > **Cargos financieros — mora e interés** (`mora/`, `utils/devengo.util.js`,
 > `utils/mora.util.js`, `utils/interes.util.js`): dos cargos **independientes**
 > sobre créditos y préstamos. La **mora** sanciona el atraso (ancla: `fecha_limite`);

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { buscarCompras as buscarComprasApi } from '../../api/busqueda.api';
 import { getProveedores, crearProveedor, actualizarProveedor, asignarCodigosProveedores } from '../../api/proveedores.api';
@@ -20,6 +21,8 @@ import { EmptyState }  from '../../components/ui/EmptyState';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { ModalCompra } from './ModalCompra';
 import { TabOrdenes }  from './TabOrdenes';
+import { TabGarantias } from './garantias/TabGarantias';
+import { useGarantiasProveedor } from '../../hooks/useEnGarantia';
 import { useSucursalKey } from '../../hooks/useSucursalKey';
 import { useMetodosPago } from '../../hooks/useMetodosPago';
 import api from '../../api/axios.config';
@@ -27,7 +30,7 @@ import { useAuth } from '../../context/useAuth';
 import {
   Truck, Plus, ShoppingCart, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Package, Hash, User, RefreshCw, ArrowLeftRight, ShoppingBag, Repeat,
-  Search, ScanLine, Calculator, Undo2, Pencil, ClipboardList, Tag, AlertTriangle, Wand2,
+  Search, ScanLine, Calculator, Undo2, Pencil, ClipboardList, Tag, AlertTriangle, Wand2, ShieldAlert,
 } from 'lucide-react';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -2578,7 +2581,10 @@ export default function ProveedoresPage() {
   const { sucursalKey, sucursalLista } = useSucursalKey();
   const { esAdminNegocio, usuario } = useAuth();
   const esAdmin = esAdminNegocio();
-  const [tabActivo, setTabActivo] = useState('proveedores');
+  // `?tab=` abre una pestaña desde un aviso (p. ej. ?tab=garantias&filtro=demoradas).
+  // Solo al montar: después manda el clic, sin un efecto que lo sincronice.
+  const [searchParams] = useSearchParams();
+  const [tabActivo, setTabActivo] = useState(() => searchParams.get('tab') || 'proveedores');
 
   const verCompras = esAdmin || usuario?.permisos_proveedores?.ver_compras === true;
 
@@ -2599,6 +2605,8 @@ export default function ProveedoresPage() {
   // sin árbol no hay nodo que pedir y el selector no podría seleccionar nada.
   const detalleNodo    = configData?.ordenes_compra_detalle_nodo === '1'
                       && configData?.variantes_activo            === '1';
+  // Garantías con proveedores: opt-in, y la llave «ver» de cada usuario.
+  const { puede: puedeGarantias } = useGarantiasProveedor();
 
   const tabs = [
     { id: 'proveedores', label: 'Proveedores', Icn: Truck        },
@@ -2608,6 +2616,7 @@ export default function ProveedoresPage() {
     ...(verCompras && ordenesActivas
       ? [{ id: 'ordenes', label: 'Órdenes', Icn: ClipboardList }] : []),
     ...(verCompras ? [{ id: 'compras', label: 'Compras', Icn: ShoppingCart }] : []),
+    ...(puedeGarantias('ver') ? [{ id: 'garantias', label: 'Garantías', Icn: ShieldAlert }] : []),
     { id: 'busqueda',    label: 'Búsqueda',    Icn: Search       },
   ];
 
@@ -2641,6 +2650,7 @@ export default function ProveedoresPage() {
       {tabActivo === 'retomas'    && <TabRetomas />}
       {tabActivo === 'ordenes'    && <TabOrdenes garantiaActiva={garantiaActiva} modoCargo={modoCargo} detalleNodo={detalleNodo} />}
       {tabActivo === 'compras'    && <TabCompras />}
+      {tabActivo === 'garantias'  && <TabGarantias filtroInicial={searchParams.get('filtro')} />}
       {tabActivo === 'busqueda'   && <TabBusquedaCompras />}
     </div>
   );
