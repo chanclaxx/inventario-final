@@ -484,6 +484,10 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
 
     let categoria, ingresos, costo, utilidad, saldoPendiente;
 
+    // En un SERVICIO el costo vacío es $0 (mano de obra), no «sin costo»
+    // (decisión del usuario, 26-oct-2026: Sitio Tecnologico veía $31.000 de
+    // utilidad donde eran $61.000). La regla «sin costo no suma» es de los
+    // PRODUCTOS, donde un costo vacío sí es un dato que falta.
     if (os.estado === 'Sin_reparar') {
       categoria      = 'diagnostico';
       ingresos       = precioFinal;
@@ -494,19 +498,19 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
       categoria      = 'garantia';
       ingresos       = totalAbonado;
       costo          = costoGarantia;
-      utilidad       = costoGarantia > 0 ? precioGarantia - costoGarantia : null;
+      utilidad       = precioGarantia - costoGarantia;
       saldoPendiente = precioGarantia - totalAbonado;
     } else if (os.estado === 'Pendiente_pago') {
       categoria      = 'pendiente';
       ingresos       = totalAbonado;
       costo          = costoReal;
-      utilidad       = costoReal > 0 ? precioFinal - costoReal : null;
+      utilidad       = precioFinal - costoReal;
       saldoPendiente = precioFinal - totalAbonado;
     } else {
       categoria      = 'pagado';
       ingresos       = totalAbonado;
       costo          = costoReal;
-      utilidad       = costoReal > 0 ? precioFinal - costoReal : null;
+      utilidad       = precioFinal - costoReal;
       saldoPendiente = 0;
     }
 
@@ -2117,14 +2121,16 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
       ),
       serv AS (
         -- Mismas categorías que getServiciosRango: cuentan los pagados y las
-        -- garantías cobrables CON costo; diagnósticos y pendientes de pago no.
+        -- garantías cobrables; diagnósticos y pendientes de pago no. En un
+        -- servicio el costo vacío es $0 (mano de obra; decisión del usuario,
+        -- 26-oct-2026), no «sin costo».
         SELECT ${periodoDe('os.fecha_entrega')} AS periodo,
                COALESCE(SUM(CASE
                  WHEN os.estado = 'Sin_reparar' THEN NULL
                  WHEN COALESCE(os.precio_garantia, 0) > 0 AND os.garantia_cobrable THEN
-                   CASE WHEN COALESCE(os.costo_garantia, 0) > 0 THEN os.precio_garantia - os.costo_garantia END
+                   os.precio_garantia - COALESCE(os.costo_garantia, 0)
                  WHEN os.estado = 'Pendiente_pago' THEN NULL
-                 ELSE CASE WHEN COALESCE(os.costo_real, 0) > 0 THEN COALESCE(os.precio_final, 0) - os.costo_real END
+                 ELSE COALESCE(os.precio_final, 0) - COALESCE(os.costo_real, 0)
                END), 0) AS u
         FROM ordenes_servicio os
         WHERE os.sucursal_id = $1

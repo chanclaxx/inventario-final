@@ -1328,10 +1328,22 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > motivo/movimiento) y el detalle lo muestra; **`auditoria.detalle` es TEXT en
 > producción** (JSONB en el fixture): se lee con `leerDetalle`. Espejo de la
 > regla en `servicioCobro.efectoCorreccion` / `camposCorregibles`.
-> Prueba: `84-servicio-abonos-tecnicos` (186; la sección 1 es la de sin
+> **En un SERVICIO el costo vacío es $0** (decisión del usuario, 26-oct-2026;
+> Sitio Tecnologico veía $31.000 de utilidad donde eran $61.000: dos trabajos
+> de mano de obra marcados listos sin costo). La regla «sin costo no suma
+> utilidad» es de los PRODUCTOS; en servicios un costo vacío es mano de obra.
+> `marcarListo` guarda 0 (antes `|| null`, que además convertía un 0 escrito en
+> vacío) y TODO lector toma NULL como 0, así cuentan también las órdenes viejas:
+> `COLS_CALCULADAS.utilidad`, «Utilidad hoy» (`getResumenHoy`, que además
+> empieza a contar los diagnósticos, como ya hacía el reporte),
+> `getServiciosRango` (utilidad = precio − costo siempre) y la serie de
+> Análisis. Las OS-0010 y OS-0011 de Sitio Tecnologico (ids 94, 95) se
+> corrigieron a costo 0 en producción con rastro en `auditoria`
+> (`scratchpad/diag/corregir-os-10-11.js`).
+> Prueba: `84-servicio-abonos-tecnicos` (192; la sección 1 es la de sin
 > migración, la 6 caja/tesorería/factura, la 9 el saldo de la garantía, la 14
-> navegador == backend == SQL, 15-20 anular y corregir). Probado también en
-> navegador aislado y por HTTP contra el esquema real.
+> navegador == backend == SQL, 15-20 anular y corregir, 21 costo vacío = $0).
+> Probado también en navegador aislado y por HTTP contra el esquema real.
 
 > **Garantías con proveedores — Proveedores → Garantías** (`modules/reclamos-garantia/`,
 > `20261023_reclamos_garantia.sql`, `pages/proveedores/garantias/`; opt-in

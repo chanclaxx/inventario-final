@@ -1109,10 +1109,11 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
     onError:   (err) => setError(err.response?.data?.error || 'Error'),
   });
 
-  const utilidad = costoReal !== '' && precioFinal !== ''
-    ? Number(precioFinal) - Number(costoReal) : null;
-  const utilGarantia = costoGarantia !== '' && precioGarantia !== ''
-    ? Number(precioGarantia) - Number(costoGarantia) : null;
+  // Costo vacío = $0 (solo mano de obra), igual que en el backend y los reportes.
+  const utilidad = precioFinal !== ''
+    ? Number(precioFinal) - Number(costoReal || 0) : null;
+  const utilGarantia = precioGarantia !== ''
+    ? Number(precioGarantia) - Number(costoGarantia || 0) : null;
 
   // Con la lista de técnicos encendida, hay que decir quién lo reparó (salvo
   // que lo haya reparado un técnico externo: eso ya lo dice).
@@ -1188,7 +1189,7 @@ function ModalMarcarListo({ orden, onClose, onExito }) {
               <InputMoneda value={costoReal} onChange={setCostoReal} placeholder="0"
                 className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl
                   text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <p className="text-xs text-gray-400">Se usa para calcular tu utilidad.</p>
+              <p className="text-xs text-gray-400">Se usa para calcular tu utilidad. Vacío cuenta como $0 (solo mano de obra).</p>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-gray-700">¿Cuánto le cobras al cliente? *</label>

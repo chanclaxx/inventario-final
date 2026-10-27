@@ -821,5 +821,36 @@ seccion('20. Quién puede, y el navegador promete lo mismo');
   checkSi('el modal de anular manda el PIN si no es admin', modal.includes('pin: pin.trim()'));
 }
 
+seccion('21. En un servicio el costo VACÍO es $0 (Sitio Tecnologico, 26-oct-2026)');
+{
+  // El caso real: dos trabajos de mano de obra de $15.000 marcados listos sin
+  // costo no sumaban utilidad (31.000 donde eran 61.000).
+  const X = await nueva({ cliente_nombre: 'Mano de obra' });
+  await svc.marcarListo(N, X.id, { precio_final: 15000, usuario_id: ADMIN });
+  checkEq('marcar listo sin costo lo guarda en 0, no vacío', (await orden(X.id)).costo_real, '0.00');
+  await abonar(X.id, 15000);
+  await svc.entregar(N, X.id);
+  // Una orden VIEJA con el costo en NULL (como las de producción) también cuenta.
+  const Y = await nueva({ cliente_nombre: 'Vieja sin costo' });
+  await svc.marcarListo(N, Y.id, { precio_final: 15000, usuario_id: ADMIN });
+  await abonar(Y.id, 15000);
+  await svc.entregar(N, Y.id);
+  await q('UPDATE ordenes_servicio SET costo_real = NULL WHERE id = $1', [Y.id]);
+  checkEq('la utilidad del detalle es el precio completo (también con NULL)',
+    [Number((await repo.findById(N, X.id)).utilidad), Number((await repo.findById(N, Y.id)).utilidad)], [15000, 15000]);
+  const rep = await reportes.getServiciosRango(S, '2000-01-01', '2100-01-01');
+  checkEq('el reporte también las cuenta', rep.cerrados.filter((c) => [X.id, Y.id].includes(c.id)).map((c) => c.utilidad), [15000, 15000]);
+  const sinCosto = rep.cerrados.filter((c) => c.categoria !== 'diagnostico' && c.utilidad === null);
+  checkEq('ya no queda ninguna orden cobrada «sin costo»', sinCosto.length, 0);
+  const hoy = await svc.getResumenHoy(S, N);
+  const [esperado] = await q(`SELECT COALESCE(SUM(COALESCE(precio_final,0) - COALESCE(costo_real,0)
+      + COALESCE(precio_garantia,0) - COALESCE(costo_garantia,0)), 0)::numeric AS u
+    FROM ordenes_servicio WHERE sucursal_id = $1 AND estado IN ('Entregado','Sin_reparar')
+      AND precio_final IS NOT NULL AND fecha_entrega::date = (NOW() AT TIME ZONE 'America/Bogota')::date`, [S]);
+  checkEq('«Utilidad hoy» incluye las de costo vacío', Number(hoy.utilidad_hoy), Number(esperado.u));
+  const pag = readFileSync(path.join(FRONT, 'pages/servicios/ServiciosPage.jsx'), 'utf8');
+  checkSi('la pantalla calcula la utilidad estimada con vacío = 0', pag.includes('Number(costoReal || 0)'));
+}
+
 console.log(`\n${ok} verificaciones correctas, ${fallos.length} fallidas`);
 if (fallos.length) { console.log('\nFALLAS:'); fallos.forEach((f) => console.log(' ·', f)); process.exit(1); }

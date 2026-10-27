@@ -187,14 +187,16 @@ const COLS_CALCULADAS = () => `
   ${SQL_SALDO('os')} AS saldo_pendiente,
   ${SQL_PRECIO_CICLO('os')} AS precio_ciclo,
   ${SQL_EN_GARANTIA('os')} AS en_garantia,
+  -- En un servicio el costo vacío es $0 (mano de obra; decisión del usuario,
+  -- 26-oct-2026): con precio hay utilidad, aunque no se haya escrito costo.
   CASE
-    WHEN os.precio_final IS NOT NULL AND os.costo_real IS NOT NULL
-    THEN os.precio_final - os.costo_real
+    WHEN os.precio_final IS NOT NULL
+    THEN os.precio_final - COALESCE(os.costo_real, 0)
     ELSE NULL
   END AS utilidad,
   CASE
-    WHEN os.precio_garantia IS NOT NULL AND os.costo_garantia IS NOT NULL
-    THEN os.precio_garantia - os.costo_garantia
+    WHEN os.precio_garantia IS NOT NULL
+    THEN os.precio_garantia - COALESCE(os.costo_garantia, 0)
     ELSE NULL
   END AS utilidad_garantia`;
 
@@ -337,7 +339,6 @@ const getResumenHoy = async (sucursalId, negocioId) => {
     WHERE ${campoFiltro} = $1
       AND estado IN ('Entregado', 'Sin_reparar')
       AND precio_final IS NOT NULL
-      AND costo_real   IS NOT NULL
       AND ${fechaBogota('fecha_entrega')} = ${HOY_BOGOTA}
   `, [param]);
 
@@ -564,7 +565,8 @@ const marcarListo = async (negocioId, id, datos) => {
               ${setTecnico}
           WHERE id = $1 AND negocio_id = $2
           RETURNING *`;
-        params = [id, negocioId, precio_garantia, costo_garantia || null, notas_tecnico || null, total];
+        // Costo vacío = $0 (mano de obra; decisión del usuario, 26-oct-2026).
+        params = [id, negocioId, precio_garantia, Number(costo_garantia) || 0, notas_tecnico || null, total];
       } else {
         query = `
           UPDATE ordenes_servicio
@@ -573,7 +575,7 @@ const marcarListo = async (negocioId, id, datos) => {
               ${setTecnico}
           WHERE id = $1 AND negocio_id = $2
           RETURNING *`;
-        params = [id, negocioId, costo_real || null, precio_final, notas_tecnico || null, total];
+        params = [id, negocioId, Number(costo_real) || 0, precio_final, notas_tecnico || null, total];
       }
       if (tecnico !== undefined) params.push(tecnico);
     }
