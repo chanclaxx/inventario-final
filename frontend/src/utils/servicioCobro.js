@@ -53,6 +53,49 @@ export const pagosVigentes = (o, abonos = []) => abonos.filter((ab) => !ab.anula
   && (ab.ciclo === null || ab.ciclo === undefined || o.ciclo === null || o.ciclo === undefined
     || Number(ab.ciclo) === Number(o.ciclo)));
 
+// ─── Corregir equivocaciones (espejo de servicios.correcciones.js) ──────────
+
+export const ESTADOS_CON_PRECIO = ['Listo', 'Pendiente_pago', 'Entregado', 'Sin_reparar'];
+
+/**
+ * Qué campos se corrigen en esta orden. En un «sin reparar» el valor es el
+ * diagnóstico (precio_final); en una garantía cobrable, el de la garantía.
+ */
+export const camposCorregibles = (o) => {
+  const enG = enGarantia(o) && o.estado !== 'Sin_reparar';
+  const gratis = enG && !o.garantia_cobrable;
+  return {
+    campoPrecio: enG ? 'precio_garantia' : 'precio_final',
+    campoCosto: enG ? 'costo_garantia' : 'costo_real',
+    etiquetaPrecio: o.estado === 'Sin_reparar' ? 'Cobro por diagnóstico'
+      : enG ? 'Precio de la garantía' : 'Precio de la reparación',
+    precio: ESTADOS_CON_PRECIO.includes(o.estado) && !gratis,
+    costo: o.estado !== 'Sin_reparar' && !gratis,
+  };
+};
+
+/** Qué pasa con la plata si el precio queda en `nuevo` (null = no cambia). */
+export const efectoCorreccion = (o, nuevo) => {
+  const pagado = abonado(o);
+  const vacio = { devolver: 0, cobrar: 0, pendiente: 0, estado: o.estado };
+  if (nuevo === null || nuevo === undefined || nuevo === '') return vacio;
+  const p = Number(nuevo);
+  const r = (v) => Math.round(v * 100) / 100;
+  if (pagado > p + 0.004) {
+    return { ...vacio, devolver: r(pagado - p), estado: o.estado === 'Pendiente_pago' ? 'Entregado' : o.estado };
+  }
+  if (p > pagado + 0.004) {
+    if (o.estado === 'Sin_reparar') return { ...vacio, cobrar: r(p - pagado) };
+    return { ...vacio, pendiente: r(p - pagado), estado: o.estado === 'Entregado' ? 'Pendiente_pago' : o.estado };
+  }
+  return { ...vacio, estado: o.estado === 'Pendiente_pago' ? 'Entregado' : o.estado };
+};
+
+/** Lo recibido y no devuelto en TODA la orden (todos sus ciclos): lo que deshace anularla. */
+export const netoRecibido = (abonos = []) => Math.round(abonos
+  .filter((a) => !a.anulado)
+  .reduce((s, a) => s + (a.tipo === 'devolucion' ? -1 : 1) * Number(a.valor || 0), 0) * 100) / 100;
+
 /** Sin reparar: el diagnóstico contra lo abonado. */
 export const cuentaSinReparar = (o, diagnostico) => {
   const d = Number(diagnostico || 0);

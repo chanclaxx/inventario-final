@@ -266,6 +266,7 @@ const findAll = async (sucursalId, negocioId, filtros = {}) => {
         WHEN 'Recibido'        THEN 4
         WHEN 'Entregado'       THEN 5
         WHEN 'Sin_reparar'     THEN 6
+        WHEN 'Anulado'         THEN 7
       END,
       os.fecha_recepcion DESC
   `, params);
@@ -799,7 +800,7 @@ const marcarSinReparar = async (negocioId, id, { motivo, precio_diagnostico, usu
     const { rows } = await client.query(`
       SELECT ${_colsOrdenBloqueo()} FROM ordenes_servicio
       WHERE id = $1 AND negocio_id = $2
-        AND estado NOT IN ('Entregado','Sin_reparar','Pendiente_pago')
+        AND estado NOT IN ('Entregado','Sin_reparar','Pendiente_pago','Anulado')
       FOR UPDATE
     `, [id, negocioId]);
     if (!rows.length) throw { status: 400, message: 'Orden no disponible para esta operación' };
@@ -891,4 +892,6 @@ module.exports = {
   abrirGarantia, actualizarNotas,
   // Reglas compartidas con reportes (una sola definición del precio del ciclo).
   SQL_EN_GARANTIA, SQL_PRECIO_CICLO, SQL_SALDO, enGarantia, precioCiclo, pagosNetos,
+  // Piezas internas que usa servicios.correcciones.js (anular / corregir).
+  _insertarMovimiento, _colsOrdenBloqueo, _crearFacturaPorServicio,
 };

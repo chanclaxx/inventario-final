@@ -689,6 +689,7 @@ const _setPermisosGarantiasDisponible = (v) => { _permisosGarantiasDisponible = 
 // emite el SQL de siempre: la caja del día no puede caerse por esta feature.
 let _servicioAbonosV2Disponible = false;
 let _tecnicosServicioDisponible = false;
+let _servicioAnulacionDisponible = false;
 const _detectarServicioV2 = async () => {
   try {
     const { rows } = await pool.query(
@@ -705,9 +706,21 @@ const _detectarServicioV2 = async () => {
     const r = rows[0] || {};
     _servicioAbonosV2Disponible = r.abonos === 7 && r.orden === 2;
     _tecnicosServicioDisponible = _servicioAbonosV2Disponible && !!r.tecnicos;
+    // Anulación (20261026): las columnas Y el CHECK que ya admite 'Anulado'.
+    const { rows: an } = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'ordenes_servicio'
+             AND column_name IN ('anulado_motivo', 'anulado_por', 'anulado_en', 'estado_anterior'))::int AS cols,
+         EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conname = 'ordenes_servicio_estado_check'
+                   AND pg_get_constraintdef(oid) LIKE '%Anulado%') AS chk`
+    );
+    _servicioAnulacionDisponible = _servicioAbonosV2Disponible && an[0]?.cols === 4 && !!an[0]?.chk;
   } catch (err) {
     _servicioAbonosV2Disponible = false;
     _tecnicosServicioDisponible = false;
+    _servicioAnulacionDisponible = false;
     console.error('⚠️  No se pudo verificar servicio técnico v2 (queda como antes):', err.message);
   }
 };
@@ -715,6 +728,8 @@ const hayServicioAbonosV2 = () => _servicioAbonosV2Disponible;
 const hayTecnicosServicio = () => _tecnicosServicioDisponible;
 const _setServicioAbonosV2Disponible = (v) => { _servicioAbonosV2Disponible = !!v; };
 const _setTecnicosServicioDisponible = (v) => { _tecnicosServicioDisponible = !!v; };
+const hayServicioAnulacion = () => _servicioAnulacionDisponible;
+const _setServicioAnulacionDisponible = (v) => { _servicioAnulacionDisponible = !!v; };
 
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
@@ -752,4 +767,5 @@ module.exports = {
   hayPermisosGarantias, _setPermisosGarantiasDisponible,
   hayServicioAbonosV2, _setServicioAbonosV2Disponible,
   hayTecnicosServicio, _setTecnicosServicioDisponible,
+  hayServicioAnulacion, _setServicioAnulacionDisponible,
 };

@@ -3,6 +3,7 @@ const { body } = require('express-validator');
 const { validate }      = require('../../middlewares/validate.middleware');
 const { requireNivel }  = require('../../middlewares/role.middleware');
 const { requireModulo } = require('../../middlewares/modulo.middleware');
+const { requireAdminOPin } = require('../../middlewares/pinAdmin.middleware');
 const ctrl    = require('./servicios.controller');
 const pdfCtrl = require('./servicios.pdf.controller');
 
@@ -67,6 +68,14 @@ router.patch('/:id/abonos/:abonoId/anular', requireModulo('servicios'), requireN
   body('motivo').isString().trim().isLength({ min: 3 }).withMessage('Escribe el motivo de la anulación'),
   validate, ctrl.anularAbono);
 router.patch('/:id/tecnico',        requireModulo('servicios'),                             ctrl.asignarTecnico);
+// Corregir equivocaciones: el admin, o quien tenga autorizado el PIN (se
+// vuelve a verificar en el servidor; ver servicios.correcciones.js).
+router.patch('/:id/anular',          requireModulo('servicios'), requireAdminOPin,
+  body('motivo').isString().trim().isLength({ min: 3 }).withMessage('Escribe el motivo de la anulación'),
+  validate, ctrl.anularOrden);
+router.patch('/:id/valores',         requireModulo('servicios'), requireAdminOPin,
+  body('motivo').isString().trim().isLength({ min: 3 }).withMessage('Escribe por qué se corrige'),
+  validate, ctrl.corregirValores);
 router.patch('/:id/entregar',       requireModulo('servicios'),                             ctrl.entregar);
 router.patch('/:id/sin-reparar',    requireModulo('servicios'), validarSinReparar, validate, ctrl.sinReparar);
 router.patch('/:id/garantia',       requireModulo('servicios'), validarGarantia,   validate, ctrl.abrirGarantia);

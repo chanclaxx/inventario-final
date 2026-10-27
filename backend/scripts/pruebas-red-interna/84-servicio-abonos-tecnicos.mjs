@@ -600,5 +600,226 @@ seccion('14. El frontend promete lo mismo que el backend');
   checkSi('la caja pinta las devoluciones de servicio entre los egresos', cajaFront.includes("'devoluciones', 'devolucionesServicio'"));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// CORREGIR EQUIVOCACIONES (20261026): anular una orden y cambiar sus valores.
+// ═════════════════════════════════════════════════════════════════════════════
+await configSvc.saveConfig(N, { servicios_tecnicos_activo: '0' }); // sin técnico obligatorio de aquí en adelante
+const ctrl = require(path.join(RAIZ, 'src/modules/servicios/servicios.controller.js'));
+const correcciones = require(path.join(RAIZ, 'src/modules/servicios/servicios.correcciones.js'));
+const lista = async (id, precio, costo = null) => {
+  await svc.marcarListo(N, id, { precio_final: precio, costo_real: costo, usuario_id: ADMIN });
+};
+const pagosDe = async (facturaId) => q('SELECT metodo, valor::int AS v FROM pagos_factura WHERE factura_id = $1 ORDER BY metodo', [facturaId]);
+
+seccion('15. Sin la migración de anulación: las rutas nuevas no hacen nada');
+{
+  checkEq('la bandera está apagada', columnas.hayServicioAnulacion(), false);
+  const o = await nueva({ cliente_nombre: 'Sin Mig' });
+  await falla('anular responde 503', () => svc.anularOrden(N, o.id, { motivo: 'prueba', usuario_id: ADMIN }), /actualización de la base/);
+  await falla('corregir también', () => svc.corregirValores(N, o.id, { costo_estimado: 1, motivo: 'prueba' }), /actualización de la base/);
+  checkEq('y la orden sigue igual', (await orden(o.id)).estado, 'Recibido');
+}
+
+seccion('16. La migración de anulación');
+{
+  const sql = readFileSync(path.join(RAIZ, 'migrations/20261026_servicio_anulacion.sql'), 'utf8');
+  await db.exec(sql);
+  await db.exec(sql);
+  checkSi('se aplica dos veces sin error', true);
+  checkSi('el runner lee el MISMO archivo', readFileSync(path.join(RAIZ, 'src/config/migrations.js'), 'utf8')
+    .includes('20261026_servicio_anulacion.sql'));
+  await columnas.detectarColumnas();
+  checkEq('la detección la enciende', columnas.hayServicioAnulacion(), true);
+  await falla('el CHECK sigue rechazando estados inventados',
+    () => q("UPDATE ordenes_servicio SET estado = 'Borrada' WHERE id = 1"), /check|violates/i);
+}
+
+seccion('17. Anular una orden ABIERTA con plata');
+{
+  const P = await nueva({ cliente_nombre: 'Paula', abono_inicial: { valor: 50000, metodo: 'Efectivo' } });
+  await falla('sin motivo no', () => svc.anularOrden(N, P.id, { motivo: ' ', usuario_id: ADMIN }), /motivo/);
+  const e = await falla('con plata recibida hay que decir qué pasa con ella',
+    () => svc.anularOrden(N, P.id, { motivo: 'Se creó dos veces', usuario_id: ADMIN }), /PLATA_SIN_DECIDIR/);
+  checkEq('  …con la cifra', e?.detalle, { neto: 50000 });
+  const r = await svc.anularOrden(N, P.id, { motivo: 'Se creó dos veces', plata: 'devolver', metodo: 'Nequi', usuario_id: ADMIN });
+  const op = await orden(P.id);
+  checkEq('queda Anulado, con su estado anterior y el motivo', [op.estado, op.estado_anterior, op.anulado_motivo, op.anulado_por, Number(op.total_abonado)],
+    ['Anulado', 'Recibido', 'Se creó dos veces', ADMIN, 0]);
+  checkEq('«se le devuelve»: una devolución por todo lo recibido', (await abonos(P.id)).map((a) => [a.tipo, Number(a.valor), a.metodo, a.anulado]),
+    [['abono', 50000, 'Efectivo', false], ['devolucion', 50000, 'Nequi', false]]);
+  checkEq('la respuesta dice qué se hizo', [r.neto, r.plata], [50000, 'devolver']);
+
+  const Q = await nueva({ cliente_nombre: 'Quique', abono_inicial: { valor: 40000, metodo: 'Efectivo' } });
+  const cajaAntes = await cajaDia();
+  await svc.anularOrden(N, Q.id, { motivo: 'El abono era de otra orden', plata: 'anular_abonos', usuario_id: ADMIN });
+  checkEq('«fue un error»: sus abonos quedan anulados', (await abonos(Q.id)).map((a) => [a.anulado, a.anulado_motivo]),
+    [[true, 'Orden anulada: El abono era de otra orden']]);
+  const cajaDespues = await cajaDia();
+  check('la caja deja de contar esos 40.000', cajaAntes.grupos.abonosServicio.total - cajaDespues.grupos.abonosServicio.total, 40000);
+  checkSi('y la devolución de Paula sale como egreso', cajaDespues.grupos.devolucionesServicio.items
+    .some((i) => Number(i.orden_id) === P.id && Number(i.valor) === 50000));
+
+  await falla('anularla otra vez', () => svc.anularOrden(N, P.id, { motivo: 'otra', usuario_id: ADMIN }), /YA_ANULADA/);
+  await falla('una anulada no recibe abonos', () => abonar(P.id, 1000), /no permite abonos/);
+  await falla('ni pasa a sin reparar', () => svc.sinReparar(N, P.id, { motivo: 'Otro', usuario_id: ADMIN }), /no disponible/);
+  await falla('ni se marca lista', () => lista(P.id, 1000), /No se puede marcar/);
+  await falla('ni se corrige', () => svc.corregirValores(N, P.id, { costo_estimado: 5, motivo: 'prueba' }), /ORDEN_ANULADA/);
+  await falla('ni se anula desde otro negocio', () => svc.anularOrden(2, Q.id, { motivo: 'prueba', usuario_id: 9 }), /no encontrada/);
+  const sinPlata = await nueva({ cliente_nombre: 'Sin plata' });
+  const rs = await svc.anularOrden(N, sinPlata.id, { motivo: 'Cliente se arrepintió', usuario_id: ADMIN });
+  checkEq('sin plata recibida no pregunta nada', [rs.orden.estado, rs.plata], ['Anulado', null]);
+  globalThis.__PQ = [P.id, Q.id];
+}
+
+seccion('18. Anular una orden ENTREGADA: su factura se cancela');
+{
+  const R = await nueva({ cliente_nombre: 'Rosa' });
+  await lista(R.id, 100000, 40000);
+  await abonar(R.id, 100000);
+  await svc.entregar(N, R.id);
+  const fr = (await orden(R.id)).factura_id;
+  checkSi('entregada, tiene su factura de servicio', !!fr);
+  const r = await svc.anularOrden(N, R.id, { motivo: 'Se registró a otro cliente', plata: 'devolver', metodo: 'Efectivo', usuario_id: ADMIN });
+  checkEq('la orden queda anulada (estaba entregada) y su factura cancelada',
+    [(await orden(R.id)).estado_anterior, (await q('SELECT estado FROM facturas WHERE id = $1', [fr]))[0].estado, r.factura_cancelada],
+    ['Entregado', 'Cancelada', fr]);
+  const rep = await reportes.getServiciosRango(S, '2000-01-01', '2100-01-01');
+  checkSi('el reporte de servicios ya no la cuenta', !rep.cerrados.some((c) => c.id === R.id));
+  checkSi('…ni a las anuladas abiertas', !rep.cerrados.some((c) => globalThis.__PQ.includes(c.id)));
+
+  // Una orden cuyo factura_id apunta a una VENTA (con productos) no la toca.
+  const V = await nueva({ cliente_nombre: 'Venta Ajena' });
+  const [fv] = await q("INSERT INTO facturas (sucursal_id, nombre_cliente, estado) VALUES (1, 'X', 'Activa') RETURNING id");
+  await q("INSERT INTO lineas_factura (factura_id, nombre_producto, imei, cantidad, precio) VALUES ($1, 'iPhone', 'IMEI-V1', 1, 500000)", [fv.id]);
+  await q('UPDATE ordenes_servicio SET factura_id = $1 WHERE id = $2', [fv.id, V.id]);
+  await svc.anularOrden(N, V.id, { motivo: 'prueba', usuario_id: ADMIN });
+  checkEq('una factura de VENTA ligada a la orden no se cancela', (await q('SELECT estado FROM facturas WHERE id = $1', [fv.id]))[0].estado, 'Activa');
+}
+
+seccion('19. Corregir valores');
+{
+  // Entregada y pagada: el precio baja → se devuelve y la factura se ajusta.
+  const Sx = await nueva({ cliente_nombre: 'Sofía' });
+  await lista(Sx.id, 200000, 80000);
+  await abonar(Sx.id, 200000);
+  await svc.entregar(N, Sx.id);
+  const fs = (await orden(Sx.id)).factura_id;
+  await falla('sin motivo no', () => svc.corregirValores(N, Sx.id, { precio: 150000 }), /por qué/);
+  await falla('valores negativos no', () => svc.corregirValores(N, Sx.id, { precio: -1, motivo: 'error' }), /negativos/);
+  const e = await falla('bajar el precio por debajo de lo pagado pide la devolución',
+    () => svc.corregirValores(N, Sx.id, { precio: 150000, motivo: 'Era 150.000' }), /ABONADO_MAYOR_A_PRECIO/);
+  checkEq('  …con las cifras', e?.detalle, { abonado: 200000, precio: 150000, devolver: 50000 });
+  const r = await svc.corregirValores(N, Sx.id, { precio: 150000, motivo: 'Era 150.000', ajuste: { metodo: 'Efectivo' } });
+  const os1 = await orden(Sx.id);
+  checkEq('baja a 150.000, devuelve 50.000 y sigue entregada', [Number(os1.precio_final), Number(os1.total_abonado), os1.estado, r.movimiento?.tipo],
+    [150000, 150000, 'Entregado', 'devolucion']);
+  checkEq('la factura dice 150.000 y sus pagos también', [(await q('SELECT precio::int AS p FROM lineas_factura WHERE factura_id = $1', [fs]))[0].p,
+    (await pagosDe(fs)).reduce((s, p) => s + p.v, 0)], [150000, 150000]);
+  checkEq('el antes y el después para el rastro', [r.antes, r.despues], [{ precio_final: 200000 }, { precio_final: 150000 }]);
+
+  // Sube en una entregada → vuelve a Pendiente de pago.
+  const r2 = await svc.corregirValores(N, Sx.id, { precio: 180000, motivo: 'Faltó el repuesto' });
+  checkEq('sube a 180.000: vuelve a Pendiente de pago con 30.000 de saldo',
+    [r2.orden.estado, Number((await repo.findById(N, Sx.id)).saldo_pendiente), r2.despues.estado], ['Pendiente_pago', 30000, 'Pendiente_pago']);
+  await abonar(Sx.id, 30000);
+  checkEq('al pagar el saldo se vuelve a entregar', (await orden(Sx.id)).estado, 'Entregado');
+  checkEq('y la factura cuadra con lo cobrado', (await pagosDe(fs)).reduce((s, p) => s + p.v, 0) > 0, true);
+
+  // Pendiente de pago que con la corrección queda cubierta → se entrega y factura.
+  const T = await nueva({ cliente_nombre: 'Tomás' });
+  await lista(T.id, 100000);
+  await abonar(T.id, 40000);
+  await svc.entregar(N, T.id);
+  const rt = await svc.corregirValores(N, T.id, { precio: 40000, motivo: 'Precio mal escrito' });
+  const ot = await orden(T.id);
+  checkEq('pendiente que queda cubierta: entregada y con factura de 40.000',
+    [rt.orden.estado, ot.estado, !!ot.factura_id, ot.factura_id ? (await q('SELECT precio::int AS p FROM lineas_factura WHERE factura_id = $1', [ot.factura_id]))[0].p : null],
+    ['Entregado', 'Entregado', true, 40000]);
+
+  // Sin reparar: el diagnóstico sube → se cobra ahora.
+  const U = await nueva({ cliente_nombre: 'Úrsula', abono_inicial: { valor: 10000, metodo: 'Efectivo' } });
+  await svc.sinReparar(N, U.id, { motivo: 'Otro', precio_diagnostico: 10000, metodo: 'Efectivo', usuario_id: ADMIN });
+  await falla('subir el diagnóstico pide cómo paga la diferencia',
+    () => svc.corregirValores(N, U.id, { precio: 25000, motivo: 'Diagnóstico mal escrito' }), /COBRO_REQUERIDO/);
+  await svc.corregirValores(N, U.id, { precio: 25000, motivo: 'Diagnóstico mal escrito', ajuste: { metodo: 'Nequi' } });
+  const ou = await orden(U.id);
+  checkEq('sin reparar: diagnóstico 25.000, cobrados 15.000 más por Nequi',
+    [Number(ou.precio_final), Number(ou.total_abonado), (await abonos(U.id)).at(-1).metodo, Number((await abonos(U.id)).at(-1).valor)],
+    [25000, 25000, 'Nequi', 15000]);
+  await falla('una orden sin reparar no tiene costo', () => svc.corregirValores(N, U.id, { costo: 5000, motivo: 'prueba' }), /sin reparar no tiene costo/);
+
+  // Costo y estimado.
+  const rc = await svc.corregirValores(N, Sx.id, { costo: 70000, motivo: 'El repuesto costó menos' });
+  checkEq('el costo solo mueve la utilidad', [Number((await orden(Sx.id)).costo_real), rc.movimiento, Number((await repo.findById(N, Sx.id)).utilidad)],
+    [70000, null, 110000]);
+  const W = await nueva({ cliente_nombre: 'Walter', costo_estimado: 50000 });
+  await svc.corregirValores(N, W.id, { costo_estimado: 80000, motivo: 'Estimado mal escrito' });
+  checkEq('el estimado se corrige en cualquier momento', Number((await orden(W.id)).costo_estimado), 80000);
+  await falla('una orden sin precio todavía no corrige precio', () => svc.corregirValores(N, W.id, { precio: 1, motivo: 'prueba' }), /SIN_PRECIO/);
+  await falla('sin ningún valor no hay nada que corregir', () => svc.corregirValores(N, W.id, { motivo: 'prueba' }), /ningún valor/);
+
+  // Garantía cobrable: se corrige el precio de la garantía; la factura (de la reparación) no se toca.
+  const G = await nueva({ cliente_nombre: 'Gloria' });
+  await lista(G.id, 90000);
+  await abonar(G.id, 90000);
+  await svc.entregar(N, G.id);
+  const fg = (await orden(G.id)).factura_id;
+  await svc.abrirGarantia(N, G.id, { cobrable: true });
+  await svc.marcarListo(N, G.id, { es_garantia: true, precio_garantia: 30000, usuario_id: ADMIN });
+  await svc.corregirValores(N, G.id, { precio: 20000, motivo: 'Era 20.000' });
+  const og = await orden(G.id);
+  checkEq('en garantía se corrige su precio; la factura sigue con el de la reparación',
+    [Number(og.precio_garantia), Number(og.precio_final), (await q('SELECT precio::int AS p FROM lineas_factura WHERE factura_id = $1', [fg]))[0].p],
+    [20000, 90000, 90000]);
+
+  // El rastro: el controlador escribe la fila de auditoría y el detalle la lee.
+  const res = { json() {}, status() { return this; } };
+  let errCtrl = null;
+  await ctrl.corregirValores({ user: { negocio_id: N, id: ADMIN }, params: { id: String(W.id) },
+    body: { costo_estimado: 90000, motivo: 'Ajuste final' } }, res, (e) => { errCtrl = e; });
+  await new Promise((r) => setTimeout(r, 50));
+  const hist = await correcciones.historialCorrecciones(N, W.id);
+  checkEq('el detalle trae la corrección con antes, después y motivo', [errCtrl, hist.length, hist[0]?.detalle?.motivo,
+    hist[0]?.detalle?.antes?.costo_estimado, hist[0]?.detalle?.despues?.costo_estimado], [null, 1, 'Ajuste final', 80000, 90000]);
+  const det = await svc.getOrdenById(N, W.id);
+  checkEq('getOrdenById la devuelve en `correcciones`', det.correcciones.length, 1);
+  // En PRODUCCIÓN auditoria.detalle es TEXT (aquí JSONB): se probó contra la
+  // base local con el esquema real y llegaba como cadena sin leer.
+  await db.exec('ALTER TABLE auditoria ALTER COLUMN detalle TYPE TEXT USING detalle::text');
+  const histTexto = await correcciones.historialCorrecciones(N, W.id);
+  checkEq('con detalle en TEXT (como en producción) también se lee', histTexto[0]?.detalle?.despues, { costo_estimado: 90000 });
+  checkEq('leerDetalle: cadena, objeto y basura', [correcciones.leerDetalle('{"a":1}'), correcciones.leerDetalle({ a: 2 }),
+    correcciones.leerDetalle('no es json')], [{ a: 1 }, { a: 2 }, {}]);
+}
+
+seccion('20. Quién puede, y el navegador promete lo mismo');
+{
+  const rutas = readFileSync(path.join(RAIZ, 'src/modules/servicios/servicios.routes.js'), 'utf8');
+  checkSi('anular exige admin o PIN', /'\/:id\/anular',\s*requireModulo\('servicios'\),\s*requireAdminOPin/.test(rutas));
+  checkSi('corregir también', /'\/:id\/valores',\s*requireModulo\('servicios'\),\s*requireAdminOPin/.test(rutas));
+  const front = await import(pathToFileURL(path.join(FRONT, 'utils/servicioCobro.js')).href);
+  checkEq('los estados con precio son los mismos', front.ESTADOS_CON_PRECIO, correcciones.ESTADOS_CON_PRECIO);
+  const casos = [
+    [{ estado: 'Entregado', total_abonado: 200000 }, 150000, { devolver: 50000, cobrar: 0, pendiente: 0, estado: 'Entregado' }],
+    [{ estado: 'Entregado', total_abonado: 150000 }, 180000, { devolver: 0, cobrar: 0, pendiente: 30000, estado: 'Pendiente_pago' }],
+    [{ estado: 'Pendiente_pago', total_abonado: 40000 }, 40000, { devolver: 0, cobrar: 0, pendiente: 0, estado: 'Entregado' }],
+    [{ estado: 'Sin_reparar', total_abonado: 10000 }, 25000, { devolver: 0, cobrar: 15000, pendiente: 0, estado: 'Sin_reparar' }],
+    [{ estado: 'Listo', total_abonado: 0 }, 50000, { devolver: 0, cobrar: 0, pendiente: 50000, estado: 'Listo' }],
+  ];
+  checkEq('efectoCorreccion: lo que avisa la pantalla es lo que hizo el backend en la sección 19',
+    casos.map(([o, p]) => front.efectoCorreccion(o, p)), casos.map(([, , esp]) => esp));
+  checkEq('netoRecibido == el de la anulación', front.netoRecibido([
+    { tipo: 'abono', valor: '50000.00' }, { tipo: 'devolucion', valor: '10000.00' }, { tipo: 'abono', valor: '5000', anulado: true }]), 40000);
+  checkEq('campos: en un sin reparar se corrige el diagnóstico', [
+    front.camposCorregibles({ estado: 'Sin_reparar' }).etiquetaPrecio,
+    front.camposCorregibles({ estado: 'Listo', precio_garantia: '30000', garantia_cobrable: true }).campoPrecio,
+    front.camposCorregibles({ estado: 'Listo', precio_garantia: '0', garantia_cobrable: false }).precio,
+  ], ['Cobro por diagnóstico', 'precio_garantia', false]);
+  const pag = readFileSync(path.join(FRONT, 'pages/servicios/ServiciosPage.jsx'), 'utf8');
+  checkSi('la pantalla lista las anuladas entre las cerradas', pag.includes("['Entregado', 'Sin_reparar', 'Anulado']"));
+  const modal = readFileSync(path.join(FRONT, 'pages/servicios/cobro/ModalAnularOrden.jsx'), 'utf8');
+  checkSi('el modal de anular manda el PIN si no es admin', modal.includes('pin: pin.trim()'));
+}
+
 console.log(`\n${ok} verificaciones correctas, ${fallos.length} fallidas`);
 if (fallos.length) { console.log('\nFALLAS:'); fallos.forEach((f) => console.log(' ·', f)); process.exit(1); }

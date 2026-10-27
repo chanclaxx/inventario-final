@@ -11,6 +11,8 @@ import {
   precioCiclo, saldoCiclo, puedeAbonar, devolucionAlFijarPrecio, cuentaSinReparar,
 } from '../../utils/servicioCobro';
 import { SelectorMetodo, SelectorTecnico } from './cobro/piezasServicio';
+import { ModalAnularOrden } from './cobro/ModalAnularOrden';
+import { ModalCorregirValores } from './cobro/ModalCorregirValores';
 import { useTecnicosServicio, nombreTecnico } from './cobro/tecnicosServicio';
 import { buscarPorCedula, crearCliente, getFrecuentes, agregarFrecuente } from '../../api/clientes.api';
 import { useCedulaCliente }            from '../../hooks/useCedulaCliente';
@@ -56,6 +58,7 @@ const ESTADOS_CONFIG = {
   Entregado:      { badge: 'gray',   label: 'Entregado',        border: 'border-l-gray-200'   },
   Sin_reparar:    { badge: 'red',    label: 'Sin reparar',      border: 'border-l-red-200'    },
   Garantia:       { badge: 'purple', label: 'Garantía',         border: 'border-l-purple-400' },
+  Anulado:        { badge: 'gray',   label: 'Anulada',          border: 'border-l-gray-300'   },
 };
 
 
@@ -67,7 +70,7 @@ const MOTIVOS_SIN_REPARAR = [
   'Otro',
 ];
 const ESTADOS_ACTIVOS  = ['Recibido', 'En_reparacion', 'Listo', 'Pendiente_pago', 'Garantia'];
-const ESTADOS_CERRADOS = ['Entregado', 'Sin_reparar'];
+const ESTADOS_CERRADOS = ['Entregado', 'Sin_reparar', 'Anulado'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1716,7 +1719,7 @@ function ModalGarantia({ orden, onClose, onExito }) {
 
 // ─── Modal: Detalle ───────────────────────────────────────────────────────────
 
-function ModalDetalleOrden({ ordenId, onClose, onImprimir, onCambio }) {
+function ModalDetalleOrden({ ordenId, onClose, onImprimir, onCambio, onCorregir, onAnular }) {
   const queryClient = useQueryClient();
   const { esAdminNegocio } = useAuth();
   const esAdmin = esAdminNegocio();
@@ -2001,6 +2004,64 @@ function ModalDetalleOrden({ ordenId, onClose, onImprimir, onCambio }) {
 
         {errorAccion && <p className="text-sm text-red-500">{errorAccion}</p>}
 
+        {/* Correcciones hechas a sus valores (el rastro queda en auditoría). */}
+        {data.correcciones?.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+              Correcciones
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {data.correcciones.map((c, i) => {
+                const det = c.detalle || {};
+                const cambios = Object.keys(det.despues || {}).map((k) => {
+                  const nombre = { precio_final: 'Precio', precio_garantia: 'Precio garantía', costo_real: 'Costo',
+                    costo_garantia: 'Costo garantía', costo_estimado: 'Estimado', estado: 'Estado' }[k] || k;
+                  const fmt = (v) => (k === 'estado' ? cfg(v).label : v === null || v === undefined ? '—' : formatCOP(Number(v)));
+                  return `${nombre}: ${fmt(det.antes?.[k])} → ${fmt(det.despues[k])}`;
+                });
+                return (
+                  <div key={i} className="bg-blue-50 rounded-xl px-3 py-2">
+                    <p className="text-xs text-blue-800">{cambios.join(' · ')}</p>
+                    {det.movimiento && (
+                      <p className="text-xs text-blue-600">
+                        {det.movimiento.tipo === 'devolucion' ? 'Se devolvieron' : 'Se cobraron'} {formatCOP(det.movimiento.valor)} ({det.movimiento.metodo})
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-500">
+                      {formatFechaHora(c.fecha)}{c.usuario_nombre ? ` · ${c.usuario_nombre}` : ''} — {det.motivo}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {data.estado === 'Anulado' && (
+          <div className="bg-gray-100 border border-gray-200 rounded-xl px-3 py-2.5">
+            <p className="text-sm font-semibold text-gray-700">
+              Orden anulada{data.estado_anterior ? ` (estaba ${cfg(data.estado_anterior).label.toLowerCase()})` : ''}
+            </p>
+            <p className="text-xs text-gray-500">{formatFechaHora(data.anulado_en)} — {data.anulado_motivo}</p>
+          </div>
+        )}
+
+        {/* Corregir equivocaciones: admin directo; los demás con el PIN. */}
+        {data.estado !== 'Anulado' && (onCorregir || onAnular) && (
+          <div className="flex gap-2 border-t border-gray-100 pt-3">
+            {onCorregir && (
+              <Button size="sm" variant="secondary" className="flex-1" onClick={() => onCorregir(data)}>
+                Corregir valores
+              </Button>
+            )}
+            {onAnular && (
+              <Button size="sm" variant="danger" className="flex-1" onClick={() => onAnular(data)}>
+                <Ban size={13} /> Anular orden
+              </Button>
+            )}
+          </div>
+        )}
+
         {data.motivo_sin_reparar && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
             <p className="text-xs font-semibold text-orange-600">Motivo de devolución</p>
@@ -2160,6 +2221,7 @@ export default function ServiciosPage() {
     { id: 'Garantia',      label: 'Garantía'      },
     { id: 'Entregado',     label: 'Entregados'    },
     { id: 'Sin_reparar',   label: 'Sin reparar'   },
+    { id: 'Anulado',       label: 'Anuladas'      },
   ];
 
   return (
@@ -2308,6 +2370,12 @@ export default function ServiciosPage() {
       {modalNueva && (
         <ModalNuevaOrden onClose={() => setModalNueva(false)} onCreada={invalidar} />
       )}
+      {accion?.tipo === 'anular' && (
+        <ModalAnularOrden orden={accion.orden} onClose={cerrar} onExito={invalidar} />
+      )}
+      {accion?.tipo === 'corregir' && (
+        <ModalCorregirValores orden={accion.orden} onClose={cerrar} onExito={invalidar} />
+      )}
       {accion?.tipo === 'en-reparacion' && (
         <ModalEnReparacion orden={accion.orden} onClose={cerrar} onExito={invalidar} />
       )}
@@ -2328,6 +2396,8 @@ export default function ServiciosPage() {
       )}
       {accion?.tipo === 'detalle' && (
         <ModalDetalleOrden ordenId={accion.orden.id} onClose={cerrar} onCambio={invalidar}
+          onCorregir={(orden) => setAccion({ tipo: 'corregir', orden })}
+          onAnular={(orden) => setAccion({ tipo: 'anular', orden })}
           onImprimir={(orden) => setAccion({
             tipo: ['Recibido', 'En_reparacion'].includes(orden.estado)
               ? 'reimprimir-recepcion'

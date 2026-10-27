@@ -1,5 +1,6 @@
 const repo = require('./servicios.repository');
 const tecnicosSrv = require('./servicios.tecnicos');
+const correcciones = require('./servicios.correcciones');
 const { pool } = require('../../config/db');
 const { hayTecnicos } = require('../../config/columnas');
 
@@ -37,8 +38,11 @@ const getOrdenes = (sucursalId, negocioId, filtros) =>
 const getOrdenById = async (negocioId, id) => {
   const orden = await repo.findById(negocioId, id);
   if (!orden) throw { status: 404, message: 'Orden no encontrada' };
-  const abonos = await repo.getAbonos(negocioId, id);
-  return { ...orden, abonos };
+  const [abonos, correccionesHechas] = await Promise.all([
+    repo.getAbonos(negocioId, id),
+    correcciones.historialCorrecciones(negocioId, Number(id)),
+  ]);
+  return { ...orden, abonos, correcciones: correccionesHechas };
 };
 
 const getResumenHoy = (sucursalId, negocioId) =>
@@ -179,6 +183,25 @@ const actualizarNotas = async (negocioId, id, notas_tecnico) => {
   return orden;
 };
 
+// ─── Corregir equivocaciones (anular / cambiar valores) ──────────────────────
+
+const anularOrden = async (negocioId, id, datos) => {
+  // Con el equipo afuera donde un técnico externo, primero hay que recibirlo.
+  await _exigirEquipoEnLocal(negocioId, id);
+  const plata = ['devolver', 'anular_abonos'].includes(datos.plata) ? datos.plata : null;
+  return correcciones.anularOrden(negocioId, Number(id), {
+    motivo: datos.motivo, plata, metodo: plata === 'devolver' ? _metodo(datos.metodo) : null,
+    usuarioId: datos.usuario_id || null,
+  });
+};
+
+const corregirValores = (negocioId, id, datos) => correcciones.corregirValores(negocioId, Number(id), {
+  precio: datos.precio, costo: datos.costo, costo_estimado: datos.costo_estimado,
+  motivo: datos.motivo,
+  ajuste: datos.ajuste && typeof datos.ajuste === 'object' ? { metodo: _metodo(datos.ajuste.metodo) } : null,
+  usuarioId: datos.usuario_id || null,
+});
+
 // ─── Técnicos internos ───────────────────────────────────────────────────────
 
 const getTecnicos = async (negocioId, { sucursalId, todos }) => ({
@@ -191,6 +214,7 @@ module.exports = {
   crearOrden, enReparacion, marcarListo, asignarTecnico,
   registrarAbono, anularAbono, entregar, sinReparar,
   abrirGarantia, actualizarNotas,
+  anularOrden, corregirValores,
   getTecnicos,
   crearTecnico: tecnicosSrv.crear,
   actualizarTecnico: tecnicosSrv.actualizar,

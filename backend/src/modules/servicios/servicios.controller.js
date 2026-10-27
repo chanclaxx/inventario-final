@@ -104,6 +104,44 @@ const asignarTecnico = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ─── Corregir equivocaciones ─────────────────────────────────────────────────
+
+const anularOrden = async (req, res, next) => {
+  try {
+    const data = await service.anularOrden(req.user.negocio_id, req.params.id, {
+      ...req.body, usuario_id: req.user.id,
+    });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Orden de servicio anulada', 'servicios', Number(req.params.id), {
+      sucursal_id:       data.orden?.sucursal_id ?? null,
+      motivo:            req.body?.motivo ?? null,
+      estado_anterior:   data.orden?.estado_anterior ?? null,
+      valor:             data.neto,
+      plata:             data.plata,
+      factura_cancelada: data.factura_cancelada,
+    });
+    res.json({ ok: true, data, message: 'Orden anulada' });
+  } catch (err) { next(err); }
+};
+
+const corregirValores = async (req, res, next) => {
+  try {
+    const data = await service.corregirValores(req.user.negocio_id, req.params.id, {
+      ...req.body, usuario_id: req.user.id,
+    });
+    // El historial del detalle lee ESTA fila: antes, después y por qué.
+    audit.registrar(req.user.negocio_id, req.user.id, 'Valores de servicio corregidos', 'servicios', Number(req.params.id), {
+      sucursal_id: data.orden?.sucursal_id ?? null,
+      motivo:      data.motivo,
+      antes:       data.antes,
+      despues:     data.despues,
+      movimiento:  data.movimiento
+        ? { tipo: data.movimiento.tipo, valor: Number(data.movimiento.valor), metodo: data.movimiento.metodo }
+        : null,
+    });
+    res.json({ ok: true, data, message: 'Valores corregidos' });
+  } catch (err) { next(err); }
+};
+
 // ─── Técnicos internos ───────────────────────────────────────────────────────
 
 const getTecnicos = async (req, res, next) => {
@@ -190,4 +228,5 @@ module.exports = {
   registrarAbono, anularAbono, asignarTecnico, entregar, sinReparar,
   abrirGarantia, actualizarNotas,
   getTecnicos, crearTecnico, actualizarTecnico,
+  anularOrden, corregirValores,
 };

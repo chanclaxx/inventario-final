@@ -1813,6 +1813,20 @@ const aplicarMigraciones = async (client) => {
     if (sqlServicio) await migrar(client, 'Servicio técnico: abonos y técnicos', sqlServicio);
   }
 
+  // Servicio técnico: anular una orden (estado 'Anulado' + rastro). Ver
+  // migrations/20261026_servicio_anulacion.sql. Bloque PROPIO (lleva PL/pgSQL):
+  // si fallara, Servicios sigue igual y `hayServicioAnulacion()` apaga las rutas.
+  {
+    let sqlAnulacion = null;
+    try {
+      sqlAnulacion = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261026_servicio_anulacion.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Servicio técnico (anulación): no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlAnulacion) await migrar(client, 'Servicio técnico: anulación', sqlAnulacion);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

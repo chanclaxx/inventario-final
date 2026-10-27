@@ -1303,9 +1303,35 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > gratis, en curso, cobrado, utilidad, días); el nombre NO va en documentos del
 > cliente. Sin la migración (`hayServicioAbonosV2()` / `hayTecnicosServicio()`)
 > todo emite el SQL de siempre.
-> Prueba: `84-servicio-abonos-tecnicos` (126; la sección 1 es la de sin
+> **Corregir equivocaciones: ANULAR una orden y CAMBIAR sus valores**
+> (`servicios.correcciones.js`, `cobro/ModalAnularOrden.jsx` y
+> `ModalCorregirValores.jsx`, `20261026_servicio_anulacion.sql`; pedido del
+> usuario, 26-oct-2026; botones en el detalle de la orden). Decisiones del
+> usuario: se anula en CUALQUIER estado (también entregada / pendiente / sin
+> reparar) y la factura de servicio de la orden queda Cancelada; la plata
+> recibida se decide EN EL MOMENTO —«se le devuelve» (devolución por todo lo
+> neto, todos los ciclos) o «fue un error» (se anulan todos sus movimientos)—,
+> sin decidir responde 409 `PLATA_SIN_DECIDIR`; se corrigen precio, costo y
+> estimado; quién: admin o con PIN (`requireAdminOPin`, como cancelar factura).
+> Estado nuevo `'Anulado'` (CHECK ampliado; `estado_anterior`, `anulado_*`;
+> los reportes filtran por estados explícitos y la dejan fuera solos). Una
+> orden con garantía con proveedor viva no se anula (409). **Solo se cancela o
+> reescribe la factura PROPIA de la orden** (una línea, sin IMEI ni producto):
+> una venta ligada por `factura_id` no se toca. Corregir el precio: por debajo
+> de lo pagado → 409 `ABONADO_MAYOR_A_PRECIO` hasta mandar `ajuste:{metodo}` y
+> devuelve; sube en una entregada → vuelve a Pendiente de pago; una pendiente
+> que queda cubierta → Entregado (y factura si no tenía); en «sin reparar» el
+> diagnóstico que sube se cobra ya (409 `COBRO_REQUERIDO`); en garantía se
+> corrige `precio_garantia` y la factura (la de la reparación) no se toca. La
+> factura sigue al precio y sus pagos se rehacen netos (solo ciclo 0). El
+> rastro va en `auditoria` («Valores de servicio corregidos», antes/después/
+> motivo/movimiento) y el detalle lo muestra; **`auditoria.detalle` es TEXT en
+> producción** (JSONB en el fixture): se lee con `leerDetalle`. Espejo de la
+> regla en `servicioCobro.efectoCorreccion` / `camposCorregibles`.
+> Prueba: `84-servicio-abonos-tecnicos` (186; la sección 1 es la de sin
 > migración, la 6 caja/tesorería/factura, la 9 el saldo de la garantía, la 14
-> navegador == backend == SQL). Probado también en navegador aislado.
+> navegador == backend == SQL, 15-20 anular y corregir). Probado también en
+> navegador aislado y por HTTP contra el esquema real.
 
 > **Garantías con proveedores — Proveedores → Garantías** (`modules/reclamos-garantia/`,
 > `20261023_reclamos_garantia.sql`, `pages/proveedores/garantias/`; opt-in

@@ -11,6 +11,9 @@ export const registrarAbono      = (id, datos)     => api.post(`/servicios/${id}
 export const anularAbonoServicio = (id, abonoId, motivo) =>
   api.patch(`/servicios/${id}/abonos/${abonoId}/anular`, { motivo });
 export const asignarTecnicoOrden = (id, tecnicoId) => api.patch(`/servicios/${id}/tecnico`, { tecnico_id: tecnicoId });
+// Corregir equivocaciones (admin, o con PIN: `pin` va en el cuerpo).
+export const anularOrdenServicio     = (id, datos) => api.patch(`/servicios/${id}/anular`, datos);
+export const corregirValoresServicio = (id, datos) => api.patch(`/servicios/${id}/valores`, datos);
 export const entregarOrden       = (id)            => api.patch(`/servicios/${id}/entregar`);
 export const sinReparar          = (id, datos)     => api.patch(`/servicios/${id}/sin-reparar`, datos);
 export const abrirGarantia       = (id, datos)     => api.patch(`/servicios/${id}/garantia`, datos);
