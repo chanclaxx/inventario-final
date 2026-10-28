@@ -852,5 +852,58 @@ seccion('21. En un servicio el costo VACÍO es $0 (Sitio Tecnologico, 26-oct-202
   checkSi('la pantalla calcula la utilidad estimada con vacío = 0', pag.includes('Number(costoReal || 0)'));
 }
 
+seccion('22. La FACTURA del servicio trae el costo de su orden (Sitio Tecnologico, 28-oct-2026)');
+{
+  // Al entregar se crea una factura de contado con una línea sin producto. El
+  // reporte buscaba ese costo en el inventario y la línea salía «sin costo»
+  // aunque la orden lo tuviera escrito (OS-0009: costo 24.000).
+  const Z = await nueva({ cliente_nombre: 'Con costo' });
+  await svc.marcarListo(N, Z.id, { precio_final: 50000, costo_real: 20000, usuario_id: ADMIN });
+  await abonar(Z.id, 50000);
+  await svc.entregar(N, Z.id);
+  const X = (await q(`SELECT id FROM ordenes_servicio WHERE cliente_nombre = 'Mano de obra'`))[0];
+  const Y = (await q(`SELECT id FROM ordenes_servicio WHERE cliente_nombre = 'Vieja sin costo'`))[0];
+  const ids = [X.id, Y.id, Z.id];
+  const facIds = (await q('SELECT factura_id FROM ordenes_servicio WHERE id = ANY($1::int[]) ORDER BY id', [ids])).map((r) => r.factura_id);
+  checkSi('las tres tienen su factura', facIds.every(Boolean));
+
+  const DESDE = '2000-01-01', HASTA = '2100-01-01';
+  const v = await reportes.getVentasRango(S, DESDE, HASTA);
+  const lineaDe = (fid) => v.facturas.find((f) => f.id === fid)?.lineas[0];
+  checkEq('costo de la línea = el de la orden (vacío = 0, también NULL)',
+    facIds.map((fid) => lineaDe(fid)?.costo_unitario_compra), [0, 0, 20000]);
+  checkEq('y su utilidad', facIds.map((fid) => lineaDe(fid)?.utilidad), [15000, 15000, 30000]);
+  checkSi('la línea viaja marcada como servicio', facIds.every((fid) => lineaDe(fid)?.es_servicio === true));
+  const normales = v.facturas.flatMap((f) => f.lineas).filter((l) => !l.es_servicio);
+  checkSi('ninguna línea de producto quedó marcada como servicio', normales.length === 0 || normales.every((l) => l.es_servicio === false));
+
+  // Sin contar dos veces: la utilidad del servicio va en «Servicios», no en «Contado».
+  const u = v.utilidad_periodo;
+  const contadoEsperado = v.facturas.filter((f) => f.estado === 'Activa')
+    .flatMap((f) => f.lineas).filter((l) => !l.es_servicio && l.utilidad !== null).reduce((s, l) => s + l.utilidad, 0);
+  checkEq('«Contado» no incluye las líneas de servicio', u.contado, contadoEsperado);
+  checkEq('«Servicios» es la del reporte de servicios', u.servicios,
+    v.servicios.resumen.utilidad_confirmada + v.servicios.resumen.utilidad_garantias);
+  checkEq('ninguna línea de servicio cuenta como «sin costo»', v.facturas.filter((f) => f.estado === 'Activa')
+    .flatMap((f) => f.lineas).filter((l) => l.es_servicio && l.costo_unitario_compra === null).length, 0);
+
+  const a = await reportes.getAnalisis(S, DESDE, HASTA, 'mes');
+  checkEq('Análisis suma lo MISMO que Ventas (sin doble conteo)',
+    a.serie.reduce((s, p) => s + p.utilidad, 0), u.total);
+
+  // El Resumen no tiene grupo de servicios: ahí la utilidad entra por su factura.
+  const hoyIso = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const vHoy = await reportes.getVentasRango(S, hoyIso, hoyIso);
+  const lineasHoy = vHoy.facturas.filter((f) => f.estado === 'Activa').flatMap((f) => f.lineas);
+  const dash = await reportes.getDashboard(S, N);
+  checkEq('«Utilidad hoy» del Resumen suma también los servicios entregados hoy',
+    dash.utilidad_hoy, lineasHoy.filter((l) => l.utilidad !== null).reduce((s, l) => s + l.utilidad, 0));
+  checkEq('y no las cuenta como «sin costo»', dash.utilidad_hoy_sin_costo,
+    lineasHoy.filter((l) => l.costo_unitario_compra === null).length);
+
+  const pagR = readFileSync(path.join(FRONT, 'pages/reportes/ReportesPage.jsx'), 'utf8');
+  checkSi('Ventas no ofrece editar el costo de una línea de servicio', pagR.includes('if (linea.es_servicio)'));
+}
+
 console.log(`\n${ok} verificaciones correctas, ${fallos.length} fallidas`);
 if (fallos.length) { console.log('\nFALLAS:'); fallos.forEach((f) => console.log(' ·', f)); process.exit(1); }

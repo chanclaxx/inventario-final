@@ -59,6 +59,17 @@ const SUBTOTAL_EFECTIVO = `(${CANT_EFECTIVA} * l.precio)`;
 // Y NULL significa «sin costo»: esa línea NO suma utilidad (en SQL,
 // `subtotal − NULL` es NULL y SUM la ignora) y el reporte lo cuenta aparte.
 // Nunca se inventa una ganancia. Requiere los alias `l` (línea) y `f` (factura).
+//
+// LA LÍNEA DE UN SERVICIO TÉCNICO (`_crearFacturaPorServicio`: una sola línea,
+// sin producto ni IMEI, en la factura que la orden apunta con `factura_id`) no
+// tiene producto del cual leer el costo: su costo es el de la ORDEN, y vacío
+// es $0 (mano de obra; decisión del usuario, 26-oct-2026). Antes caía al
+// respaldo por nombre, no encontraba nada y salía «sin costo» aunque la orden
+// tuviera su costo escrito (Sitio Tecnologico, 28-oct-2026).
+const SQL_ES_LINEA_SERVICIO = `(
+  l.imei IS NULL AND l.producto_id IS NULL AND l.atributo_id IS NULL AND l.variante_id IS NULL
+  AND EXISTS (SELECT 1 FROM ordenes_servicio os_l WHERE os_l.factura_id = f.id)
+)`;
 const SQL_COSTO_UNIT_LINEA = `
   CASE
     WHEN l.imei IS NOT NULL THEN
@@ -69,6 +80,10 @@ const SQL_COSTO_UNIT_LINEA = `
       (SELECT ap.costo_unitario FROM atributos_producto ap WHERE ap.id = l.atributo_id)
     WHEN l.producto_id IS NOT NULL THEN
       (SELECT pc.costo_unitario FROM productos_cantidad pc WHERE pc.id = l.producto_id)
+    WHEN ${SQL_ES_LINEA_SERVICIO} THEN
+      (SELECT COALESCE(os_l.costo_real, 0) / NULLIF(l.cantidad, 0)
+       FROM ordenes_servicio os_l WHERE os_l.factura_id = f.id
+       ORDER BY os_l.id LIMIT 1)
     ELSE
       (SELECT pc.costo_unitario FROM productos_cantidad pc
        WHERE pc.nombre = l.nombre_producto AND pc.sucursal_id = f.sucursal_id
@@ -868,8 +883,13 @@ const _creditosDelRango = async (sucursalId, desde, hasta) => {
  */
 const _utilidadDelPeriodo = ({ facturas, creditos, prestamos, servicios, redInterna }) => {
   const activas = facturas.filter((f) => f.estado === 'Activa');
+  // La línea de un servicio técnico va en su factura (y ahí se ve su
+  // utilidad), pero en el total se cuenta UNA vez, en «Servicios», que es donde
+  // viven las garantías, los diagnósticos y lo pendiente de pago.
+  const lineasContado = (f) => f.lineas.filter((l) => !l.es_servicio);
   const partes = {
-    contado:   activas.reduce((s, f) => s + Number(f.utilidad_neta || 0), 0),
+    contado:   activas.reduce((s, f) => s + lineasContado(f)
+      .reduce((s2, l) => (l.utilidad !== null ? s2 + l.utilidad : s2), 0), 0),
     creditos:  Number(creditos?.resumen?.utilidad_confirmada || 0),
     prestamos: Number(prestamos?.resumen?.utilidad_confirmada || 0),
     servicios: Number(servicios?.resumen?.utilidad_confirmada || 0)
@@ -878,7 +898,7 @@ const _utilidadDelPeriodo = ({ facturas, creditos, prestamos, servicios, redInte
   };
   const sinCosto = {
     lineas_contado: activas.reduce(
-      (n, f) => n + f.lineas.filter((l) => l.costo_unitario_compra === null).length, 0),
+      (n, f) => n + lineasContado(f).filter((l) => l.costo_unitario_compra === null).length, 0),
     creditos:  Number(creditos?.resumen?.con_costo_incompleto || 0),
     prestamos: (prestamos?.saldados || []).filter((p) => p.utilidad === null).length,
     servicios: (servicios?.cerrados || [])
@@ -1072,6 +1092,8 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       ${obsequios.selObsequio('l')},
       -- NULL = sin costo registrado (la línea no suma utilidad y se marca).
       ${SQL_COSTO_UNIT_LINEA} AS costo_unitario_compra,
+      -- La línea de un servicio técnico: su utilidad ya está en «Servicios».
+      ${SQL_ES_LINEA_SERVICIO} AS es_servicio,
       CASE WHEN l.imei IS NOT NULL THEN 'serial' ELSE 'cantidad' END AS tipo_producto,
       -- IMPORTANTE: se usan subconsultas con LIMIT 1 (no JOINs) para obtener el
       -- nombre de línea. Un mismo IMEI puede existir en varias filas de
@@ -1120,6 +1142,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       costo_total:           costoTotal,
       utilidad,
       obsequio:              linea.obsequio === true,
+      es_servicio:           linea.es_servicio === true,
       tipo_producto:         linea.tipo_producto,
       linea_nombre:          linea.linea_nombre || null,
     };
@@ -2083,7 +2106,8 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
       WITH lin AS (
         SELECT ${periodoDe('f.fecha')} AS periodo, f.id AS factura_id, f.estado,
                ${SUBTOTAL_EFECTIVO} AS subtotal,
-               ${SQL_COSTO_LINEA}   AS costo
+               ${SQL_COSTO_LINEA}   AS costo,
+               ${SQL_ES_LINEA_SERVICIO} AS es_servicio
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
         WHERE f.sucursal_id = $1
@@ -2097,7 +2121,8 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
                COALESCE(SUM(costo), 0)                                   AS costo,
                COALESCE(SUM(subtotal) FILTER (WHERE costo IS NOT NULL), 0) AS ventas_con_costo,
                -- La retoma NO se resta: es un medio de pago, no una pérdida.
-               COALESCE(SUM(subtotal - costo) FILTER (WHERE estado = 'Activa'), 0) AS u_contado
+               -- La línea de un servicio se cuenta en «serv», no aquí (como en Ventas).
+               COALESCE(SUM(subtotal - costo) FILTER (WHERE estado = 'Activa' AND NOT es_servicio), 0) AS u_contado
         FROM lin GROUP BY periodo
       ),
       cred AS (

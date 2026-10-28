@@ -1340,9 +1340,22 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > Análisis. Las OS-0010 y OS-0011 de Sitio Tecnologico (ids 94, 95) se
 > corrigieron a costo 0 en producción con rastro en `auditoria`
 > (`scratchpad/diag/corregir-os-10-11.js`).
-> Prueba: `84-servicio-abonos-tecnicos` (192; la sección 1 es la de sin
+> **La FACTURA del servicio lleva el costo de su ORDEN** (28-oct-2026, «aun
+> con el costo registrado sale sin costo»): `_crearFacturaPorServicio` escribe
+> una línea sin producto ni IMEI, y `SQL_COSTO_UNIT_LINEA` caía al respaldo por
+> nombre → «sin costo» en Ventas, el aviso de líneas sin costo, el Resumen
+> (`utilidad_hoy` no sumaba ningún servicio), Productos, Vendedores y asesoría.
+> Ahora `SQL_ES_LINEA_SERVICIO` (esa forma de línea + `ordenes_servicio.factura_id
+> = f.id`) toma `COALESCE(costo_real, 0)`. **Sin doble conteo**: en la utilidad
+> del período y en la serie de Análisis esas líneas NO van en «Contado»
+> (`es_servicio` en la línea, `NOT es_servicio` en `u_contado`) porque ya están
+> en «Servicios»; el Resumen no tiene grupo de servicios y las suma por la
+> factura. En Ventas su costo no se edita (se corrige en la orden).
+> Prueba: sección 22 de la 84.
+> Prueba: `84-servicio-abonos-tecnicos` (204; la sección 1 es la de sin
 > migración, la 6 caja/tesorería/factura, la 9 el saldo de la garantía, la 14
-> navegador == backend == SQL, 15-20 anular y corregir, 21 costo vacío = $0).
+> navegador == backend == SQL, 15-20 anular y corregir, 21 costo vacío = $0,
+> 22 la factura del servicio con el costo de su orden).
 > Probado también en navegador aislado y por HTTP contra el esquema real.
 
 > **Garantías con proveedores — Proveedores → Garantías** (`modules/reclamos-garantia/`,

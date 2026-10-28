@@ -173,6 +173,16 @@ const CeldaCostoEditable = ({ linea, onGuardado }) => {
 
   const costoActual = linea.costo_unitario_compra;
 
+  // La línea de un servicio técnico toma el costo de su ORDEN (vacío = $0):
+  // no hay producto que corregir aquí. Se corrige en Servicios → «Corregir valores».
+  if (linea.es_servicio) {
+    return (
+      <span className="text-gray-700" title="El costo de un servicio se corrige en la orden (Servicios → Corregir valores)">
+        {formatCOP(costoActual ?? 0)}
+      </span>
+    );
+  }
+
   const handleEditar = () => {
     setValor(costoActual !== null ? String(costoActual) : '');
     setError(null);
