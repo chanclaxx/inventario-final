@@ -138,6 +138,10 @@ await service.recibir(centro, envio.id, { lineas_recibidas: lineasEnv.map((l) =>
 await db.query(`UPDATE remisiones SET fecha_emision = $2, fecha_recepcion = $2 WHERE id = $1`, [envio.id, JUNIO]);
 const pago = await service.enviarRemesa(centro, { valor: 2100000 });
 await service.confirmarRemesa(bodega, pago.id);
+// El local PAGÓ en junio: la utilidad de un despacho cuenta el día en que llegó
+// la plata (la remesa, cuando la bodega la recibe), no el de la recepción.
+await db.query(`UPDATE remesas SET fecha_envio = $2, fecha_recepcion = $2 WHERE id = $1`, [pago.id, JUNIO2]);
+await db.query(`UPDATE abonos_remision SET fecha = $2 WHERE remesa_id = $1`, [pago.id, JUNIO2]);
 
 const DESDE = '2026-05-01', HASTA = '2026-06-30';
 
@@ -273,6 +277,106 @@ try {
   ok('  y la nota de lo que no tiene costo', textos.some((x) => x.startsWith('Sin costo registrado')));
 } catch (err) {
   ok('★ El PDF se genera (con despachos, préstamos y sin costo)', false, err.message);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 9. El despacho cuenta el día en que el local PAGA (28-oct-2026) ═══');
+// ═════════════════════════════════════════════════════════════════════════════
+// Reportado: «la utilidad de despachos no está en Análisis». Se fechaba por la
+// RECEPCIÓN con todo lo cobrado hasta hoy: lo que un local pagaba este mes de
+// un envío del mes pasado no salía en este mes. Un segundo envío recibido en
+// junio (costo 1.000.000, valor 1.200.000) se paga en DOS partes: 1.100.000 en
+// junio (100.000 de utilidad) y 100.000 en julio (100.000 más).
+{
+  await db.exec(`INSERT INTO seriales (producto_id, imei, costo_compra) VALUES (1, 'ENV-3', 400000), (1, 'ENV-4', 600000)`);
+  const ids = (await db.query(`SELECT id FROM seriales WHERE imei IN ('ENV-3', 'ENV-4') ORDER BY imei`)).rows.map((r) => r.id);
+  {
+    const costo2 = 1000000;
+    const env2 = await service.despachar(bodega, {
+      sucursal_destino_id: 2,
+      lineas: ids.map((id) => ({ tipo: 'serial', serial_id: id, valor_interno: 600000 })),
+    });
+    const lin2 = await repo.getLineasRemision(env2.id);
+    await service.recibir(centro, env2.id, { lineas_recibidas: lin2.map((l) => Number(l.id)) });
+    await db.query(`UPDATE remisiones SET fecha_emision = $2, fecha_recepcion = $2 WHERE id = $1`, [env2.id, JUNIO]);
+    const antes = (await reportes.getVentasRango(1, '2026-07-01', '2026-07-31')).utilidad_periodo.despachos;
+    const p1 = await service.enviarRemesa(centro, { valor: costo2 + 100000, remision_id: env2.id });
+    await service.confirmarRemesa(bodega, p1.id);
+    await db.query(`UPDATE remesas SET fecha_envio = $2, fecha_recepcion = $2 WHERE id = $1`, [p1.id, JUNIO2]);
+    await db.query(`UPDATE abonos_remision SET fecha = $2 WHERE remesa_id = $1`, [p1.id, JUNIO2]);
+    const p2 = await service.enviarRemesa(centro, { valor: 100000, remision_id: env2.id });
+    await service.confirmarRemesa(bodega, p2.id);
+    await db.query(`UPDATE remesas SET fecha_envio = $2, fecha_recepcion = $2 WHERE id = $1`, [p2.id, JULIO]);
+    await db.query(`UPDATE abonos_remision SET fecha = $2 WHERE remesa_id = $1`, [p2.id, JULIO]);
+
+    const junio = await reportes.getVentasRango(1, '2026-06-01', '2026-06-30');
+    const julio = await reportes.getVentasRango(1, '2026-07-01', '2026-07-31');
+    ok('★ Junio: 100.000 del primer envío + 100.000 de la primera parte del segundo',
+       junio.utilidad_periodo.despachos === 200000, money(junio.utilidad_periodo.despachos));
+    ok('★★ Julio: la segunda parte, de un envío recibido en JUNIO (antes salía 0)',
+       julio.utilidad_periodo.despachos - antes === 100000, money(julio.utilidad_periodo.despachos - antes));
+    ok('  julio trae el bloque «cobrado en el período» aunque no recibió envíos',
+       julio.red_interna?.cobrado_periodo?.utilidad === julio.utilidad_periodo.despachos,
+       JSON.stringify(julio.red_interna?.cobrado_periodo));
+    const serie = (await reportes.getAnalisis(1, '2026-06-01', '2026-07-31', 'mes')).serie;
+    const dJul = serie.find((p) => p.periodo === '2026-07-01')?.utilidad_desglose?.despachos;
+    ok('★ Análisis pone esa utilidad en JULIO', dJul === julio.utilidad_periodo.despachos, money(dJul));
+    const lista = (await reportes.getVentasRango(1, '2026-06-01', '2026-06-30')).red_interna.envios
+      .find((e) => e.remision_id === Number(env2.id));
+    ok('  la suma de los meses es la utilidad realizada del envío (sin perder ni repetir)',
+       lista && lista.utilidad_realizada === 200000, money(lista?.utilidad_realizada));
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+console.log('\n═══ 10. Todo lo que deja plata, una sola vez (28-oct-2026) ═══');
+// ═════════════════════════════════════════════════════════════════════════════
+{
+  const R = ['2026-06-01', '2026-06-30'];
+  const antes  = (await reportes.getVentasRango(1, ...R)).utilidad_periodo;
+  const aAntes = await reportes.getAnalisis(1, ...R, 'mes');
+  const pAntes = (await reportes.getProyeccion(1, 6)).historial.find((m) => m.periodo === '2026-06-01');
+  const compAntes = aAntes.composicion.find((c) => c.fuente === 'Contado')?.total || 0;
+
+  // (a) Saldar un préstamo con un abono crea una factura de contado con el
+  // equipo (`_crearFacturaDesdePrestamo`). Su utilidad ya está en «Préstamos
+  // saldados»: en «Contado» lo contaba DOS veces.
+  await db.exec(`
+    INSERT INTO facturas (id, numero, sucursal_id, nombre_cliente, fecha, estado, notas)
+      VALUES (900, 900, 1, 'Luis', '${JUNIO2}', 'Activa', 'Factura generada por saldo de préstamo #1');
+    INSERT INTO lineas_factura (factura_id, nombre_producto, imei, cantidad, precio)
+      VALUES (900, 'iPhone 13', 'PRES-1', 1, 500000);
+  `);
+  const conFactura = (await reportes.getVentasRango(1, ...R));
+  ok('★★ La factura del préstamo saldado NO suma otra vez en «Contado»',
+     conFactura.utilidad_periodo.contado === antes.contado && conFactura.utilidad_periodo.prestamos === antes.prestamos,
+     `${money(conFactura.utilidad_periodo.contado)} · préstamos ${money(conFactura.utilidad_periodo.prestamos)}`);
+  ok('  …pero sigue en la lista de facturas, marcada',
+     conFactura.facturas.find((f) => f.id === 900)?.es_de_prestamo === true);
+  const aCon = await reportes.getAnalisis(1, ...R, 'mes');
+  ok('★ Análisis tampoco la cuenta dos veces', aCon.serie.reduce((s2, x) => s2 + x.utilidad, 0) === conFactura.utilidad_periodo.total,
+     money(aCon.serie.reduce((s2, x) => s2 + x.utilidad, 0)));
+  ok('  ni la composición («Préstamos» ya trae lo recuperado)',
+     (aCon.composicion.find((c) => c.fuente === 'Contado')?.total || 0) === compAntes);
+  const pCon = (await reportes.getProyeccion(1, 6)).historial.find((m) => m.periodo === '2026-06-01');
+  ok('★ Proyección: el préstamo es venta el día que se otorgó, y su factura no la duplica',
+     pCon && pAntes && pCon.ventas === pAntes.ventas, `${money(pCon?.ventas)} · antes ${money(pAntes?.ventas)}`);
+  const junioSerie = aCon.serie.find((x) => x.periodo === '2026-06-01');
+  ok('  (el préstamo de junio entra a las ventas por su valor)', junioSerie?.prestamos_valor === 500000,
+     money(junioSerie?.prestamos_valor));
+
+  // (b) Un «sin reparar» cobra el diagnóstico y no crea factura: no entraba en
+  // ningún total.
+  await db.exec(`
+    INSERT INTO ordenes_servicio (numero, sucursal_id, estado, precio_final, total_abonado, fecha_entrega)
+      VALUES (2, 1, 'Sin_reparar', 30000, 30000, '${JUNIO}');
+  `);
+  const conDiag = (await reportes.getVentasRango(1, ...R)).utilidad_periodo;
+  ok('★★ El diagnóstico suma a «Servicios»', conDiag.servicios === antes.servicios + 30000, money(conDiag.servicios));
+  const aDiag = await reportes.getAnalisis(1, ...R, 'mes');
+  ok('  y Análisis dice lo mismo', aDiag.serie.reduce((s2, x) => s2 + x.utilidad, 0) === conDiag.total);
+  const pDiag = (await reportes.getProyeccion(1, 6)).historial.find((m) => m.periodo === '2026-06-01');
+  ok('  y Proyección lo cuenta como venta', pDiag.ventas === pCon.ventas + 30000, money(pDiag.ventas - pCon.ventas));
 }
 
 console.log(`\n${fallos === 0 ? '✓' : '✗'} ${pasados} pasaron, ${fallos} fallaron\n`);

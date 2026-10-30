@@ -1247,13 +1247,34 @@ const FilaEnvioLocal = ({ envio }) => {
 // pagar TARDE. Es ingreso FINANCIERO: va en su propio renglón y nunca dentro de
 // la utilidad de arriba (que mide lo cobrado de la mercancía menos su costo).
 // Puede haber mora en un período sin envíos recibidos en él.
+// `red.cobrado_periodo` es lo que los locales PAGARON en el período, de envíos
+// de cualquier fecha: es lo que suma a la utilidad total del período. La lista
+// es otra pregunta (lo recibido en el período y cuánto lleva pagado hoy).
 const SeccionVentasLocales = ({ red }) => {
-  if (!red || (!red.envios?.length && !red.mora)) return null;
+  if (!red || (!red.envios?.length && !red.mora && !red.cobrado_periodo)) return null;
 
-  const { envios = [], resumen, mora } = red;
+  const { envios = [], resumen, mora, cobrado_periodo: cobradoPeriodo } = red;
 
   return (
     <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+      {cobradoPeriodo && (
+        <div className="bg-green-50/70 border border-green-100 rounded-xl p-3 flex flex-col gap-1">
+          <p className="text-xs font-semibold text-green-800 flex items-center gap-1.5">
+            <Truck size={13} /> Cobrado a los locales en el período
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-green-800">
+            <span>Recibido <strong>{formatCOP(cobradoPeriodo.cobrado)}</strong></span>
+            <span>Utilidad <strong>{formatCOP(cobradoPeriodo.utilidad)}</strong></span>
+            <span className="text-xs text-green-700/80 self-center">
+              de {cobradoPeriodo.envios} envío{cobradoPeriodo.envios !== 1 ? 's' : ''}
+              {cobradoPeriodo.envios_sin_costo > 0 && ` · ${cobradoPeriodo.envios_sin_costo} sin costo`}
+            </span>
+          </div>
+          <p className="text-[11px] text-green-700/70">
+            Es la utilidad de despachos que suma al total del período: cuenta el día en que el local pagó, sea de un envío de este período o de antes.
+          </p>
+        </div>
+      )}
       {envios.length > 0 && resumen && (<>
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
         <Truck size={15} className="text-cyan-600" />
@@ -1345,7 +1366,7 @@ const PARTES_UTILIDAD = [
   ['creditos',  'Créditos saldados'],
   ['prestamos', 'Préstamos saldados'],
   ['servicios', 'Servicios'],
-  ['despachos', 'Despachos a locales'],
+  ['despachos', 'Despachos cobrados'],
 ];
 
 const TarjetaUtilidadPeriodo = ({ utilidad }) => {

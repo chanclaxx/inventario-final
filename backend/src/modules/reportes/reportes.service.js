@@ -2,6 +2,7 @@ const { pool } = require('../../config/db');
 const costoRed = require('../../utils/costoRed.util');
 const obsequios = require('../../utils/obsequios.util');
 const { hayObsequios } = require('../../config/columnas');
+const { MARCA_FACTURA_DE_PRESTAMO } = require('../prestamos/reporteEmpleado.service');
 
 // ── Fechas: UNA sola convención ─────────────────────────────────────────────
 //
@@ -70,6 +71,15 @@ const SQL_ES_LINEA_SERVICIO = `(
   l.imei IS NULL AND l.producto_id IS NULL AND l.atributo_id IS NULL AND l.variante_id IS NULL
   AND EXISTS (SELECT 1 FROM ordenes_servicio os_l WHERE os_l.factura_id = f.id)
 )`;
+// LA FACTURA DE UN PRÉSTAMO SALDADO (`_crearFacturaDesdePrestamo`, marcada en
+// `notas`, la misma marca que usan el reporte por empleado y la cancelación):
+// el préstamo ya cuenta su utilidad en «Préstamos saldados» (abonado − costo),
+// así que en el total del período esa factura NO va en «Contado» o el mismo
+// equipo sumaría dos veces (28-oct-2026). Se sigue viendo en la lista.
+const SQL_ES_FACTURA_DE_PRESTAMO = `(COALESCE(f.notas, '') LIKE '${MARCA_FACTURA_DE_PRESTAMO}')`;
+const _esFacturaDePrestamo = (notas) =>
+  String(notas || '').startsWith(MARCA_FACTURA_DE_PRESTAMO.replace(/%$/, ''));
+
 const SQL_COSTO_UNIT_LINEA = `
   CASE
     WHEN l.imei IS NOT NULL THEN
@@ -580,6 +590,7 @@ const getServiciosRango = async (sucursalId, desde, hasta) => {
       utilidad_confirmada:  sumarUtilidad(pagados),
       utilidad_garantias:   sumarUtilidad(garantias),
       ingresos_diagnostico: sumarIngresos(diagnosticos),
+      utilidad_diagnosticos: sumarUtilidad(diagnosticos),
       utilidad_pendiente:   sumarUtilidad(pendientes),
       saldo_por_cobrar:     sumarSaldo(pendientes) + sumarSaldo(garantias),
       total_ingresos:       sumarIngresos(cerrados),
@@ -881,20 +892,25 @@ const _creditosDelRango = async (sucursalId, desde, hasta) => {
  * La mora y el interés NO entran: son ingreso financiero y van aparte. Lo que
  * no tiene costo no suma y se cuenta en `sin_costo`.
  */
-const _utilidadDelPeriodo = ({ facturas, creditos, prestamos, servicios, redInterna }) => {
+const _utilidadDelPeriodo = ({ facturas, creditos, prestamos, servicios, despachosCobrados }) => {
   const activas = facturas.filter((f) => f.estado === 'Activa');
   // La línea de un servicio técnico va en su factura (y ahí se ve su
   // utilidad), pero en el total se cuenta UNA vez, en «Servicios», que es donde
-  // viven las garantías, los diagnósticos y lo pendiente de pago.
-  const lineasContado = (f) => f.lineas.filter((l) => !l.es_servicio);
+  // viven las garantías, los diagnósticos y lo pendiente de pago. Igual la
+  // factura de un préstamo saldado: cuenta en «Préstamos saldados».
+  const lineasContado = (f) => (f.es_de_prestamo ? [] : f.lineas.filter((l) => !l.es_servicio));
   const partes = {
     contado:   activas.reduce((s, f) => s + lineasContado(f)
       .reduce((s2, l) => (l.utilidad !== null ? s2 + l.utilidad : s2), 0), 0),
     creditos:  Number(creditos?.resumen?.utilidad_confirmada || 0),
     prestamos: Number(prestamos?.resumen?.utilidad_confirmada || 0),
+    // El diagnóstico de un «sin reparar» es plata cobrada sin costo: antes no
+    // entraba en ningún total (no crea factura).
     servicios: Number(servicios?.resumen?.utilidad_confirmada || 0)
-             + Number(servicios?.resumen?.utilidad_garantias || 0),
-    despachos: Number(redInterna?.resumen?.utilidad_realizada || 0),
+             + Number(servicios?.resumen?.utilidad_garantias || 0)
+             + Number(servicios?.resumen?.utilidad_diagnosticos || 0),
+    // Lo que los locales PAGARON en el período, sea de envíos de cuando sea.
+    despachos: Number(despachosCobrados?.total || 0),
   };
   const sinCosto = {
     lineas_contado: activas.reduce(
@@ -903,7 +919,7 @@ const _utilidadDelPeriodo = ({ facturas, creditos, prestamos, servicios, redInte
     prestamos: (prestamos?.saldados || []).filter((p) => p.utilidad === null).length,
     servicios: (servicios?.cerrados || [])
       .filter((o) => (o.categoria === 'pagado' || o.categoria === 'garantia') && o.utilidad === null).length,
-    despachos: Number(redInterna?.resumen?.envios_sin_costo || 0),
+    despachos: Number(despachosCobrados?.envios_sin_costo || 0),
   };
   return {
     ...partes,
@@ -1172,6 +1188,9 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
       // regalo costó ya está DENTRO de `utilidad_bruta` (su línea cobró 0).
       unidades_obsequio:      items.reduce((s2, i) => (i.obsequio ? s2 + i.cantidad : s2), 0),
       utilidad_bruta:         utilidadBruta,
+      // Factura que nació al saldar un préstamo: su utilidad va en «Préstamos
+      // saldados» (ver SQL_ES_FACTURA_DE_PRESTAMO).
+      es_de_prestamo:         _esFacturaDePrestamo(f.notas),
       // La retoma NO se resta: se informa aparte (total_retomas). utilidad_neta
       // se mantiene por compatibilidad, igual a la utilidad bruta de productos.
       utilidad_neta:          utilidadBruta,
@@ -1259,8 +1278,23 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
   // la de control: qué se regala, quién lo regala y cuánto cuesta.
   const obsequiosRango = await getObsequiosRango(sucursalId, desde, hasta);
 
+  const despachosCobrados = await getUtilidadDespachosCobrada(sucursalId, desde, hasta);
+  // Lo que los locales pagaron EN el período (de envíos de cualquier fecha):
+  // es lo que suma al total. La lista de arriba es otra pregunta (lo recibido
+  // en el período y cuánto lleva pagado hasta hoy).
+  const redInternaFinal = despachosCobrados.envios > 0
+    ? {
+      ...(redInternaConMora || { envios: [], resumen: null }),
+      cobrado_periodo: {
+        cobrado:          despachosCobrados.cobrado,
+        utilidad:         despachosCobrados.total,
+        envios:           despachosCobrados.envios,
+        envios_sin_costo: despachosCobrados.envios_sin_costo,
+      },
+    }
+    : redInternaConMora;
   const utilidadPeriodo = _utilidadDelPeriodo({
-    facturas: facturasCompletas, creditos: creditosData, prestamos, servicios, redInterna,
+    facturas: facturasCompletas, creditos: creditosData, prestamos, servicios, despachosCobrados,
   });
 
   return {
@@ -1269,7 +1303,7 @@ const getVentasRango = async (sucursalId, desde, hasta) => {
     // esconde el bloque), pero todo lo demás sí viaja.
     resumen: facturasCompletas.length ? resumen : null,
     prestamos, servicios,
-    creditos: creditosData, mora, red_interna: redInternaConMora,
+    creditos: creditosData, mora, red_interna: redInternaFinal,
     // LA utilidad del período, con la misma definición que Análisis, el PDF y
     // la Proyección: contado + créditos saldados + préstamos saldados +
     // servicios + lo cobrado de los despachos a locales.
@@ -1402,6 +1436,60 @@ const getObsequiosRango = async (sucursalId, desde, hasta) => {
   };
 };
 
+// Una línea de envío: unidades efectivas (lo recibido menos lo devuelto), lo
+// que se le cobró al local y lo que le costó a la bodega.
+const SQL_LINEAS_ENVIO = `
+  SELECT
+    lr.id,
+    lr.remision_id,
+    lr.tipo,
+    lr.nombre_producto,
+    lr.imei,
+    CASE WHEN lr.tipo = 'serial' THEN 1
+         ELSE GREATEST(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
+                        - COALESCE(lr.cantidad_devuelta, 0), 0) END AS unidades,
+    lr.valor_interno,
+    CASE WHEN lr.tipo = 'serial'
+         THEN COALESCE(s.costo_compra, lr.costo_origen)
+         ELSE lr.costo_origen END AS costo_unitario
+  FROM lineas_remision lr
+  LEFT JOIN seriales s ON s.id = lr.serial_id
+  WHERE lr.estado_linea = 'Recibida'
+`;
+
+// Las cifras de un envío para medir su utilidad (`SQL_LINEAS_ENVIO`, sobre las
+// líneas con unidades). `remision_id` + valor, valor medible, costo y líneas sin
+// costo. Requiere `lin` (las líneas de los envíos a medir).
+const SQL_TOT_ENVIO = `
+  SELECT
+    l.remision_id,
+    SUM(l.unidades)::int                            AS unidades,
+    SUM(l.unidades * l.valor_interno)               AS valor,
+    -- Los totales se arman con las líneas MEDIBLES: descartar un envío
+    -- entero porque una de sus líneas no tiene costo botaría la utilidad
+    -- de las que sí lo tienen.
+    COALESCE(SUM(l.unidades * l.valor_interno)
+      FILTER (WHERE l.costo_unitario IS NOT NULL), 0) AS valor_medible,
+    COALESCE(SUM(l.unidades * l.costo_unitario)
+      FILTER (WHERE l.costo_unitario IS NOT NULL), 0) AS costo,
+    COALESCE(SUM(l.unidades * l.valor_interno)
+      FILTER (WHERE l.costo_unitario IS NULL), 0)     AS valor_sin_costo,
+    COUNT(*) FILTER (WHERE l.costo_unitario IS NULL)::int AS lineas_sin_costo
+  FROM lin l
+  WHERE l.unidades > 0
+  GROUP BY l.remision_id
+`;
+
+// Lo que un envío ya le dejó a la bodega con `cobrado` recibido: el cobro cubre
+// primero el costo (mismo criterio que un crédito a un cliente) y solo lo que
+// sobra es utilidad. Si una línea no tiene costo, se mide la parte medible
+// (lo cobrado × valor con costo / valor). Null si NINGUNA línea tiene costo.
+const _utilidadRealizadaEnvio = (cobrado, { valor, valorMedible, costo, lineasSinCosto }) => {
+  if (lineasSinCosto > 0 && valorMedible === 0) return null;
+  const cobradoMedible = valor > 0 ? cobrado * (valorMedible / valor) : cobrado;
+  return Math.max(0, cobradoMedible - costo);
+};
+
 // ─── Ventas a los locales de la red (solo aplica a la BODEGA) ────────────────
 //
 // Con el modelo "el envío es la deuda", despachar ES vender: la bodega entrega
@@ -1439,26 +1527,6 @@ const getObsequiosRango = async (sucursalId, desde, hasta) => {
 const getVentasALocales = async (sucursalId, desde, hasta) => {
   const redRepo = require('../red-interna/redInterna.repository');
 
-  // Una línea de envío: unidades efectivas (lo recibido menos lo devuelto), lo
-  // que se le cobró al local y lo que le costó a la bodega.
-  const SQL_LINEAS = `
-    SELECT
-      lr.id,
-      lr.remision_id,
-      lr.tipo,
-      lr.nombre_producto,
-      lr.imei,
-      CASE WHEN lr.tipo = 'serial' THEN 1
-           ELSE GREATEST(COALESCE(lr.cantidad_recibida, lr.cantidad, 0)
-                          - COALESCE(lr.cantidad_devuelta, 0), 0) END AS unidades,
-      lr.valor_interno,
-      CASE WHEN lr.tipo = 'serial'
-           THEN COALESCE(s.costo_compra, lr.costo_origen)
-           ELSE lr.costo_origen END AS costo_unitario
-    FROM lineas_remision lr
-    LEFT JOIN seriales s ON s.id = lr.serial_id
-    WHERE lr.estado_linea = 'Recibida'
-  `;
 
   const { rows } = await pool.query(`
     WITH envios AS (
@@ -1471,26 +1539,8 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
         AND DATE(COALESCE(r.fecha_recepcion, r.fecha_emision)
              ) BETWEEN $2 AND $3
     ),
-    lin AS (SELECT * FROM (${SQL_LINEAS}) l WHERE l.remision_id IN (SELECT id FROM envios)),
-    tot AS (
-      SELECT
-        l.remision_id,
-        SUM(l.unidades)::int                            AS unidades,
-        SUM(l.unidades * l.valor_interno)               AS valor,
-        -- Los totales se arman con las líneas MEDIBLES: descartar un envío
-        -- entero porque una de sus líneas no tiene costo botaría la utilidad
-        -- de las que sí lo tienen.
-        COALESCE(SUM(l.unidades * l.valor_interno)
-          FILTER (WHERE l.costo_unitario IS NOT NULL), 0) AS valor_medible,
-        COALESCE(SUM(l.unidades * l.costo_unitario)
-          FILTER (WHERE l.costo_unitario IS NOT NULL), 0) AS costo,
-        COALESCE(SUM(l.unidades * l.valor_interno)
-          FILTER (WHERE l.costo_unitario IS NULL), 0)     AS valor_sin_costo,
-        COUNT(*) FILTER (WHERE l.costo_unitario IS NULL)::int AS lineas_sin_costo
-      FROM lin l
-      WHERE l.unidades > 0
-      GROUP BY l.remision_id
-    ),
+    lin AS (SELECT * FROM (${SQL_LINEAS_ENVIO}) l WHERE l.remision_id IN (SELECT id FROM envios)),
+    tot AS (${SQL_TOT_ENVIO}),
     abo AS (
       SELECT a.remision_id, SUM(a.valor) AS abonado
       FROM (${redRepo.SQL_ABONOS_EFECTIVOS}) a
@@ -1515,7 +1565,7 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
   // dentro de la anterior para no arrastrar el detalle por los GROUP BY.
   const ids = rows.map((r) => Number(r.remision_id));
   const { rows: lineas } = await pool.query(`
-    SELECT * FROM (${SQL_LINEAS}) l
+    SELECT * FROM (${SQL_LINEAS_ENVIO}) l
     WHERE l.remision_id = ANY($1::bigint[]) AND l.unidades > 0
     ORDER BY l.remision_id, l.id
   `, [ids]);
@@ -1550,6 +1600,8 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
     // utilidad; se mide la parte medible, la misma regla de los créditos.
     const sinNingunCosto = r.lineas_sin_costo > 0 && valorMedible === 0;
     const cobradoMedible = valor > 0 ? cobrado * (valorMedible / valor) : cobrado;
+    const realizada      = _utilidadRealizadaEnvio(cobrado, {
+      valor, valorMedible, costo, lineasSinCosto: r.lineas_sin_costo });
     return {
       remision_id:      Number(r.remision_id),
       numero:           r.numero,
@@ -1564,7 +1616,7 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
       pagado:             saldo === 0,
       // Lo que ya se ganó: el cobro cubre primero el costo (mismo criterio que
       // un crédito a un cliente) y solo lo que sobra es utilidad.
-      utilidad_realizada: sinNingunCosto ? null : Math.round(Math.max(0, cobradoMedible - costo)),
+      utilidad_realizada: realizada === null ? null : Math.round(realizada),
       falta_para_cubrir:  sinNingunCosto ? null : Math.round(Math.max(0, costo - cobradoMedible)),
       // Lo que dejará cuando el local termine de pagar. Null si alguna línea no
       // tiene costo: presentar una utilidad parcial como si fuera la del envío
@@ -1598,6 +1650,91 @@ const getVentasALocales = async (sucursalId, desde, hasta) => {
       valor_sin_costo:    suma((e) => e.valor_sin_costo),
       envios_sin_costo:   envios.filter((e) => e.lineas_sin_costo > 0).length,
     },
+  };
+};
+
+// ─── Utilidad de los despachos COBRADA en el período (solo la BODEGA) ────────
+//
+// La utilidad de un despacho se realiza cuando el local PAGA (arriba). Pero el
+// total del período la tomaba de `getVentasALocales`, que trae los envíos
+// RECIBIDOS en el rango con todo lo cobrado HASTA HOY: lo que el local pagó
+// este mes de un envío del mes pasado no salía en este mes (se le sumaba al
+// pasado, que ya estaba cerrado), y Análisis por días o semanas casi nunca
+// mostraba despachos (reportado por el usuario, 28-oct-2026).
+//
+// Ahora cada abono EFECTIVO (`SQL_ABONOS_EFECTIVOS`, importado) se fecha cuando
+// la plata llegó —la misma regla del estado de cuenta: la remesa cuando la
+// bodega la recibe; el gasto o el ajuste en su fecha; el saldo a favor en la
+// suya— y aporta lo que hace CRECER la utilidad realizada de su envío:
+// realizada(cobrado hasta ese abono) − realizada(cobrado antes). Con la misma
+// `_utilidadRealizadaEnvio` de la lista, así que la suma de todos los períodos
+// es la utilidad realizada de cada envío, sin perder ni repetir un peso.
+//
+// Devuelve { total, por_dia: Map('YYYY-MM-DD' → utilidad), cobrado, envios,
+// envios_sin_costo }. Sin red (o sin abonos) devuelve ceros, nunca lanza.
+const getUtilidadDespachosCobrada = async (sucursalId, desde, hasta) => {
+  const vacio = { total: 0, por_dia: new Map(), cobrado: 0, envios: 0, envios_sin_costo: 0 };
+  const redRepo = require('../red-interna/redInterna.repository');
+  let rows;
+  try {
+    ({ rows } = await pool.query(`
+      WITH ab AS (
+        SELECT a.id, a.remision_id, a.valor,
+               COALESCE(CASE a.origen
+                          WHEN 'remesa' THEN rm.fecha_recepcion::timestamp
+                          WHEN 'gasto'  THEN mc.fecha::timestamp
+                          WHEN 'ajuste' THEN mc.fecha::timestamp
+                        END, a.fecha::timestamp) AS fecha_cobro
+        FROM (${redRepo.SQL_ABONOS_EFECTIVOS}) a
+        JOIN remisiones r                       ON r.id  = a.remision_id
+        LEFT JOIN remesas rm                    ON rm.id = a.remesa_id
+        LEFT JOIN movimientos_cuenta_interna mc ON mc.id = a.movimiento_id
+        WHERE r.sucursal_origen_id = $1 AND r.tipo = 'entrega' AND r.estado <> 'Anulada'
+      ),
+      env AS (SELECT DISTINCT remision_id FROM ab WHERE DATE(fecha_cobro) BETWEEN $2 AND $3),
+      lin AS (SELECT * FROM (${SQL_LINEAS_ENVIO}) l WHERE l.remision_id IN (SELECT remision_id FROM env)),
+      tot AS (${SQL_TOT_ENVIO})
+      SELECT ab.remision_id, ab.valor AS abono, to_char(ab.fecha_cobro, 'YYYY-MM-DD') AS dia,
+             t.valor, t.valor_medible, t.costo, t.lineas_sin_costo
+      FROM ab
+      JOIN tot t ON t.remision_id = ab.remision_id
+      WHERE DATE(ab.fecha_cobro) <= $3
+      ORDER BY ab.remision_id, ab.fecha_cobro, ab.id
+    `, [sucursalId, desde, hasta]));
+  } catch (err) {
+    // Un negocio sin las tablas de la red interna no tiene despachos.
+    if (err && (err.code === '42P01' || err.code === '42703')) return vacio;
+    throw err;
+  }
+  if (!rows.length) return vacio;
+
+  const porDia = new Map();
+  const envios = new Set();
+  const sinCosto = new Set();
+  let total = 0;
+  let cobrado = 0;
+  let actual = null;
+  let acumulado = 0;
+  for (const r of rows) {
+    if (r.remision_id !== actual) { actual = r.remision_id; acumulado = 0; }
+    const cifras = {
+      valor: Number(r.valor), valorMedible: Number(r.valor_medible),
+      costo: Number(r.costo), lineasSinCosto: Number(r.lineas_sin_costo),
+    };
+    const antes = _utilidadRealizadaEnvio(acumulado, cifras);
+    acumulado += Number(r.abono);
+    const despues = _utilidadRealizadaEnvio(acumulado, cifras);
+    if (r.dia < desde) continue;
+    envios.add(r.remision_id);
+    cobrado += Number(r.abono);
+    if (despues === null) { sinCosto.add(r.remision_id); continue; }
+    const delta = Math.round(despues) - Math.round(antes);
+    total += delta;
+    porDia.set(r.dia, (porDia.get(r.dia) || 0) + delta);
+  }
+  return {
+    total, por_dia: porDia, cobrado,
+    envios: envios.size, envios_sin_costo: sinCosto.size,
   };
 };
 
@@ -2092,7 +2229,7 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
   // la Proyección lo compara como texto.
   const periodoDe = (col) => `to_char(date_trunc('${unit}', ${col}), 'YYYY-MM-DD')`;
 
-  const [serieResult, despachosRango, ventasEstadoResult, serviciosIngResult, prestamosIngResult, metodosResult] = await Promise.all([
+  const [serieResult, despachosRango, despachosCobrados, ventasEstadoResult, serviciosIngResult, prestamosIngResult, metodosResult] = await Promise.all([
 
     // ── Serie temporal ──────────────────────────────────────────────────────
     //
@@ -2107,7 +2244,8 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
         SELECT ${periodoDe('f.fecha')} AS periodo, f.id AS factura_id, f.estado,
                ${SUBTOTAL_EFECTIVO} AS subtotal,
                ${SQL_COSTO_LINEA}   AS costo,
-               ${SQL_ES_LINEA_SERVICIO} AS es_servicio
+               ${SQL_ES_LINEA_SERVICIO} AS es_servicio,
+               ${SQL_ES_FACTURA_DE_PRESTAMO} AS de_prestamo
         FROM lineas_factura l
         JOIN facturas f ON f.id = l.factura_id
         WHERE f.sucursal_id = $1
@@ -2121,8 +2259,16 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
                COALESCE(SUM(costo), 0)                                   AS costo,
                COALESCE(SUM(subtotal) FILTER (WHERE costo IS NOT NULL), 0) AS ventas_con_costo,
                -- La retoma NO se resta: es un medio de pago, no una pérdida.
-               -- La línea de un servicio se cuenta en «serv», no aquí (como en Ventas).
-               COALESCE(SUM(subtotal - costo) FILTER (WHERE estado = 'Activa' AND NOT es_servicio), 0) AS u_contado
+               -- La línea de un servicio se cuenta en «serv» y la factura de un
+               -- préstamo saldado en «prest», no aquí (como en Ventas).
+               COALESCE(SUM(subtotal - costo)
+                 FILTER (WHERE estado = 'Activa' AND NOT es_servicio AND NOT de_prestamo), 0) AS u_contado,
+               -- Para la Proyección: la factura de un préstamo saldado se quita
+               -- de las ventas porque el préstamo entra como venta el día que
+               -- se otorgó (abajo, «prest_v»), igual que un crédito.
+               COALESCE(SUM(subtotal) FILTER (WHERE de_prestamo), 0)                       AS vendido_prestamo,
+               COALESCE(SUM(costo)    FILTER (WHERE de_prestamo), 0)                       AS costo_prestamo,
+               COALESCE(SUM(subtotal) FILTER (WHERE de_prestamo AND costo IS NOT NULL), 0) AS con_costo_prestamo
         FROM lin GROUP BY periodo
       ),
       cred AS (
@@ -2145,27 +2291,58 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
         GROUP BY 1
       ),
       serv AS (
-        -- Mismas categorías que getServiciosRango: cuentan los pagados y las
-        -- garantías cobrables; diagnósticos y pendientes de pago no. En un
-        -- servicio el costo vacío es $0 (mano de obra; decisión del usuario,
-        -- 26-oct-2026), no «sin costo».
+        -- Mismas categorías que getServiciosRango: cuentan los pagados, las
+        -- garantías cobrables y el cobro por diagnóstico de un «sin reparar»
+        -- (plata cobrada sin costo, que antes no entraba en ningún total); lo
+        -- pendiente de pago no (entra el día en que se termina de pagar: ahí
+        -- pasa a Entregado y toma esa fecha de entrega). En un servicio el
+        -- costo vacío es $0 (mano de obra; decisión del usuario, 26-oct-2026).
         SELECT ${periodoDe('os.fecha_entrega')} AS periodo,
                COALESCE(SUM(CASE
-                 WHEN os.estado = 'Sin_reparar' THEN NULL
+                 WHEN os.estado = 'Sin_reparar' THEN COALESCE(os.precio_final, 0)
                  WHEN COALESCE(os.precio_garantia, 0) > 0 AND os.garantia_cobrable THEN
                    os.precio_garantia - COALESCE(os.costo_garantia, 0)
                  WHEN os.estado = 'Pendiente_pago' THEN NULL
                  ELSE COALESCE(os.precio_final, 0) - COALESCE(os.costo_real, 0)
-               END), 0) AS u
+               END), 0) AS u,
+               -- Para la Proyección: lo cobrado por servicios que NO pasa por una
+               -- factura (diagnósticos y garantías cobrables; la reparación sí
+               -- tiene la suya y ya está en las ventas).
+               COALESCE(SUM(CASE
+                 WHEN os.estado = 'Sin_reparar' THEN COALESCE(os.precio_final, 0)
+                 WHEN COALESCE(os.precio_garantia, 0) > 0 AND os.garantia_cobrable
+                      AND os.estado = 'Entregado' THEN os.precio_garantia
+                 ELSE 0 END), 0) AS v_extra,
+               COALESCE(SUM(CASE
+                 WHEN COALESCE(os.precio_garantia, 0) > 0 AND os.garantia_cobrable
+                      AND os.estado = 'Entregado' THEN COALESCE(os.costo_garantia, 0)
+                 ELSE 0 END), 0) AS c_extra
         FROM ordenes_servicio os
         WHERE os.sucursal_id = $1
           AND os.estado IN ('Entregado', 'Pendiente_pago', 'Sin_reparar')
           AND ${fechaBogota('os.fecha_entrega')} BETWEEN $2 AND $3
         GROUP BY 1
       ),
+      prest_v AS (
+        -- Para la Proyección: un préstamo es una venta a plazo y entra el día
+        -- que se otorgó, como un crédito (mismos estados que la utilidad
+        -- esperada: lo devuelto no es venta). Su utilidad REAL sigue contando
+        -- al saldarse («prest»).
+        SELECT ${periodoDe('p.fecha')} AS periodo,
+               COALESCE(SUM(p.valor_prestamo), 0) AS valor,
+               COALESCE(SUM(c.costo), 0)          AS costo,
+               COALESCE(SUM(p.valor_prestamo) FILTER (WHERE c.costo IS NOT NULL), 0) AS medible
+        FROM prestamos p
+        CROSS JOIN LATERAL (SELECT ${SQL_COSTO_PRESTAMO} AS costo) c
+        WHERE p.sucursal_id = $1 AND p.estado IN ('Activo', 'Saldado')
+          AND p.valor_prestamo > 0
+          AND DATE(p.fecha) BETWEEN $2 AND $3
+        GROUP BY 1
+      ),
       periodos AS (
         SELECT periodo FROM fac UNION SELECT periodo FROM cred
         UNION SELECT periodo FROM prest UNION SELECT periodo FROM serv
+        UNION SELECT periodo FROM prest_v
       )
       SELECT
         pe.periodo,
@@ -2176,18 +2353,31 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
         COALESCE(fac.u_contado, 0)        AS u_contado,
         COALESCE(cred.u, 0)               AS u_creditos,
         COALESCE(prest.u, 0)              AS u_prestamos,
-        COALESCE(serv.u, 0)               AS u_servicios
+        COALESCE(serv.u, 0)               AS u_servicios,
+        COALESCE(fac.vendido_prestamo, 0)   AS vendido_prestamo,
+        COALESCE(fac.costo_prestamo, 0)     AS costo_prestamo,
+        COALESCE(fac.con_costo_prestamo, 0) AS con_costo_prestamo,
+        COALESCE(serv.v_extra, 0)         AS servicios_sin_factura_valor,
+        COALESCE(serv.c_extra, 0)         AS servicios_sin_factura_costo,
+        COALESCE(pv.valor, 0)             AS prestamos_valor,
+        COALESCE(pv.costo, 0)             AS prestamos_costo,
+        COALESCE(pv.medible, 0)           AS prestamos_medible
       FROM periodos pe
       LEFT JOIN fac   ON fac.periodo   = pe.periodo
       LEFT JOIN cred  ON cred.periodo  = pe.periodo
       LEFT JOIN prest ON prest.periodo = pe.periodo
       LEFT JOIN serv  ON serv.periodo  = pe.periodo
+      LEFT JOIN prest_v pv ON pv.periodo = pe.periodo
       ORDER BY pe.periodo
     `, [sucursalId, desde, hasta]),
 
     // Los despachos a locales del período (solo la bodega tiene): la MISMA
     // función de la pestaña Ventas, así su utilidad realizada no se recalcula.
     getVentasALocales(sucursalId, desde, hasta).catch(() => null),
+    // Su UTILIDAD, en cambio, va por el día en que el local pagó (la misma
+    // función del total de Ventas): lo despachado se fecha al recibirse, lo
+    // ganado al cobrarse.
+    getUtilidadDespachosCobrada(sucursalId, desde, hasta),
 
     // ── Composición: productos contado vs crédito ──────────────────────────
     pool.query(`
@@ -2199,6 +2389,8 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
       WHERE f.sucursal_id = $1
         AND DATE(f.fecha) BETWEEN $2 AND $3
         AND f.estado IN ('Activa', 'Credito')
+        -- La factura de un préstamo saldado ya está en «Préstamos» (recuperado).
+        AND NOT ${SQL_ES_FACTURA_DE_PRESTAMO}
       GROUP BY f.estado
     `, [sucursalId, desde, hasta]),
 
@@ -2245,14 +2437,17 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
   const porPeriodo = new Map();
   for (const r of serieResult.rows) porPeriodo.set(r.periodo, r);
   const despachosPorPeriodo = new Map();
-  for (const e of despachosRango?.envios || []) {
-    const p = _periodoDe(e.fecha, unit);
+  const acumDespacho = (p) => {
     const acc = despachosPorPeriodo.get(p) || { u: 0, valor: 0, costo: 0, valor_medible: 0 };
-    acc.u     += e.utilidad_realizada ?? 0;
-    acc.valor += e.valor;
-    if (e.utilidad_realizada !== null) { acc.costo += e.costo; acc.valor_medible += e.valor - e.valor_sin_costo; }
     despachosPorPeriodo.set(p, acc);
     if (!porPeriodo.has(p)) porPeriodo.set(p, { periodo: p });
+    return acc;
+  };
+  for (const [dia, u] of despachosCobrados.por_dia) acumDespacho(_periodoDe(dia, unit)).u += u;
+  for (const e of despachosRango?.envios || []) {
+    const acc = acumDespacho(_periodoDe(e.fecha, unit));
+    acc.valor += e.valor;
+    if (e.utilidad_realizada !== null) { acc.costo += e.costo; acc.valor_medible += e.valor - e.valor_sin_costo; }
   }
 
   const serie = [...porPeriodo.keys()].sort().map((p) => {
@@ -2281,6 +2476,18 @@ const getAnalisis = async (sucursalId, desde, hasta, agrupacion) => {
       despachos_valor:         d.valor,
       despachos_costo:         d.costo,
       despachos_valor_medible: d.valor_medible,
+      // Para la Proyección (ver «prest_v» y «serv»): los préstamos otorgados
+      // en el período, la parte de las facturas que nació al saldar un
+      // préstamo (se resta para no contarlo dos veces) y lo cobrado por
+      // servicios sin factura (diagnósticos y garantías cobrables).
+      prestamos_valor:             Number(r.prestamos_valor || 0),
+      prestamos_costo:             Number(r.prestamos_costo || 0),
+      prestamos_medible:           Number(r.prestamos_medible || 0),
+      facturas_prestamo_valor:     Number(r.vendido_prestamo || 0),
+      facturas_prestamo_costo:     Number(r.costo_prestamo || 0),
+      facturas_prestamo_medible:   Number(r.con_costo_prestamo || 0),
+      servicios_sin_factura_valor: Number(r.servicios_sin_factura_valor || 0),
+      servicios_sin_factura_costo: Number(r.servicios_sin_factura_costo || 0),
       num_facturas:     numFacturas,
       ticket_promedio:  numFacturas > 0 ? totalVendido / numFacturas : 0,
     };
@@ -2816,9 +3023,22 @@ const getProyeccion = async (sucursalId, meses = 6) => {
   // factura; sin esto su proyección salía en 0). El % de costo se mide SOLO
   // sobre lo que tiene costo: dividir el costo conocido entre todas las ventas
   // hacía ver las ventas sin costo como utilidad pura.
-  const ventasDe  = (s) => Number(s.total_vendido) + Number(s.despachos_valor || 0);
-  const costoDe   = (s) => Number(s.costo) + Number(s.despachos_costo || 0);
-  const medibleDe = (s) => Number(s.ventas_con_costo || 0) + Number(s.despachos_valor_medible || 0);
+  //
+  // Y todo lo demás que se vende (28-oct-2026, «que cuente todo el dinero que
+  // genera utilidad»): los PRÉSTAMOS entran el día que se otorgan, como un
+  // crédito —antes solo entraban si al saldarse creaban factura, y en el mes
+  // del saldo—, y por eso esa factura se resta; y lo cobrado por SERVICIOS sin
+  // factura (diagnósticos y garantías cobrables). Un servicio siempre tiene
+  // costo medible (vacío = $0).
+  const ventasDe  = (s) => Number(s.total_vendido) - Number(s.facturas_prestamo_valor || 0)
+    + Number(s.despachos_valor || 0) + Number(s.prestamos_valor || 0)
+    + Number(s.servicios_sin_factura_valor || 0);
+  const costoDe   = (s) => Number(s.costo) - Number(s.facturas_prestamo_costo || 0)
+    + Number(s.despachos_costo || 0) + Number(s.prestamos_costo || 0)
+    + Number(s.servicios_sin_factura_costo || 0);
+  const medibleDe = (s) => Number(s.ventas_con_costo || 0) - Number(s.facturas_prestamo_medible || 0)
+    + Number(s.despachos_valor_medible || 0) + Number(s.prestamos_medible || 0)
+    + Number(s.servicios_sin_factura_valor || 0);
   const pctDe = (costo, medible) => (medible > 0 ? costo / medible : 0);
 
   const historial = completos.map((s) => {

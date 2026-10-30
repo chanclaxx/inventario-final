@@ -21,6 +21,16 @@ import { EmptyState } from '../../components/ui/EmptyState';
 // consulta (más pesada que las gráficas) y no tienen por qué pagarla todos.
 const PanelAsesor = lazy(() => import('./PanelAsesor'));
 
+// Las partes de la utilidad del período, en el orden y con los nombres de la
+// tarjeta de Ventas (`utilidad_desglose` de cada período de la serie).
+const PARTES_UTILIDAD = [
+  ['contado',   'Contado'],
+  ['creditos',  'Créditos saldados'],
+  ['prestamos', 'Préstamos saldados'],
+  ['servicios', 'Servicios'],
+  ['despachos', 'Despachos cobrados'],
+];
+
 // ─────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────
@@ -312,6 +322,11 @@ export default function PanelAnalisis() {
   const diasPeriodo          = diasEntre(desde, hasta);
   const gastosPeriodo        = Number(gastosRango?.total || 0);
   const utilidadNetaPeriodo  = utilidadBrutaPeriodo - gastosPeriodo;
+  // De dónde sale esa utilidad: las MISMAS partes de Ventas (cada período de la
+  // serie trae su desglose; aquí solo se suman).
+  const desglosePeriodo = PARTES_UTILIDAD.map(([k, label]) => [
+    label, serie.reduce((s, r) => s + Number(r.utilidad_desglose?.[k] || 0), 0),
+  ]).filter(([, v]) => v !== 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -422,6 +437,24 @@ export default function PanelAnalisis() {
               ? <EmptyState icon={TrendingUp} titulo="Sin ventas en el período seleccionado" />
               : <GraficaTendencia serie={serie} unit={unit} tipo={tipoGrafica} puntos={puntos} />}
           </ChartCard>
+
+          {/* De dónde sale la utilidad del período */}
+          {serie.length > 0 && desglosePeriodo.length > 0 && (
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col gap-2">
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <p className="text-sm font-semibold text-emerald-800">Utilidad del período</p>
+                <p className="text-xl font-bold text-emerald-700">{formatCOP(utilidadBrutaPeriodo)}</p>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-700">
+                {desglosePeriodo.map(([label, v]) => (
+                  <span key={label}>{label}: <strong>{formatCOP(v)}</strong></span>
+                ))}
+              </div>
+              <p className="text-xs text-emerald-600/70">
+                Créditos, préstamos y despachos cuentan cuando se cobran; la mora y el interés van aparte (ingreso financiero).
+              </p>
+            </div>
+          )}
 
           {/* Utilidad neta del período (gastos del centro de gastos) */}
           {gastosActivo && gastosPeriodo > 0 && serie.length > 0 && (

@@ -882,8 +882,11 @@ seccion('22. La FACTURA del servicio trae el costo de su orden (Sitio Tecnologic
   const contadoEsperado = v.facturas.filter((f) => f.estado === 'Activa')
     .flatMap((f) => f.lineas).filter((l) => !l.es_servicio && l.utilidad !== null).reduce((s, l) => s + l.utilidad, 0);
   checkEq('«Contado» no incluye las líneas de servicio', u.contado, contadoEsperado);
-  checkEq('«Servicios» es la del reporte de servicios', u.servicios,
-    v.servicios.resumen.utilidad_confirmada + v.servicios.resumen.utilidad_garantias);
+  checkEq('«Servicios» es la del reporte de servicios (diagnósticos incluidos)', u.servicios,
+    v.servicios.resumen.utilidad_confirmada + v.servicios.resumen.utilidad_garantias
+      + v.servicios.resumen.utilidad_diagnosticos);
+  checkSi('hay diagnósticos en la prueba y suman', v.servicios.resumen.utilidad_diagnosticos > 0
+    && v.servicios.resumen.utilidad_diagnosticos === v.servicios.resumen.ingresos_diagnostico);
   checkEq('ninguna línea de servicio cuenta como «sin costo»', v.facturas.filter((f) => f.estado === 'Activa')
     .flatMap((f) => f.lineas).filter((l) => l.es_servicio && l.costo_unitario_compra === null).length, 0);
 

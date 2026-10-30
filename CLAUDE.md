@@ -1352,7 +1352,7 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > en «Servicios»; el Resumen no tiene grupo de servicios y las suma por la
 > factura. En Ventas su costo no se edita (se corrige en la orden).
 > Prueba: sección 22 de la 84.
-> Prueba: `84-servicio-abonos-tecnicos` (204; la sección 1 es la de sin
+> Prueba: `84-servicio-abonos-tecnicos` (205; la sección 1 es la de sin
 > migración, la 6 caja/tesorería/factura, la 9 el saldo de la garantía, la 14
 > navegador == backend == SQL, 15-20 anular y corregir, 21 costo vacío = $0,
 > 22 la factura del servicio con el costo de su orden).
@@ -2497,8 +2497,28 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > (`ORDER BY costoRed.ORDEN_FILA_IMEI`; con `LIMIT 1` a secas podía tocar otra
 > fila del fan-out y la utilidad no cambiaba), y responde `COSTO_DE_BODEGA`
 > también si el equipo consignado ya se vendió.
-> Prueba: `65-reportes-coherentes` (32; la sección 1 compara Ventas contra la
-> serie de Análisis y la 8 lee el PDF instrumentando pdfkit).
+> **(6) Todo lo que deja plata, UNA vez** (28-oct-2026, «que Análisis y
+> Proyección cuenten todo»): **los despachos cuentan el día en que el local
+> PAGA** (`getUtilidadDespachosCobrada`: cada abono efectivo, fechado como en el
+> estado de cuenta —la remesa al recibirla la bodega—, aporta lo que hace
+> crecer la utilidad realizada de su envío, con `_utilidadRealizadaEnvio`, la
+> misma de la lista); antes se tomaban los envíos RECIBIDOS en el rango con lo
+> cobrado hasta hoy, y lo pagado este mes de un envío viejo no salía en ningún
+> mes abierto. Ventas lo muestra como «Cobrado a los locales en el período»
+> (`red_interna.cobrado_periodo`); la lista de envíos sigue siendo la de lo
+> recibido. **La factura de un préstamo saldado** (`_crearFacturaDesdePrestamo`,
+> marca `MARCA_FACTURA_DE_PRESTAMO` en `notas`, `SQL_ES_FACTURA_DE_PRESTAMO`)
+> NO va en «Contado»: el préstamo ya está en «Préstamos saldados» y se sumaba
+> dos veces (también en la composición). **El diagnóstico de un «sin reparar»**
+> (no crea factura) entra en «Servicios» (`utilidad_diagnosticos`). La
+> **Proyección** cuenta como venta los préstamos el día que se OTORGAN (como un
+> crédito; resta su factura de saldo) y lo cobrado por servicios sin factura.
+> Análisis muestra el desglose del período con las mismas partes de Ventas.
+> Mora e interés siguen aparte (ingreso financiero; el estado de resultados los
+> suma).
+> Prueba: `65-reportes-coherentes` (46; la sección 1 compara Ventas contra la
+> serie de Análisis, la 8 lee el PDF instrumentando pdfkit, la 9 el despacho
+> pagado en otro mes y la 10 préstamo con factura, diagnóstico y Proyección).
 
 > **Tablas para asesoría — Reportes → Análisis** (`reportes/asesor.service.js`,
 > `GET /reportes/analisis/asesor`, `PanelAsesor.jsx`, `asesor/tablasAsesor.js`,
