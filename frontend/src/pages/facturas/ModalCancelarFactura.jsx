@@ -5,7 +5,8 @@ import { Modal }   from '../../components/ui/Modal';
 import { Button }  from '../../components/ui/Button';
 import { Input }   from '../../components/ui/Input';
 import { Spinner } from '../../components/ui/Spinner';
-import { cancelarFactura } from '../../api/facturas.api';
+import { cancelarFactura, getPrestamoDeFacturaSaldo } from '../../api/facturas.api';
+import { CancelarFacturaPrestamo } from './CancelarFacturaPrestamo';
 import { getFacturaById }  from '../../api/facturas.api';
 import { verificarPin }    from '../../api/config.api';
 import { getEntregas }     from '../../api/domiciliarios.api';
@@ -114,7 +115,18 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
     staleTime: 0,
   });
 
-  const isLoading = loadingDetalle || loadingEntrega;
+  // ¿Es la factura que nació al saldar un préstamo? Entonces cancelarla es
+  // devolver el préstamo: tiene su propio flujo (CancelarFacturaPrestamo).
+  const { data: infoPrestamo, isLoading: loadingPrestamo } = useQuery({
+    queryKey: ['factura-prestamo-saldo', factura.id],
+    queryFn:  () => getPrestamoDeFacturaSaldo(factura.id).then((r) => r.data.data),
+    staleTime: 0,
+    // Un backend viejo responde 404: sin reintento se cae enseguida a la
+    // cancelación de siempre en vez de dejar el modal cargando.
+    retry: false,
+  });
+
+  const isLoading = loadingDetalle || loadingEntrega || loadingPrestamo;
 
   const entregaPendiente = (entregasData || []).find(
     (e) => e.factura_id === factura.id && e.estado === 'Pendiente'
@@ -144,6 +156,9 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
     mutationFn: () => cancelarFactura(factura.id, eliminarRetoma === true, revertirMora),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['facturas'],           exact: false });
+      // El historial usa sus propias claves: ['facturas'] no las alcanza.
+      queryClient.invalidateQueries({ queryKey: ['facturas-recientes'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['facturas-busqueda'],  exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-serial'],   exact: false });
       queryClient.invalidateQueries({ queryKey: ['productos-cantidad'], exact: false });
       onSuccess?.();
@@ -175,6 +190,13 @@ export function ModalCancelarFactura({ factura, onClose, onSuccess }) {
       <Modal open onClose={onClose} title="Cancelar factura" size="sm">
         <Spinner className="py-10" />
       </Modal>
+    );
+  }
+
+  // ── Factura de saldo de un préstamo: su propio flujo ─────────────────────
+  if (infoPrestamo?.es_de_prestamo) {
+    return (
+      <CancelarFacturaPrestamo factura={factura} info={infoPrestamo} onClose={onClose} onSuccess={onSuccess} />
     );
   }
 

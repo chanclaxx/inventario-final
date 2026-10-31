@@ -677,7 +677,9 @@ const editarValorPrestamo = async (req, res, next) => {
     );
     audit.registrar(req.user.negocio_id, req.user.id, 'Valor de préstamo editado', 'prestamos', id,
       _detallePrestamo(data, { valor: Number(valor_prestamo) }));
-    res.json({ ok: true, data, message: 'Valor del préstamo actualizado correctamente' });
+    res.json({ ok: true, data, message: data?.saldado
+      ? 'Valor actualizado: con lo ya abonado el préstamo quedó pagado y se generó su factura'
+      : 'Valor del préstamo actualizado correctamente' });
   } catch (err) { next(err); }
 };
 

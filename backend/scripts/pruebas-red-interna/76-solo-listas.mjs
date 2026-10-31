@@ -146,10 +146,15 @@ const hojaPlantilla = async (sede) => {
     instrucciones: XLSX.utils.sheet_to_json(wb.Sheets.Instrucciones, { header: 1 }).flat().join('\n'),
   };
 };
+let _ventas = 0;
 const vender = (sede, lineas) => facturas.crearFactura({
   negocio_id: 1, sucursal_id: sede, usuario_id: 1,
   nombre_cliente: 'Cliente', cedula: '123', celular: '300',
   lineas, pagos: [{ metodo: 'Efectivo', valor: 1 }],
+  // Cada llamada es una venta NUEVA, como la manda la pantalla (una clave por
+  // intento). Sin clave, dos ventas idénticas en 30 s se tomarían por un doble
+  // clic y la segunda devolvería la primera (facturas.duplicados.js).
+  clave_idempotencia: `prueba-${++_ventas}-${Date.now()}`,
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

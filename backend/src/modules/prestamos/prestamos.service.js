@@ -865,6 +865,21 @@ const registrarAbono = async (
  */
 const DECISIONES_DEVOLUCION = ['anular', 'saldo_a_favor', 'reasignar'];
 
+/** Suma `monto` al saldo a favor de la persona del préstamo, en la sede del préstamo, con su movimiento. */
+const _abonarSaldoAFavor = async (client, prestamo, monto, motivo) => {
+  const tipo      = prestamo.prestatario_id ? 'prestatario' : 'cliente';
+  const personaId = prestamo.prestatario_id || prestamo.cliente_id;
+  const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);
+  await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoActual + monto);
+  const saldoSuc = await repo.getSaldoSucursal(client, tipo, personaId, prestamo.sucursal_id);
+  await repo.setSaldoSucursal(client, tipo, personaId, prestamo.sucursal_id, saldoSuc + monto);
+  await repo.registrarMovSaldoSucursal(client, {
+    tipo_persona: tipo, persona_id: personaId, sucursal_id: prestamo.sucursal_id,
+    concepto: motivo, monto, tipo_movimiento: 'credito',
+    referencia_id: prestamo.id, usuario_id: null,
+  });
+};
+
 const _resolverAbonosDevueltos = async (client, prestamo, negocioId, decision) => {
   const motivo = decision === 'reasignar'
     ? `Reasignado: se devolvió ${prestamo.nombre_producto || 'el producto'} y el pago pasó a sus otros préstamos`
@@ -885,15 +900,7 @@ const _resolverAbonosDevueltos = async (client, prestamo, negocioId, decision) =
 
   // Las otras dos pasan por el saldo a favor, que es el único registro con
   // historial propio. 'reasignar' además lo aplica de una a lo que debe.
-  const saldoActual = await repo.getSaldoAFavorPersona(client, tipo, personaId);
-  await repo.setearSaldoAFavorPersona(client, tipo, personaId, saldoActual + total);
-  const saldoSuc = await repo.getSaldoSucursal(client, tipo, personaId, prestamo.sucursal_id);
-  await repo.setSaldoSucursal(client, tipo, personaId, prestamo.sucursal_id, saldoSuc + total);
-  await repo.registrarMovSaldoSucursal(client, {
-    tipo_persona: tipo, persona_id: personaId, sucursal_id: prestamo.sucursal_id,
-    concepto: motivo, monto: total, tipo_movimiento: 'credito',
-    referencia_id: prestamo.id, usuario_id: null,
-  });
+  await _abonarSaldoAFavor(client, prestamo, total, motivo);
 
   let aplicado = null;
   if (decision === 'reasignar') {
@@ -906,10 +913,23 @@ const _resolverAbonosDevueltos = async (client, prestamo, negocioId, decision) =
   return { abonos_anulados: total, decision, aplicado };
 };
 
+// Un préstamo PAGADO ya es una venta: tiene su factura y el equipo figura
+// vendido. Devolverlo (entero o en parte) dejaba el equipo vendido y la factura
+// viva. La pantalla nunca lo ofreció; ahora el servidor tampoco lo deja.
+const _exigirNoPagado = (prestamo) => {
+  if (prestamo.estado !== 'Saldado') return;
+  throw {
+    status: 409, code: 'PRESTAMO_PAGADO',
+    message: 'Este préstamo ya está pagado. Para devolverlo, cancela su factura desde Facturas: '
+           + 'ahí se decide qué pasa con lo que pagó la persona.',
+  };
+};
+
 const devolverPrestamo = async (negocioId, prestamoId, { decision = 'anular' } = {}) => {
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado === 'Devuelto') throw { status: 400, message: 'El préstamo ya fue devuelto' };
+  _exigirNoPagado(prestamo);
 
   const client = await pool.connect();
   try {
@@ -976,6 +996,7 @@ const devolverParcial = async (negocioId, prestamoId, cantidad_devuelta, { decis
   const prestamo = await repo.findByIdYNegocio(prestamoId, negocioId);
   if (!prestamo) throw { status: 404, message: 'Préstamo no encontrado' };
   if (prestamo.estado === 'Devuelto') throw { status: 400, message: 'El préstamo ya fue devuelto' };
+  _exigirNoPagado(prestamo);
   if (prestamo.imei) throw { status: 400, message: 'La devolución parcial solo aplica a productos por cantidad' };
   if (!prestamo.producto_id) throw { status: 400, message: 'El préstamo no tiene producto asociado' };
 
@@ -1427,10 +1448,14 @@ const _repartirSaldoEnTx = async (client, negocioId, tipo, personaId) => {
     let saldado    = false;
     let factura_id = null;
 
+    // Por el cierre de SIEMPRE (`cerrarSiPagadoEnTx`, el único lugar donde un
+    // préstamo pasa a Saldado): antes este reparto lo cerraba con solo cubrir el
+    // capital, aunque quedara mora o interés pendiente. Ahora lo usa también
+    // «pasar a sus otros préstamos» al cancelar una factura de saldo.
     if (Number(resultado.total_abonado) >= Number(resultado.valor_prestamo)) {
-      saldado = true;
-      await repo.updateEstado(client, prestamo.id, 'Saldado');
-      factura_id = await _crearFacturaDesdePrestamo(client, prestamo, 'Saldo a favor', negocioId);
+      const cierre = await cerrarSiPagadoEnTx(client, prestamo.id, negocioId, { metodo: 'Saldo a favor' });
+      saldado    = cierre.saldado;
+      factura_id = cierre.factura_id;
     }
 
     prestamosAfectados.push({
@@ -1932,7 +1957,231 @@ const editarValorPrestamo = async (negocioId, prestamoId, nuevoValor) => {
     }, 'dejar');
   }
 
-  return repo.updateValorPrestamo(prestamoId, nuevoValor);
+  // Bajar el valor hasta lo ya abonado deja el préstamo pagado: se cierra por
+  // el cierre de siempre (`cerrarSiPagadoEnTx`), con su factura y el equipo
+  // vendido. Antes quedaba Activo con saldo $0 (Cellsite #12915). Si queda mora
+  // o interés pendiente, sigue Activo, igual que con un abono.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await bloquearOperacion(client, `abono-prestamo:${prestamoId}`);
+    const { rows: [actual] } = await client.query(
+      `UPDATE prestamos SET valor_prestamo = $1 WHERE id = $2 AND estado = 'Activo' RETURNING *`,
+      [nuevoValor, prestamoId],
+    );
+    if (!actual) throw { status: 400, message: 'Solo se pueden editar préstamos activos' };
+    let cierre = null;
+    if (Number(actual.total_abonado) >= Number(actual.valor_prestamo)) {
+      const { rows: [ultimo] } = await client.query(
+        `SELECT metodo FROM abonos_prestamo WHERE prestamo_id = $1 AND NOT anulado ORDER BY fecha DESC, id DESC LIMIT 1`,
+        [prestamoId],
+      );
+      cierre = await cerrarSiPagadoEnTx(client, prestamoId, negocioId, { metodo: ultimo?.metodo || 'Efectivo' });
+    }
+    await client.query('COMMIT');
+    return { ...actual, estado: cierre?.saldado ? 'Saldado' : actual.estado, saldado: !!cierre?.saldado,
+      factura_id: cierre?.factura_id ?? null };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ─── Cancelar la factura de saldo de un préstamo YA PAGADO ───────────────────
+//
+// Saldar un préstamo crea una factura de contado («Factura generada por saldo de
+// préstamo #N»). Cancelarla como una factura cualquiera dejaba el equipo
+// disponible con el préstamo todavía Saldado y sus abonos vivos, y si la
+// factura era de otro día metía un EGRESO en la caja por una plata que nunca
+// entró por esa factura (entró por los abonos). Ahora es una DEVOLUCIÓN del
+// préstamo, en una transacción:
+//   · el equipo (o las unidades) vuelve al inventario, devuelto por la persona;
+//   · el préstamo queda Devuelto y sus facturas de saldo, canceladas;
+//   · lo que pagó lo decide quien cancela (pedido del usuario, 31-oct-2026):
+//       'saldo_a_favor' → queda a favor de la persona, en la sede del préstamo;
+//       'reasignar'     → pasa a sus otros préstamos (lo que sobre, a favor);
+//       'devolver'      → se le devuelve: EGRESO en la caja abierta de la sede,
+//                         SOLO por lo que entró como dinero — lo pagado con un
+//                         equipo («Intercambio») o con saldo a favor no salió
+//                         de ninguna caja, así que vuelve a su saldo a favor.
+//   · la mora y el interés cobrados se quedan en el negocio, igual que al
+//     devolver un préstamo activo.
+// La caja NO cambia por anular los abonos: los cuenta el día que entraron.
+const DESTINOS_PLATA = ['saldo_a_favor', 'reasignar', 'devolver'];
+const METODOS_NO_DINERO = ['Intercambio', 'Saldo a favor'];
+
+const _facturaDelNegocio = async (executor, negocioId, facturaId, { bloquear = false } = {}) => {
+  const { rows: [f] } = await executor.query(`
+    SELECT f.* FROM facturas f JOIN sucursales s ON s.id = f.sucursal_id
+    WHERE f.id = $1 AND s.negocio_id = $2 ${bloquear ? 'FOR UPDATE OF f' : ''}
+  `, [facturaId, negocioId]);
+  if (!f) throw { status: 404, message: 'Factura no encontrada' };
+  return f;
+};
+
+const _abonadoPorTipo = async (executor, prestamoId) => {
+  const { rows } = await executor.query(`
+    SELECT COALESCE(SUM(valor - valor_anulado) FILTER (WHERE metodo = ANY($2::text[])), 0) AS no_dinero,
+           COALESCE(SUM(valor - valor_anulado), 0) AS total
+    FROM abonos_prestamo WHERE prestamo_id = $1 AND NOT anulado
+  `, [prestamoId, METODOS_NO_DINERO]);
+  return { total: Number(rows[0].total), no_dinero: Number(rows[0].no_dinero) };
+};
+
+/**
+ * Lo que la pantalla necesita ANTES de cancelar: null si la factura no es de
+ * saldo de un préstamo (se cancela como siempre); si lo es, de cuál y cuánto
+ * se pagó, para ofrecer qué hacer con esa plata.
+ */
+const infoFacturaDeSaldo = async (negocioId, facturaId) => {
+  const factura = await _facturaDelNegocio(pool, negocioId, facturaId);
+  const esDeSaldo = /^Factura generada por saldo de préstamo #\d+$/.test(String(factura.notas || '').trim());
+  if (!esDeSaldo) return null;
+  if (factura.estado !== 'Activa') return { es_de_prestamo: true, identificado: false, motivo: 'La factura ya está cancelada' };
+  const prestamoId = await repo.prestamoDeFacturaSaldo(pool, factura);
+  if (!prestamoId) {
+    return { es_de_prestamo: true, identificado: false,
+      motivo: 'No se pudo saber con certeza de qué préstamo es esta factura.' };
+  }
+  const { rows: [p] } = await pool.query('SELECT * FROM prestamos WHERE id = $1', [prestamoId]);
+  const tipo      = p.prestatario_id ? 'prestatario' : (p.cliente_id ? 'cliente' : null);
+  const personaId = p.prestatario_id || p.cliente_id || null;
+  const pagado = await _abonadoPorTipo(pool, prestamoId);
+  let deudaOtros = 0;
+  if (personaId) {
+    const activos = await repo.findActivosPorPersona(pool, tipo, personaId, negocioId);
+    deudaOtros = activos.reduce((s, x) => s + Math.max(0, Number(x.saldo_pendiente || 0)), 0);
+  }
+  const caja = await require('../caja/caja.repository').findCajaAbierta(p.sucursal_id);
+  return {
+    es_de_prestamo: true, identificado: true,
+    prestamo: {
+      id: p.id, numero: p.numero ?? p.id, estado: p.estado, prestatario: p.prestatario,
+      nombre_producto: p.nombre_producto, imei: p.imei, cantidad: Number(p.cantidad_prestada || 1),
+      valor: Number(p.valor_prestamo), sucursal_id: p.sucursal_id,
+    },
+    pagado: pagado.total,
+    pagado_dinero: pagado.total - pagado.no_dinero,
+    pagado_no_dinero: pagado.no_dinero,
+    tiene_persona: !!personaId,
+    deuda_otros_prestamos: deudaOtros,
+    caja_abierta: !!caja,
+    destinos: DESTINOS_PLATA,
+  };
+};
+
+const cancelarFacturaDeSaldo = async (negocioId, facturaId, { destino, metodo = 'Efectivo', usuarioId = null } = {}) => {
+  if (!DESTINOS_PLATA.includes(destino)) {
+    throw { status: 400, code: 'DESTINO_REQUERIDO',
+      message: 'Elige qué pasa con lo que pagó la persona: saldo a favor, pasarlo a sus otros préstamos o devolvérselo.' };
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const factura = await _facturaDelNegocio(client, negocioId, facturaId);
+    if (factura.estado !== 'Activa') throw { status: 400, message: 'La factura ya está cancelada' };
+    const prestamoId = await repo.prestamoDeFacturaSaldo(client, factura);
+    if (!prestamoId) {
+      throw { status: 409, code: 'PRESTAMO_NO_IDENTIFICADO',
+        message: 'No se pudo saber con certeza de qué préstamo es esta factura, así que no se canceló nada. Contacta a soporte.' };
+    }
+    // El mismo candado que un abono a este préstamo: un pago que entra a la vez
+    // no puede ver el préstamo a medio devolver.
+    await bloquearOperacion(client, `abono-prestamo:${prestamoId}`,
+      'Hay un pago de este préstamo registrándose en este momento. Espera a que termine y vuelve a intentarlo.');
+    const f = await _facturaDelNegocio(client, negocioId, facturaId, { bloquear: true });
+    if (f.estado !== 'Activa') throw { status: 400, message: 'La factura ya está cancelada' };
+    const { rows: [prestamo] } = await client.query('SELECT * FROM prestamos WHERE id = $1 FOR UPDATE', [prestamoId]);
+    if (prestamo.estado !== 'Saldado') {
+      throw { status: 409, code: 'PRESTAMO_NO_PAGADO',
+        message: `El préstamo #${prestamo.numero ?? prestamo.id} no figura pagado (${prestamo.estado}), así que esta factura no se puede cancelar desde aquí. Contacta a soporte.` };
+    }
+    const tienePersona = !!(prestamo.prestatario_id || prestamo.cliente_id);
+    if (destino !== 'devolver' && !tienePersona) {
+      throw { status: 409, code: 'SIN_PERSONA',
+        message: 'Este préstamo no está ligado a un cliente o compañero registrado: no hay a quién dejarle saldo a favor. Elige devolverle la plata.' };
+    }
+
+    // 1. El equipo o las unidades vuelven al inventario.
+    if (prestamo.imei) {
+      await client.query(`
+        UPDATE seriales s SET vendido = false, prestado = false, fecha_salida = NULL
+        FROM productos_serial ps
+        WHERE s.imei = $1 AND ps.id = s.producto_id AND ps.sucursal_id = $2
+      `, [prestamo.imei, prestamo.sucursal_id]);
+    } else if (prestamo.producto_id) {
+      const cant = Number(prestamo.cantidad_prestada || 0);
+      if (prestamo.variante_id) {
+        await repo.ajustarStockVarianteEnTx(client, prestamo.variante_id, cant);
+        await repo.sincronizarStockArbolEnTx(client, prestamo.producto_id);
+      } else if (prestamo.atributo_id) {
+        await repo.ajustarStockAtributoEnTx(client, prestamo.atributo_id, cant);
+        await repo.sincronizarStockArbolEnTx(client, prestamo.producto_id);
+      } else {
+        await repo.ajustarStock(client, prestamo.producto_id, cant);
+      }
+    }
+
+    // 2. El préstamo queda devuelto.
+    await repo.updateEstado(client, prestamoId, 'Devuelto');
+
+    // 3. La plata.
+    const pagado = await _abonadoPorTipo(client, prestamoId);
+    let resultado;
+    let egreso = 0;
+    if (destino === 'devolver') {
+      const dinero = pagado.total - pagado.no_dinero;
+      let caja = null;
+      if (dinero > 0) {
+        caja = await require('../caja/caja.repository').findCajaAbierta(prestamo.sucursal_id);
+        if (!caja) {
+          throw { status: 409, code: 'CAJA_CERRADA',
+            message: 'Para devolverle la plata tiene que haber una caja abierta en la sede del préstamo. Abre la caja o elige saldo a favor.' };
+        }
+      }
+      const motivo = `Anulado: se canceló la factura del préstamo y se le devolvió la plata`;
+      await repo.anularAbonosDePrestamo(client, prestamoId, motivo);
+      if (pagado.no_dinero > 0 && tienePersona) {
+        await _abonarSaldoAFavor(client, prestamo, pagado.no_dinero,
+          'Lo pagado con un equipo o con saldo a favor vuelve a su saldo a favor (préstamo devuelto)');
+      }
+      if (dinero > 0) {
+        egreso = dinero;
+        await client.query(`
+          INSERT INTO movimientos_caja(caja_id, usuario_id, tipo, concepto, valor, referencia_id, referencia_tipo, metodo)
+          VALUES ($1, $2, 'Egreso', $3, $4, $5, 'prestamo_devuelto', $6)
+        `, [caja.id, usuarioId, `Devolución préstamo #${prestamo.numero ?? prestamo.id} — ${prestamo.prestatario || ''}`.trim(),
+          dinero, prestamoId, metodo || 'Efectivo']);
+      }
+      resultado = { abonos_anulados: pagado.total, decision: 'devolver', aplicado: null };
+    } else {
+      resultado = await _resolverAbonosDevueltos(client, prestamo, negocioId, destino);
+    }
+
+    // 4. Sus facturas de saldo vivas (la pedida y cualquier duplicado viejo).
+    const canceladas = await repo.facturasDeSaldo(client, prestamoId);
+    if (!canceladas.includes(Number(facturaId))) canceladas.push(Number(facturaId));
+    await client.query(`UPDATE facturas SET estado = 'Cancelada' WHERE id = ANY($1::int[])`, [canceladas]);
+
+    await client.query('COMMIT');
+    return {
+      prestamo_id: prestamoId, numero: prestamo.numero ?? prestamo.id,
+      sucursal_id: prestamo.sucursal_id, prestatario: prestamo.prestatario,
+      nombre_producto: prestamo.nombre_producto, imei: prestamo.imei,
+      destino, pagado: pagado.total, egreso_caja: egreso,
+      a_favor: destino === 'devolver' ? (tienePersona ? pagado.no_dinero : 0) : pagado.total,
+      aplicado: resultado.aplicado ?? null,
+      facturas_canceladas: canceladas.sort((a, b) => a - b),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 // ─── Servicio: registrar abono total (FIFO) ───────────────────────────────────
@@ -2455,6 +2704,7 @@ module.exports = {
   retomaDirecta, aplicarSaldoAPrestamos, aplicarSaldoAPrestamo, getResumenCartera,
   anularAbono, anularRetomaDirecta, getRetomasDirectas,
   getEstadoCuenta, crearAjusteDeuda, editarValorPrestamo,
+  infoFacturaDeSaldo, cancelarFacturaDeSaldo,
   getSaldoSucursalPersona, getHistorialSaldoSucursalPersona,
   registrarAbonoTotal, modificarAbonoTotal, anularAbonoTotal,
   fijarPlazo, condonarMora, cobrarMora,

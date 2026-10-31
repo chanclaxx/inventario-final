@@ -206,6 +206,60 @@ Three roles exist: `admin_negocio`, `supervisor`, `vendedor`. Role determines wh
 > (decisión del usuario). Prueba: `71-venta-sin-talla` (36; la sección 1 es la
 > de los negocios sin tallas).
 
+> **Una venta, una factura** (`facturas/facturas.duplicados.js`, `ModalFactura`
+> `enviandoRef`/`claveRef`; auditoría de datos del 30-oct-2026: facturas
+> gemelas a 10–40 s en Tesla, MarioWorld, Hydra). Con IMEI la gemela ya se
+> rechazaba (el serial va con FOR UPDATE desde mar-2026); con accesorios no.
+> **Sin migración** (el usuario pidió no tocar la base): `crearFactura` toma
+> `bloquearOperacion('factura:<sede>:<usuario>')` y DESPUÉS busca la repetida —
+> con `clave_idempotencia` (una por intento, la manda la pantalla, se recuerda
+> en memoria 10 min) manda SOLO la clave: una clave nueva es otra venta aunque
+> sea idéntica; sin clave (bundle viejo) manda la gemela por contenido (misma
+> sede, usuario, cliente y líneas en 30 s). Lo repetido devuelve la factura
+> existente con `repetida: true` y el controlador responde 200 sin auditar
+> otra venta. En pantalla el freno es un `useRef` ANTES de cualquier await (el
+> `loading` llega un render tarde, y el Enter no pasa por el botón). Las suites
+> que repiten ventas a propósito mandan su clave (56, 76).
+> Prueba: `85-facturas-duplicadas` (32; la sección 2 es la de lo que no es la
+> misma venta, la 7 el orden candado → buscar → crear).
+
+> **Cancelar la factura de un préstamo PAGADO es DEVOLVER el préstamo**
+> (`prestamos.service.infoFacturaDeSaldo` / `cancelarFacturaDeSaldo`,
+> `GET /facturas/:id/prestamo-de-saldo`, `PATCH /facturas/:id/cancelar-prestamo`,
+> `CancelarFacturaPrestamo.jsx`; auditoría de datos del 30-oct-2026). La
+> factura que nace al saldar un préstamo (`notas = 'Factura generada por saldo
+> de préstamo #<numero ?? id>'`) se cancelaba como una venta cualquiera: el
+> préstamo seguía Saldado, el equipo vendido y nadie decidía qué pasaba con la
+> plata (Cellsite 7032/7474). Ahora `cancelarFactura` la rechaza (409
+> `FACTURA_DE_PRESTAMO`) y la pantalla abre el flujo propio: el equipo o las
+> unidades vuelven al inventario, el préstamo queda **Devuelto**, se cancelan
+> TODAS sus facturas de saldo (las gemelas viejas también) y la persona elige
+> qué pasa con lo pagado (decisión del usuario): **saldo a favor**, **pasarlo
+> a sus otros préstamos** (FIFO; lo que sobra queda a favor) o **devolverle la
+> plata** (abonos anulados con motivo + egreso en `movimientos_caja`,
+> `referencia_tipo 'prestamo_devuelto'`, exige caja abierta; lo pagado con
+> Intercambio o saldo a favor no sale de caja: vuelve a su saldo). Sin persona
+> registrada solo se puede devolver. La mora y el interés cobrados se quedan.
+> PIN como la cancelación normal. Si el préstamo no se identifica sin dudas
+> (409 `PRESTAMO_NO_IDENTIFICADO`) no se ofrece nada. `devolverPrestamo` y
+> `devolverParcial` responden 409 `PRESTAMO_PAGADO` sobre un Saldado (la
+> pantalla nunca lo ofreció).
+> **La factura de saldo se busca por el PRÉSTAMO, no por texto**
+> (`repo.facturasDeSaldo`): misma sede, la marca con `numero ?? id` (con el id
+> viejo solo si no choca con el número de otro préstamo) y una línea del mismo
+> IMEI o nodo. `cancelarFacturaDePrestamo` buscaba `#<id>` con LIKE sin sede:
+> desde el 16-jul anular un abono que saldó no cancelaba nada, y anular un pago
+> total canceló facturas de OTROS préstamos.
+> De paso: **editar el valor de un préstamo hasta lo abonado lo salda** (por
+> `cerrarSiPagadoEnTx`, con factura); **un crédito cuya cuota inicial cubre el
+> total nace Saldado** (`crearFactura`) y `SQL_CREDITOS_SALDADOS` lo fecha el
+> día de la venta aunque no tenga abonos (los saldados sin abono ni cuota
+> siguen fuera); `_repartirSaldoEnTx` cierra por `cerrarSiPagadoEnTx`. Los
+> datos viejos NO se tocaron (decisión del usuario).
+> Prueba: `86-factura-saldo-prestamo` (53; la 2 es el choque id/número, la 5-7
+> las tres opciones, la 11 editar valor y crédito con cuota completa). Probado
+> en navegador contra una base local aislada.
+
 > **Precio mínimo de venta** (`utils/precioMinimo.util.js`, opt-in
 > `precio_minimo_activo`, **ausente = apagado**; Ajustes → Precios de venta):
 > ni la factura (crear y **editar**), ni el préstamo (crear y editar el valor), ni

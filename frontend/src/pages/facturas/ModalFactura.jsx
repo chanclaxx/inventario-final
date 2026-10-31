@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { Modal }                    from '../../components/ui/Modal';
 import { Button }                   from '../../components/ui/Button';
@@ -108,7 +108,14 @@ function parsearListaConfig(valor) {
   }
 }
 
-function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio, credito, vendedorId }) {
+// Una por intento de venta (ver `claveRef` en el modal). randomUUID solo existe
+// en contextos seguros (https o localhost); en una red local por http se cae al
+// respaldo, que basta para distinguir dos intentos del mismo navegador.
+const nuevaClaveVenta = () => (globalThis.crypto?.randomUUID
+  ? globalThis.crypto.randomUUID()
+  : `v-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
+
+function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSeleccionados, montos, retomas, domicilio, credito, vendedorId, claveIdempotencia }) {
   const pagosPorDefecto = totalNeto <= 0
     ? [{ metodo: metodosSeleccionados[0] || 'Efectivo', valor: totalNeto }]
     : null;
@@ -184,6 +191,7 @@ function buildPayloadFactura({ tipoCliente, form, items, totalNeto, metodosSelec
     mora_condicion_id: credito.activo ? (credito.condicion_id || null) : null,
     interes_plan_id:   credito.activo ? (credito.interes_plan_id || null) : null,
     vendedor_id:    vendedorId || null,
+    clave_idempotencia: claveIdempotencia || null,
   };
 }
 
@@ -1152,6 +1160,16 @@ export function ModalFactura({ open, onClose }) {
   const handleAddRetoma    = () => setRetomas((prev) => [...prev, RETOMA_VACIA()]);
   const handleRemoveRetoma = (key) => setRetomas((prev) => prev.filter((r) => r._key !== key));
 
+  // ── Una venta, una factura ─────────────────────────────────────────────────
+  // `enviandoRef` frena el segundo clic (o el Enter) en el MISMO instante: el
+  // `loading` del botón llega un render tarde, y en ese hueco salían facturas
+  // gemelas (auditoría del 30-oct-2026). `claveRef` identifica el intento de
+  // venta: si el formulario igual se envía dos veces —o se reintenta tras un
+  // corte de red—, el backend devuelve la factura que ya creó en vez de otra.
+  // La clave vive hasta que la venta se completa (resetForm la renueva).
+  const enviandoRef = useRef(false);
+  const claveRef    = useRef(null);
+
   const mutation = useMutation({
     mutationFn: crearFactura,
     onSuccess: async (res) => {
@@ -1178,10 +1196,15 @@ export function ModalFactura({ open, onClose }) {
         limpiarCarrito(); onClose(); resetForm();
       }
     },
-    onError: (err) => setError(err.response?.data?.error || 'Error al crear la factura'),
+    onError: (err) => {
+      enviandoRef.current = false;
+      setError(err.response?.data?.error || 'Error al crear la factura');
+    },
   });
 
   const resetForm = () => {
+    enviandoRef.current = false;
+    claveRef.current    = null;
     setForm({ nombre: '', cedula: '', celular: '', email: '', direccion: '', notas: '' });
     setMetodosSeleccionados([]); setMontos({});
     setConRetoma(false); setRetomas([RETOMA_VACIA()]);
@@ -1244,6 +1267,7 @@ export function ModalFactura({ open, onClose }) {
   };
 
   const ejecutarMutacion = () => {
+    if (!claveRef.current) claveRef.current = nuevaClaveVenta();
     mutation.mutate(buildPayloadFactura({
       tipoCliente, form, items, totalNeto,
       metodosSeleccionados, montos,
@@ -1251,10 +1275,25 @@ export function ModalFactura({ open, onClose }) {
       domicilio,
       credito,
       vendedorId: mostrarVendedor ? vendedorId : null,
+      claveIdempotencia: claveRef.current,
     }));
   };
 
+  // El freno va ANTES de cualquier await: si se pusiera después, el segundo
+  // clic entraría mientras el primero verifica la cédula.
   const handleSubmit = async () => {
+    if (enviandoRef.current) return;
+    enviandoRef.current = true;
+    let enviada = false;
+    try {
+      enviada = await validarYEnviar();
+    } finally {
+      if (!enviada) enviandoRef.current = false;
+    }
+  };
+
+  // Devuelve true solo si lanzó la venta; cualquier otro camino libera el freno.
+  const validarYEnviar = async () => {
     setError('');
     if (!form.nombre.trim())                                return setError('El nombre es requerido');
     if (tipoCliente === 'cliente' && !form.cedula.trim())   return setError('La cédula es requerida');
@@ -1305,15 +1344,23 @@ export function ModalFactura({ open, onClose }) {
       setVerificandoCedula(true);
       const puedeContin = await verificarCedula(form);
       setVerificandoCedula(false);
-      if (!puedeContin) return;
+      if (!puedeContin) return false;
     }
 
     ejecutarMutacion();
+    return true;
   };
 
   const handleReescribir = async () => {
-    await reescribirCliente();
-    ejecutarMutacion();
+    if (enviandoRef.current) return;
+    enviandoRef.current = true;
+    try {
+      await reescribirCliente();
+      ejecutarMutacion();
+    } catch (err) {
+      enviandoRef.current = false;
+      throw err;
+    }
   };
 
   const handleCancelarConflicto = () => cancelarConflicto(setForm);

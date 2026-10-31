@@ -63,7 +63,7 @@ const ESPERA_LOCK = '20s';
  * Postgres; una colisión entre dos claves distintas solo costaría que dos
  * operaciones sin relación se esperen un instante, nunca un dato mal escrito.
  */
-const bloquearOperacion = async (client, clave) => {
+const bloquearOperacion = async (client, clave, mensajeOcupado = null) => {
   await client.query(`SET LOCAL lock_timeout = '${ESPERA_LOCK}'`);
   try {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [String(clave)]);
@@ -72,8 +72,9 @@ const bloquearOperacion = async (client, clave) => {
     if (err && err.code === '55P03') {
       throw {
         status: 409,
-        message: 'Hay otro pago de esta misma persona registrándose en este momento. '
-               + 'Espera a que termine y revisa el estado de cuenta antes de volver a intentarlo.',
+        message: mensajeOcupado
+          || 'Hay otro pago de esta misma persona registrándose en este momento. '
+           + 'Espera a que termine y revisa el estado de cuenta antes de volver a intentarlo.',
       };
     }
     throw err;

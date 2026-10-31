@@ -13,6 +13,8 @@ const precioMinimo = require('../../utils/precioMinimo.util');
 const obsequios    = require('../../utils/obsequios.util');
 const { exigirVarianteSiTiene } = require('../../utils/varianteRequerida.util');
 const { hayObsequios } = require('../../config/columnas');
+const duplicados   = require('./facturas.duplicados');
+const { bloquearOperacion } = require('../../utils/idempotencia.util');
 
 // Piso de una línea de factura (feature opt-in `precio_minimo_activo`). La línea
 // solo guarda el IMEI de un serial, así que se busca por IMEI dentro de la sede.
@@ -240,6 +242,9 @@ const crearFactura = async ({
   // Plan de interés corriente (feature opt-in `interes_activa`), independiente
   // del plazo: un crédito puede causar interés sin tener fecha límite.
   interes_plan_id,
+  // Una por intento de venta (la manda la pantalla): el mismo formulario
+  // enviado dos veces devuelve la misma factura. Ver facturas.duplicados.js.
+  clave_idempotencia,
 }) => {
   const { pool }             = require('../../config/db');
   const facturasRepo         = require('./facturas.repository');
@@ -305,9 +310,26 @@ const crearFactura = async ({
     };
   }
 
+  const clave = duplicados.normalizarClave(clave_idempotencia);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Dos clics (o un Enter y un clic) son dos peticiones casi a la vez. El
+    // candado hace esperar a la segunda hasta que la primera confirme, y
+    // recién entonces se busca la repetida: sin él, ninguna ve a la otra.
+    await bloquearOperacion(client, `factura:${Number(sucursal_id)}:${usuario_id}`,
+      'Hay otra venta tuya registrándose en este momento. Espera a que termine y revisa '
+      + 'las facturas recientes antes de volver a intentarlo.');
+    const repetida = await duplicados.buscarRepetida(client, {
+      sucursal_id: Number(sucursal_id), usuario_id, nombre_cliente, cedula, clave,
+      lineas: (lineas || []).map((l) => ({ ...l, precio: obsequios.precioDeLinea(l) })),
+    });
+    if (repetida) {
+      await client.query('ROLLBACK');
+      return { ...repetida, repetida: true };
+    }
 
     const cliente_id = await resolverClienteId(client, negocio_id, {
       cedula, nombre: nombre_cliente, celular, email, direccion,
@@ -516,7 +538,7 @@ const crearFactura = async ({
         fecha_limite, mora_condicion_id, interes_plan_id,
       });
 
-      await creditosRepo.create(client, {
+      const credito = await creditosRepo.create(client, {
         factura_id:    factura.id,
         cliente_id:    cliente_id,
         sucursal_id:   sucursal_id,
@@ -524,9 +546,19 @@ const crearFactura = async ({
         cuota_inicial: Number(cuota_inicial || 0),
         ...datosMora,
       });
+
+      // Una cuota inicial que cubre TODO deja el crédito pagado desde que nace.
+      // Antes quedaba Activo con saldo $0 para siempre (Tesla, crédito 195):
+      // ensuciaba la lista de créditos y, como no tiene abonos, su utilidad no
+      // entraba en ningún reporte. Se cierra por el cierre de siempre; los
+      // reportes lo fechan el día de la venta (SQL_CREDITOS_SALDADOS).
+      if (Number(cuota_inicial || 0) >= totalLineas) {
+        await require('../creditos/creditos.service').cerrarSiPagadoEnTx(client, credito.id, negocio_id);
+      }
     }
 
     await client.query('COMMIT');
+    duplicados.recordarClave(Number(sucursal_id), clave, factura.id);
 
     if (email) {
       (async () => {
@@ -576,6 +608,20 @@ const cancelarFactura = async (negocioId, id, eliminarRetoma = false, _desdeDevo
   const factura = await facturasRepo.findByIdYNegocio(id, negocioId);
   if (!factura) throw { status: 404, message: 'Factura no encontrada' };
   if (factura.estado === 'Cancelada') throw { status: 400, message: 'La factura ya está cancelada' };
+
+  // La factura que nace al SALDAR un préstamo no se cancela como una venta: el
+  // préstamo seguiría Saldado con sus abonos vivos, el equipo quedaría
+  // disponible y, si es de otro día, la caja registraría un egreso por plata que
+  // entró por los abonos. Tiene su flujo (`PATCH /:id/cancelar-prestamo`), que
+  // devuelve el préstamo y pregunta qué pasa con lo que pagó la persona. Una
+  // pantalla vieja en caché llega aquí: se rechaza con un mensaje claro.
+  if (/^Factura generada por saldo de préstamo #\d+$/.test(String(factura.notas || '').trim())) {
+    throw {
+      status: 409, code: 'FACTURA_DE_PRESTAMO',
+      message: 'Esta factura es el pago de un préstamo. Para cancelarla hay que decidir qué pasa con lo que pagó '
+             + 'la persona: recarga la página y vuelve a intentarlo.',
+    };
+  }
 
   if (!_desdeDevolucion) {
     const domiciliariosRepo = require('../domiciliarios/domiciliarios.repository');

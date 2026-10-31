@@ -955,14 +955,85 @@ const restarTotalAbonado = async (client, prestamoId, valor) => {
   return rows[0];
 };
 
+// ─── La factura de saldo de un préstamo ──────────────────────────────────────
+//
+// `_crearFacturaDesdePrestamo` la marca en `notas` con
+// «Factura generada por saldo de préstamo #<numero ?? id>». Antes se buscaba con
+// `LIKE '%préstamo #<id>%'`: el ID, sin sede y por texto parcial. Desde que los
+// préstamos tienen número (16-jul-2026) el ID ya no es lo que dice la marca, así
+// que anular un abono no cancelaba la factura correcta… y cancelaba la de OTRO
+// préstamo cuyo NÚMERO coincidía con este ID (Cellsite, 5-sep-2026: facturas
+// 7032 y 7474 canceladas al anular pagos de los préstamos con id 7566 y 6873).
+//
+// Ahora la marca se compara EXACTA, en la sede del préstamo, y la factura tiene
+// que llevar el MISMO equipo o producto del préstamo. La marca con el ID (las
+// facturas de antes de la numeración) solo vale si ningún otro préstamo de la
+// sede tiene ese número: si lo tiene, la marca es ambigua y no se toca nada.
+const SQL_MARCA_SALDO = `'Factura generada por saldo de préstamo #'`;
+const SQL_FACTURAS_DE_SALDO = `
+  SELECT f.id
+  FROM facturas f, prestamos p
+  WHERE p.id = $1
+    AND f.sucursal_id = p.sucursal_id
+    AND f.estado = 'Activa'
+    AND (
+      f.notas = ${SQL_MARCA_SALDO} || COALESCE(p.numero, p.id)
+      OR (p.numero IS NOT NULL AND p.numero <> p.id
+          AND f.notas = ${SQL_MARCA_SALDO} || p.id
+          AND NOT EXISTS (SELECT 1 FROM prestamos o
+                          WHERE o.sucursal_id = p.sucursal_id AND o.id <> p.id AND o.numero = p.id))
+    )
+    AND EXISTS (
+      SELECT 1 FROM lineas_factura l
+      WHERE l.factura_id = f.id
+        AND ((p.imei IS NOT NULL AND l.imei = p.imei)
+          OR (p.imei IS NULL AND l.imei IS NULL
+              AND l.producto_id IS NOT DISTINCT FROM p.producto_id
+              AND l.atributo_id IS NOT DISTINCT FROM p.atributo_id
+              AND l.variante_id IS NOT DISTINCT FROM p.variante_id))
+    )`;
+
+/** Las facturas de saldo VIVAS de un préstamo (normalmente una; dos si hubo un doble clic viejo). */
+const facturasDeSaldo = async (client, prestamoId) => {
+  const { rows } = await client.query(`${SQL_FACTURAS_DE_SALDO} ORDER BY f.id`, [prestamoId]);
+  return rows.map((r) => r.id);
+};
+
+/**
+ * Cancela TODAS las facturas de saldo vivas del préstamo —así un duplicado
+ * viejo también se va cuando el préstamo se reabre— cambiando solo su estado:
+ * el equipo y la plata los resuelve quien llama. Devuelve la primera (los
+ * llamadores la informan como `factura_cancelada_id`).
+ */
 const cancelarFacturaDePrestamo = async (client, prestamoId) => {
   const { rows } = await client.query(`
     UPDATE facturas SET estado = 'Cancelada'
-    WHERE notas LIKE $1
-      AND estado = 'Activa'
+    WHERE id IN (${SQL_FACTURAS_DE_SALDO})
     RETURNING id
-  `, [`%préstamo #${prestamoId}%`]);
-  return rows[0]?.id || null;
+  `, [prestamoId]);
+  return rows.map((r) => r.id).sort((a, b) => a - b)[0] || null;
+};
+
+/**
+ * El préstamo de una factura de saldo, o null si la factura no es de saldo o el
+ * préstamo no se puede identificar con certeza (nunca se adivina). Lee la marca
+ * y prueba los préstamos de la sede con ese número (o, si no tienen número, con
+ * ese id); solo vale el que pasa la MISMA prueba de `facturasDeSaldo`.
+ */
+const prestamoDeFacturaSaldo = async (client, factura) => {
+  const m = /^Factura generada por saldo de préstamo #(\d+)$/.exec(String(factura?.notas || '').trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  const { rows: candidatos } = await client.query(`
+    SELECT id FROM prestamos
+    WHERE sucursal_id = $1 AND (numero = $2 OR id = $2)
+  `, [factura.sucursal_id, n]);
+  const encontrados = [];
+  for (const c of candidatos) {
+    const { rows } = await client.query(`SELECT 1 FROM (${SQL_FACTURAS_DE_SALDO}) x WHERE x.id = $2`, [c.id, factura.id]);
+    if (rows.length) encontrados.push(c.id);
+  }
+  return encontrados.length === 1 ? encontrados[0] : null;
 };
 
 const revertirSerialVendido = async (client, imei, sucursalId) => {
@@ -1579,7 +1650,7 @@ module.exports = {
   // anulación
   updateValorPrestamo,
   findAbonoById, eliminarAbono, restarTotalAbonado,
-  cancelarFacturaDePrestamo, revertirSerialVendido,
+  cancelarFacturaDePrestamo, facturasDeSaldo, prestamoDeFacturaSaldo, revertirSerialVendido,
   findRetomaPorId, findSerialEnInventario, eliminarRetoma,
   findRetomasDirectasPorPersona, getEstadoCuenta,
   ajustarStockAtributoEnTx, ajustarStockVarianteEnTx, sincronizarStockArbolEnTx,

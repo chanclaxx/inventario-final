@@ -126,10 +126,15 @@ const setCfg = async (clave, valor) => {
   if (valor != null) await q(`INSERT INTO config_negocio VALUES (1, $1, $2)`, [clave, valor]);
 };
 
+let _ventas = 0;
 const vender = (lineas) => facturas.crearFactura({
   negocio_id: 1, sucursal_id: 1, usuario_id: 1,
   nombre_cliente: 'Cliente', cedula: '123', celular: '300',
   lineas, pagos: [{ metodo: 'Efectivo', valor: 1 }],
+  // Cada llamada es una venta NUEVA, como la manda la pantalla (una clave por
+  // intento). Sin clave, dos ventas idénticas en 30 s se tomarían por un doble
+  // clic y la segunda devolvería la primera (facturas.duplicados.js).
+  clave_idempotencia: `prueba-${++_ventas}-${Date.now()}`,
 });
 const cable     = (precio, cantidad = 1) => ({ nombre_producto: 'Cable', producto_id: 1, cantidad, precio });
 const protector = (precio) => ({ nombre_producto: 'Protector', producto_id: 2, cantidad: 1, precio });

@@ -37,6 +37,10 @@ router.post('/',           requireModulo('facturar'), validarFactura, validate, 
 // de "editar": quitarle líneas a una factura devuelve stock y baja el crédito —
 // es una cancelación parcial, no una corrección de datos.
 router.patch('/:id/cancelar',           requireModulo('facturar'), requirePermisoFacturas('cancelar'), ctrl.cancelarFactura);
+// La factura que nació al saldar un préstamo: se cancela DEVOLVIENDO el
+// préstamo y decidiendo qué pasa con lo que pagó la persona (mismo permiso).
+router.get('/:id/prestamo-de-saldo',     requireModulo('facturar'), requirePermisoFacturas('cancelar'), ctrl.infoFacturaDeSaldo);
+router.patch('/:id/cancelar-prestamo',   requireModulo('facturar'), requirePermisoFacturas('cancelar'), ctrl.cancelarFacturaDeSaldo);
 router.patch('/:id/devolucion-parcial', requireModulo('facturar'), requirePermisoFacturas('cancelar'), ctrl.devolverLineasCredito);
 router.patch('/:id',                    requireModulo('facturar'), requirePermisoFacturas('editar'),   ctrl.editarFactura);
 

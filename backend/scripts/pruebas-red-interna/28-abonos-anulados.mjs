@@ -214,11 +214,14 @@ console.log('\n═══ 2. Un préstamo sin abonos se devuelve igual que siempr
 // entera perdería la plata que sí pagó préstamos abiertos.
 console.log('\n═══ 3. Pago total repartido, con un préstamo devuelto ═══');
 {
-  const pA = await nuevoPrestamo(2, 'PEPE', 'IMEI-4', 3400000);  // se devuelve
+  // El pago total se reparte del más viejo al más nuevo: salda el vivo y deja
+  // el otro a medias. Un préstamo ya PAGADO no se devuelve por aquí (eso es
+  // cancelar su factura, suite 86), así que el devuelto es el que quedó abierto.
   await nuevoPrestamo(2, 'PEPE', 'IMEI-5', 5400000);             // sigue vivo
-  await prestamos.registrarAbonoTotal(1, 'prestatario', 2, 8800000, 'Efectivo', 1, 1);
+  const pA = await nuevoPrestamo(2, 'PEPE', 'IMEI-4', 3400000);  // se devuelve
+  await prestamos.registrarAbonoTotal(1, 'prestatario', 2, 7000000, 'Efectivo', 1, 1);
 
-  check('el pago total dejó todo saldado', await deudaReal(2), 0);
+  check('el pago total dejó pendiente solo el que se devuelve', await deudaReal(2), 1800000);
   const [repartoA] = await q(`SELECT COALESCE(SUM(valor),0) v FROM abonos_prestamo WHERE prestamo_id=$1`, [pA]);
 
   const res = await prestamos.devolverPrestamo(1, pA);
@@ -226,7 +229,7 @@ console.log('\n═══ 3. Pago total repartido, con un préstamo devuelto ═�
 
   const movs = await prestamos.getEstadoCuenta(1, 'prestatario', 2);
   const filaPago = movs.find((m) => m.tipo === 'abono_total');
-  check('★ el extracto muestra el pago COMPLETO', filaPago?.abono, 8800000);
+  check('★ el extracto muestra el pago COMPLETO', filaPago?.abono, 7000000);
   checkEq('★ y el pago total NO queda marcado (parte sigue viva)', filaPago?.anulado, false);
   check('★ pero solo baja deuda por la parte viva', await saldoExtracto(2), await deudaReal(2));
   check('esa deuda es cero: el préstamo vivo quedó pagado', await deudaReal(2), 0);
@@ -461,7 +464,7 @@ console.log('\n═══ 8. Las tres salidas del modal ═══');
 // de contar: el pago sigue existiendo entero —es lo que pagó— pero baja la deuda
 // menos.
 //
-// Lo que no puede pasar: que la fila muestre $8.800.000, el saldo baje
+// Lo que no puede pasar: que la fila muestre $7.000.000, el saldo baje
 // $5.400.000, y no haya nada que explique la diferencia. Eso son dos números
 // que no cuadran, que es justo lo que este trabajo vino a quitar.
 console.log('\n═══ 9. Pago total: se anula solo la parte devuelta ═══');
@@ -470,17 +473,19 @@ console.log('\n═══ 9. Pago total: se anula solo la parte devuelta ══�
                  VALUES (1,'PARTES','195', 0)`);
   const id = (await q(`SELECT id FROM prestatarios WHERE nombre='PARTES'`))[0].id;
 
-  const pDev  = await nuevoPrestamo(id, 'PARTES', 'IMEI-21', 3400000);  // se devuelve
+  // El vivo va primero: el reparto lo salda y deja el otro a medias (un
+  // préstamo ya PAGADO no se devuelve por aquí — eso es cancelar su factura).
   const pVivo = await nuevoPrestamo(id, 'PARTES', 'IMEI-22', 5400000);  // sigue
+  const pDev  = await nuevoPrestamo(id, 'PARTES', 'IMEI-21', 3400000);  // se devuelve
 
-  await prestamos.registrarAbonoTotal(1, 'prestatario', id, 8800000, 'Efectivo', 1, 1);
+  await prestamos.registrarAbonoTotal(1, 'prestatario', id, 7000000, 'Efectivo', 1, 1);
   const [ptId] = await q(`SELECT id FROM abonos_totales WHERE persona_id=$1`, [id]);
 
   await prestamos.devolverPrestamo(1, pDev, { decision: 'anular' });
 
   // ── El pago total NO se toca ──────────────────────────────────────────────
   const [pt] = await q(`SELECT valor_total FROM abonos_totales WHERE id=$1`, [ptId.id]);
-  check('★ el pago total sigue diciendo lo que la persona pagó', pt.valor_total, 8800000);
+  check('★ el pago total sigue diciendo lo que la persona pagó', pt.valor_total, 7000000);
 
   // ── Solo el hijo del devuelto queda anulado ───────────────────────────────
   const hijos = await q(
@@ -490,16 +495,16 @@ console.log('\n═══ 9. Pago total: se anula solo la parte devuelta ══�
   const hDev  = hijos.find((h) => Number(h.prestamo_id) === Number(pDev));
   const hVivo = hijos.find((h) => Number(h.prestamo_id) === Number(pVivo));
   checkEq('★ el pedazo del devuelto queda anulado', hDev?.anulado, true);
-  check('   y por su valor exacto', hDev?.valor_anulado, 3400000);
+  check('   y por su valor exacto', hDev?.valor_anulado, 1600000);
   checkEq('★ el pedazo del préstamo vivo NO se toca', hVivo?.anulado, false);
   check('   sigue contando completo', hVivo?.valor_anulado, 0);
 
   // ── En el extracto: muestra todo, baja solo la parte viva ────────────────
   const movs = await prestamos.getEstadoCuenta(1, 'prestatario', id);
   const fila = movs.find((m) => m.tipo === 'abono_total');
-  check('★ el extracto muestra el pago COMPLETO', fila?.abono, 8800000);
+  check('★ el extracto muestra el pago COMPLETO', fila?.abono, 7000000);
   checkEq('★ y NO lo marca como anulado del todo (parte sigue viva)', fila?.anulado_total, false);
-  check('★ pero dice cuánto de él dejó de contar', fila?.valor_anulado, 3400000);
+  check('★ pero dice cuánto de él dejó de contar', fila?.valor_anulado, 1600000);
   checkEq('con su motivo, para que la fila se explique sola',
     String(fila?.motivo_anulacion || '').includes('se devolvió'), true);
 

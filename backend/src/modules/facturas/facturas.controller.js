@@ -71,6 +71,14 @@ const crearFactura = async (req, res, next) => {
       usuario_id: req.user.id,
       negocio_id: req.user.negocio_id,
     });
+    // El mismo formulario enviado dos veces: la venta ya existía y se devuelve
+    // esa factura (ver facturas.duplicados.js). No es un error ni otra venta.
+    if (data.repetida) {
+      return res.status(200).json({
+        ok: true, data,
+        message: `Esta venta ya se había registrado (factura #${data.numero ?? data.id}). No se creó otra.`,
+      });
+    }
     audit.registrar(req.user.negocio_id, req.user.id, 'Venta registrada', 'facturas', data.id, {
       sucursal_id,
       cliente:  data.nombre_cliente,
@@ -100,6 +108,41 @@ const cancelarFactura = async (req, res, next) => {
         ? 'Factura cancelada y mora revertida'
         : 'Factura cancelada correctamente',
     });
+  } catch (err) { next(err); }
+};
+
+// La factura de saldo de un préstamo pagado (ver prestamos.service). La
+// lógica vive en préstamos porque lo que se deshace es el PRÉSTAMO.
+const infoFacturaDeSaldo = async (req, res, next) => {
+  try {
+    const data = await require('../prestamos/prestamos.service').infoFacturaDeSaldo(req.user.negocio_id, req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+};
+
+const cancelarFacturaDeSaldo = async (req, res, next) => {
+  try {
+    const { destino, metodo } = req.body || {};
+    const data = await require('../prestamos/prestamos.service').cancelarFacturaDeSaldo(
+      req.user.negocio_id, req.params.id, { destino, metodo, usuarioId: req.user.id });
+    audit.registrar(req.user.negocio_id, req.user.id, 'Préstamo devuelto', 'prestamos', data.prestamo_id, {
+      sucursal_id: data.sucursal_id, prestatario: data.prestatario, producto: data.nombre_producto,
+      imei: data.imei, desde: 'cancelar factura de saldo', destino: data.destino,
+      pagado: data.pagado, egreso_caja: data.egreso_caja, a_favor: data.a_favor,
+      facturas_canceladas: data.facturas_canceladas,
+    });
+    for (const fid of data.facturas_canceladas) {
+      audit.registrar(req.user.negocio_id, req.user.id, 'Venta cancelada', 'facturas', fid, {
+        sucursal_id: data.sucursal_id, prestamo_devuelto: data.numero, destino: data.destino,
+      });
+    }
+    const textos = {
+      saldo_a_favor: 'lo que pagó quedó como saldo a favor',
+      reasignar:     'lo que pagó pasó a sus otros préstamos',
+      devolver:      'se registró la devolución de la plata en la caja',
+    };
+    res.json({ ok: true, data,
+      message: `Factura cancelada: el préstamo #${data.numero} quedó devuelto y ${textos[data.destino]}.` });
   } catch (err) { next(err); }
 };
 
@@ -145,5 +188,6 @@ const devolverLineasCredito = async (req, res, next) => {
 module.exports = {
   getFacturas, getFacturasRecientes, buscarFacturas, buscarDespachos,
   getFacturaById, crearFactura, cancelarFactura, editarFactura,
+  infoFacturaDeSaldo, cancelarFacturaDeSaldo,
   devolverLineasCredito,
 };

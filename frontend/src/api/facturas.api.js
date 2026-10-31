@@ -12,6 +12,14 @@ export const editarFactura  = (id, data) => api.patch(`/facturas/${id}`, data);
 export const cancelarFactura = (id, eliminarRetoma = false, revertirMora = false) =>
   api.patch(`/facturas/${id}/cancelar`, { eliminarRetoma, revertirMora });
 
+// La factura que nació al SALDAR un préstamo: cancelarla es devolver el
+// préstamo. Primero se pregunta de qué préstamo es (null = factura normal) y
+// después se cancela diciendo qué pasa con lo que pagó la persona:
+// 'saldo_a_favor' | 'reasignar' | 'devolver' (con su método).
+export const getPrestamoDeFacturaSaldo = (id) => api.get(`/facturas/${id}/prestamo-de-saldo`);
+export const cancelarFacturaDeSaldo = (id, { destino, metodo }) =>
+  api.patch(`/facturas/${id}/cancelar-prestamo`, { destino, metodo });
+
 export const getFacturasRecientes = (cursor = null, dias = 5) =>
   api.get('/facturas/recientes', { params: { cursor, dias } });
 

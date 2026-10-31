@@ -156,14 +156,21 @@ const _sqlCostoCreditos = (csSql) => `
 // Créditos SALDADOS en un rango ($1 sucursal, $2 desde, $3 hasta), con su
 // utilidad ya calculada. La fecha de saldo es la del último abono VIGENTE (un
 // abono anulado no cerró nada).
+//
+// Un crédito cuya CUOTA INICIAL cubrió todo no tiene abonos: se saldó el día de
+// la venta (`creado_en`). Sin esto su utilidad no entraba en ningún reporte. La
+// condición es la cuota completa y NADA más: un saldado sin abonos y sin cuota
+// (el botón «Saldado» viejo, Caliwood) saldría como pérdida —cobrado 0 menos el
+// costo— y esos se dejaron fuera a propósito.
 const SQL_CREDITOS_SALDADOS = `
   SELECT x.*, x.total_cobrado * x.proporcion_medible - x.costo_total AS utilidad
   FROM (${_sqlCostoCreditos(`
-    SELECT cr.id AS credito_id, cr.factura_id, ua.fecha_saldo,
+    SELECT cr.id AS credito_id, cr.factura_id,
+           COALESCE(ua.fecha_saldo, cr.creado_en) AS fecha_saldo,
            cr.valor_total, cr.cuota_inicial, cr.total_abonado,
            (cr.cuota_inicial + cr.total_abonado) AS total_cobrado
     FROM creditos cr
-    JOIN (
+    LEFT JOIN (
       SELECT ac.credito_id, MAX(ac.fecha) AS fecha_saldo
       FROM abonos_credito ac
       WHERE NOT ac.anulado
@@ -171,7 +178,8 @@ const SQL_CREDITOS_SALDADOS = `
     ) ua ON ua.credito_id = cr.id
     WHERE cr.sucursal_id = $1
       AND cr.estado = 'Saldado'
-      AND DATE(ua.fecha_saldo) BETWEEN $2 AND $3
+      AND (ua.fecha_saldo IS NOT NULL OR cr.cuota_inicial >= cr.valor_total)
+      AND DATE(COALESCE(ua.fecha_saldo, cr.creado_en)) BETWEEN $2 AND $3
   `)}) x`;
 
 // Hoy en Bogotá como 'YYYY-MM-DD', para las consultas que piden un rango.
