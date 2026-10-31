@@ -392,5 +392,65 @@ const fila = (id) => estado.sedes.find((s) => s.sucursal_id === id);
 ok('  el estado de Ajustes marca la tienda como propia y Bunny con deuda',
   fila(3).es_propia && !fila(2).es_propia && fila(2).total_a_pagar > 0 && !fila(2).lista);
 
+// ═════════════════════════════════════════════════════════════════════════════
+seccion('14. ★ Nombre PARECIDO: se pregunta antes de duplicar el catálogo');
+// ═════════════════════════════════════════════════════════════════════════════
+// La bodega tiene «Cargador iPhone 20W» y la tienda lo tiene escrito
+// «Cargador 20W iPhone - Apple»; la funda no tiene nada parecido en la tienda.
+await db.exec(`
+  INSERT INTO productos_cantidad (nombre, precio, costo_unitario, stock, sucursal_id, linea_id)
+    VALUES ('Cargador iPhone 20W', 30000, 9000, 10, 1, 2),
+           ('Cargador 20W iPhone - Apple', 32000, 9500, 1, 3, 2),
+           ('Funda MagSafe', 50000, 20000, 5, 1, 2);
+`);
+const cargB = num((await uno(`SELECT id FROM productos_cantidad WHERE sucursal_id = 1 AND nombre = 'Cargador iPhone 20W'`)).id);
+const cargT = num((await uno(`SELECT id FROM productos_cantidad WHERE sucursal_id = 3 AND nombre = 'Cargador 20W iPhone - Apple'`)).id);
+const fundaB = num((await uno(`SELECT id FROM productos_cantidad WHERE sucursal_id = 1 AND nombre = 'Funda MagSafe'`)).id);
+bodega = await req(2, 1);
+const prev = await traslados.previsualizar(bodega, {
+  sucursal_destino_id: 3,
+  lineas: [
+    { tipo: 'cantidad', producto_id: cargB }, { tipo: 'cantidad', producto_id: fundaB },
+    { tipo: 'cantidad', producto_id: 1 },          // el case: mismo código → seguro
+  ],
+});
+const pCarg = prev.items.find((x) => x.producto_id === cargB);
+ok('★ El cargador se marca como PARECIDO, no se asume', pCarg?.nivel === 'similar' && !pCarg.seguro);
+ok('  y sugiere el de la tienda', pCarg?.sugerencias?.[0]?.id === cargT, JSON.stringify(pCarg?.sugerencias));
+ok('  la funda no tiene nada parecido: nueva', prev.items.find((x) => x.producto_id === fundaB)?.nivel === 'nuevo');
+ok('  el case (mismo código) se resuelve solo', prev.items.find((x) => x.producto_id === 1)?.seguro === true);
+ok('  hay que confirmar antes de trasladar', prev.requiere_confirmacion === true && prev.dudosos === 2);
+ok('★ La revisión no trae costo ni precio', ![...claves(prev)].some((k) => CLAVES_PLATA.test(k)),
+  [...claves(prev)].filter((k) => CLAVES_PLATA.test(k)).join(','));
+e = await falla(() => traslados.previsualizar(bodega, { sucursal_destino_id: 2, lineas: [{ tipo: 'cantidad', producto_id: cargB }] }));
+ok('  la revisión respeta la ruta (no hacia un local)', e?.status === 409);
+e = await falla(() => traslados.previsualizar(bodega, { sucursal_destino_id: 3, lineas: [{ tipo: 'cantidad', producto_id: cargT }] }));
+ok('  ni revisa productos que no son de esta sucursal', e?.status === 404);
+const refs = await traslados.referenciasDestino(bodega, { sucursalId: 3, tipo: 'cantidad', q: 'cargador' });
+ok('  «Buscar otra» trae el catálogo de la tienda, sin plata',
+  refs.some((r) => Number(r.id) === cargT) && ![...claves(refs)].some((k) => CLAVES_PLATA.test(k)));
+
+const nCargAntes = num((await uno(`SELECT COUNT(*) n FROM productos_cantidad WHERE sucursal_id = 3 AND nombre ILIKE '%cargador%'`)).n);
+const tElegido = await traslados.trasladar(bodega, {
+  sucursal_destino_id: 3,
+  lineas: [{ tipo: 'cantidad', producto_id: cargB, cantidad: 2, producto_destino_id: cargT }],
+});
+await service.recibir(tienda, tElegido.id, {});
+ok('★★ Eligiendo el de la tienda, NO se duplica: llega a ese mismo producto',
+  num((await uno(`SELECT COUNT(*) n FROM productos_cantidad WHERE sucursal_id = 3 AND nombre ILIKE '%cargador%'`)).n) === nCargAntes
+  && await stockNodo('productos_cantidad', cargT) === 3);
+const tNueva = await traslados.trasladar(bodega, {
+  sucursal_destino_id: 3, lineas: [{ tipo: 'cantidad', producto_id: fundaB, cantidad: 1 }],
+});
+await service.recibir(tienda, tNueva.id, {});
+ok('  «Crear nueva» (sin destino) crea la referencia como siempre',
+  !!(await uno(`SELECT id FROM productos_cantidad WHERE sucursal_id = 3 AND nombre = 'Funda MagSafe'`)));
+
+// El despacho usa la misma cascada: también pregunta por lo parecido.
+await db.exec(`INSERT INTO productos_cantidad (nombre, precio, costo_unitario, stock, sucursal_id, linea_id)
+  VALUES ('Cargador 20W iPhone (Apple)', 32000, 9500, 0, 2, 2)`);
+const prevD = await service.previsualizarDestino(bodega, { sucursal_destino_id: 2, lineas: [{ tipo: 'cantidad', producto_id: cargB }] });
+ok('  el DESPACHO también sugiere el parecido del local', prevD.items[0].nivel === 'similar' && prevD.items[0].sugerencias.length === 1);
+
 console.log(`\n${pasados} verificaciones pasaron · ${fallos.length} fallaron`);
 if (fallos.length) { console.log('Fallaron:\n  - ' + fallos.join('\n  - ')); process.exit(1); }

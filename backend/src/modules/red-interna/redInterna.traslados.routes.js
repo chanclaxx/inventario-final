@@ -39,6 +39,12 @@ router.post('/sedes/:sucursalId/cerrar-cuenta', requireNivel('admin_negocio'), r
 router.get('/panel', responder((req) => traslados.panel(req)));
 router.get('/buscar', puedeTrasladar, responder((req) => traslados.buscar(req, req.query.q)));
 router.post('/resolver', puedeTrasladar, responder((req) => traslados.resolver(req, req.body?.items)));
+// La revisión de destino del despacho: a qué producto de la otra sede va cada
+// uno, para no duplicar su catálogo.
+router.post('/previsualizar', puedeTrasladar, responder((req) => traslados.previsualizar(req, req.body || {})));
+router.get('/referencias/:sucursalId', puedeTrasladar, responder((req) => traslados.referenciasDestino(req, {
+  sucursalId: req.params.sucursalId, tipo: req.query.tipo, q: req.query.q,
+})));
 router.get('/', responder((req) => traslados.listar(req, {
   estado: req.query.estado, limit: req.query.limit, sentido: req.query.sentido,
 })));

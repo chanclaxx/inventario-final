@@ -3917,7 +3917,14 @@ const previsualizarDestino = async (req, { sucursal_destino_id, lineas }) => {
   if (!Array.isArray(lineas) || !lineas.length) {
     throw { status: 400, message: 'No hay productos para revisar' };
   }
+  return _previsualizarLineas(negocioId, destinoId, lineas);
+};
 
+// El núcleo de la revisión, sin el candado de la bodega: lo comparten el
+// despacho (arriba) y el traslado entre sedes propias, que valida su propia
+// ruta. Solo lee: id, nombre, código, stock y línea de los productos del
+// destino — ningún costo ni precio.
+const _previsualizarLineas = async (negocioId, destinoId, lineas) => {
   const client = await pool.connect();
   try {
     const salida = [];
@@ -4270,6 +4277,7 @@ module.exports = {
     redTraslados: _redTraslados,
     ejecutarRecepcion: (...a) => _ejecutarRecepcion(...a),
     resolverNodoOrigen: (...a) => _resolverNodoOrigen(...a),
+    previsualizarLineas: (...a) => _previsualizarLineas(...a),
     comprometidoSinRecibir: (...a) => _comprometidoSinRecibir(...a),
     destinoElegido: (...a) => _destinoElegido(...a),
     exigirFormaCompatible: (...a) => _exigirFormaCompatible(...a),

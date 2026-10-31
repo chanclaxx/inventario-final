@@ -289,7 +289,12 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
         ${selPreciosNodo('producto')}
         NULL::int  AS atributo_id, NULL::text AS atributo_valor,
         NULL::int  AS variante_id, NULL::text AS variante_valor,
-        su.id AS sucursal_id, su.nombre AS sucursal_nombre
+        su.id AS sucursal_id, su.nombre AS sucursal_nombre,
+        -- ¿Es un CONTENEDOR? Un producto con tallas activas no dice cuál se
+        -- vende; uno sin tallas se agrega tal cual aunque el negocio tenga la
+        -- feature «Variantes» encendida (antes se rechazaban todos).
+        EXISTS (SELECT 1 FROM atributos_producto x
+                WHERE x.producto_id = pc.id AND x.activo = true) AS tiene_hijos
       FROM productos_cantidad pc
       JOIN sucursales su ON su.id = pc.sucursal_id
       WHERE su.negocio_id = $1
@@ -307,7 +312,10 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
         ${selPreciosNodo('atributo')}
         ap.id, COALESCE(tc.nombre || ': ', '') || ap.valor,
         NULL::int, NULL::text,
-        su.id, su.nombre
+        su.id, su.nombre,
+        -- Una talla con colores debajo tampoco dice cuál se vende.
+        EXISTS (SELECT 1 FROM variantes_atributo x
+                WHERE x.atributo_id = ap.id AND x.activo = true)
       FROM atributos_producto ap
       JOIN productos_cantidad pc ON pc.id = ap.producto_id
       JOIN sucursales su ON su.id = ap.sucursal_id
@@ -328,7 +336,8 @@ const buscarCantidadPorCodigo = async (codigo, negocioId, sucursalId) => {
         ${selPreciosNodo('variante')}
         ap.id, COALESCE(tca.nombre || ': ', '') || ap.valor,
         v.id, COALESCE(tcv.nombre || ': ', '') || v.valor,
-        su.id, su.nombre
+        su.id, su.nombre,
+        FALSE
       FROM variantes_atributo v
       JOIN atributos_producto ap ON ap.id = v.atributo_id
       JOIN productos_cantidad pc ON pc.id = ap.producto_id

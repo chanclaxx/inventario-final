@@ -189,6 +189,58 @@ const buscar = async (req, texto) => {
   return { opciones };
 };
 
+/**
+ * ¿A qué producto del destino va cada línea? La MISMA revisión del despacho
+ * (`referencias.resolver`: código → nombre igual → nombre PARECIDO), para no
+ * duplicar el catálogo de la otra sede: lo que no se empareja con seguridad se
+ * le pregunta al usuario antes de trasladar, y su respuesta viaja en
+ * `producto_destino_id`. Solo lee; no trae ni costo ni precio.
+ */
+const previsualizar = async (req, { sucursal_destino_id, lineas }) => {
+  exigirActivos(req);
+  const negocioId = req.user.negocio_id;
+  const origenId  = Number(req.sucursal_id);
+  const destinoId = Number(sucursal_destino_id);
+  const invalida = reglas.motivoRutaInvalida(_red(req), origenId, destinoId);
+  if (invalida) throw { status: 409, code: 'RUTA_TRASLADO', message: invalida };
+  if (!Array.isArray(lineas) || !lineas.length) throw { status: 400, message: 'No hay productos para revisar' };
+  if (lineas.length > 400) throw { status: 400, message: 'Un traslado admite hasta 400 líneas' };
+  await _internos().verificarSucursal(null, destinoId, negocioId);
+
+  // Solo lo que de verdad está en esta sucursal: sin esto, un id ajeno haría
+  // que la revisión devolviera el nombre de un producto de otra sede.
+  const seriales  = lineas.filter((l) => l.tipo === 'serial').map((l) => Number(l.serial_id)).filter(Boolean);
+  const productos = lineas.filter((l) => l.tipo !== 'serial').map((l) => Number(l.producto_id)).filter(Boolean);
+  const [{ rows: sOk }, { rows: pOk }] = await Promise.all([
+    pool.query(`SELECT s.id FROM seriales s JOIN productos_serial ps ON ps.id = s.producto_id
+                WHERE ps.sucursal_id = $1 AND s.id = ANY($2::int[])`, [origenId, seriales]),
+    pool.query(`SELECT id FROM productos_cantidad WHERE sucursal_id = $1 AND id = ANY($2::int[])`, [origenId, productos]),
+  ]);
+  const okS = new Set(sOk.map((r) => Number(r.id)));
+  const okP = new Set(pOk.map((r) => Number(r.id)));
+  const validas = lineas.filter((l) => (l.tipo === 'serial' ? okS.has(Number(l.serial_id)) : okP.has(Number(l.producto_id))));
+  if (!validas.length) throw { status: 404, message: 'Ninguno de los productos está en esta sucursal' };
+  return _internos().previsualizarLineas(negocioId, destinoId, validas.map((l) => ({
+    tipo: l.tipo === 'serial' ? 'serial' : 'cantidad',
+    serial_id: l.serial_id || null, producto_id: l.producto_id || null,
+    cantidad: l.cantidad || 1, nombre: l.nombre || null,
+  })));
+};
+
+/**
+ * «Buscar otra» de la revisión: el catálogo del DESTINO para elegir a mano.
+ * Solo de un destino válido para este traslado, y sin plata (id, nombre,
+ * código, stock y línea, lo mismo que ya lee la revisión del despacho).
+ */
+const referenciasDestino = async (req, { sucursalId, tipo, q }) => {
+  exigirActivos(req);
+  const destinoId = Number(sucursalId);
+  const invalida = reglas.motivoRutaInvalida(_red(req), Number(req.sucursal_id), destinoId);
+  if (invalida) throw { status: 409, code: 'RUTA_TRASLADO', message: invalida };
+  await _internos().verificarSucursal(null, destinoId, req.user.negocio_id);
+  return repo.buscarReferencias(req.user.negocio_id, destinoId, tipo === 'serial' ? 'serial' : 'cantidad', q || '');
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TRASLADAR — emite el documento y, sin confirmación, lo recibe ahí mismo
 // ─────────────────────────────────────────────────────────────────────────────
@@ -741,7 +793,7 @@ const validarSedesPropias = async (negocioId, raw, { bodegaId, actuales = [] }) 
 };
 
 module.exports = {
-  exigirActivos, resolver, buscar, trasladar, anular, avisarRecibido,
+  exigirActivos, resolver, buscar, previsualizar, referenciasDestino, trasladar, anular, avisarRecibido,
   listar, panel, detalle, estadoSedes, cerrarCuenta, validarSedesPropias,
   NOTA_CIERRE, etiqueta,
 };

@@ -19,6 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { hayListasPrecios } = require('../../config/columnas');
+const similitud = require('../../utils/similitudNombre.util');
 
 // ── Listas de precios: el local nace con los de la bodega ────────────────────
 //
@@ -65,7 +66,42 @@ const NIVEL = {
   CODIGO:   'codigo',    // mismo código único → es el mismo producto, seguro
   EXACTO:   'exacto',    // mismo nombre normalizado (+ marca/modelo o línea)
   PROBABLE: 'probable',  // mismo nombre pero difiere la línea/el modelo
+  // Nombre PARECIDO pero no igual («iPhone 13 128GB» / «iPhone 13 128 GB
+  // Apple»). No tiene `destino`: si nadie decide, la recepción crea la
+  // referencia como siempre. Solo trae `sugerencias` para que la pantalla
+  // pregunte antes de duplicar el catálogo del destino.
+  SIMILAR:  'similar',
   NUEVO:    'nuevo',     // no hay nada parecido en el destino
+};
+
+/**
+ * Productos del destino con nombre PARECIDO al del origen (mismo puntaje que el
+ * emparejamiento del traslado viejo, `utils/similitudNombre.util`). Primero un
+ * filtro barato en SQL —que compartan alguna palabra de 3+ letras— y después
+ * el puntaje en JavaScript sobre esos pocos. Nunca escribe nada.
+ */
+const _parecidos = async (client, { tipo, sucursalDestinoId, origen }) => {
+  const palabras = [...new Set(similitud.tokens(origen.nombre).filter((t) => t.length >= 3))]
+    .slice(0, 8)
+    .map((t) => `%${t.replace(/[%_\\]/g, '')}%`);
+  if (!palabras.length) return [];
+  const { rows } = tipo === 'serial'
+    ? await client.query(`
+        SELECT id, nombre, marca, modelo, linea_id FROM productos_serial
+        WHERE sucursal_id = $1 AND ${NORM('nombre')} LIKE ANY($2::text[])
+        ORDER BY id LIMIT 300
+      `, [sucursalDestinoId, palabras])
+    : await client.query(`
+        SELECT id, nombre, codigo, stock, linea_id FROM productos_cantidad
+        WHERE sucursal_id = $1 AND activo = true AND ${NORM('nombre')} LIKE ANY($2::text[])
+        ORDER BY id LIMIT 300
+      `, [sucursalDestinoId, palabras]);
+  return rows
+    .map((r) => ({ r, s: similitud.puntaje(r, origen) }))
+    .filter((x) => x.s >= similitud.UMBRAL_PARECIDO)
+    .sort((a, b) => b.s - a.s || a.r.id - b.r.id)
+    .slice(0, 5)
+    .map((x) => x.r);
 };
 
 const SEGUROS = new Set([NIVEL.CODIGO, NIVEL.EXACTO]);
@@ -133,6 +169,10 @@ const resolverCantidad = async (client, { productoOrigenId, sucursalDestinoId })
       return { nivel: NIVEL.PROBABLE, destino: sugerencias[0], origen: o, sugerencias };
     }
   }
+
+  // 5. Nombre PARECIDO: se sugiere, nunca se asume (sin `destino`).
+  const parecidos = await _parecidos(client, { tipo: 'cantidad', sucursalDestinoId, origen: o });
+  if (parecidos.length) return { nivel: NIVEL.SIMILAR, destino: null, origen: o, sugerencias: parecidos };
 
   return { nivel: NIVEL.NUEVO, destino: null, origen: o };
 };
@@ -307,6 +347,10 @@ const resolverSerial = async (client, { productoOrigenId, sucursalDestinoId }) =
   if (porNombre.length) {
     return { nivel: NIVEL.PROBABLE, destino: porNombre[0], origen: o, sugerencias: porNombre };
   }
+
+  // Nombre PARECIDO: se sugiere, nunca se asume (sin `destino`).
+  const parecidos = await _parecidos(client, { tipo: 'serial', sucursalDestinoId, origen: o });
+  if (parecidos.length) return { nivel: NIVEL.SIMILAR, destino: null, origen: o, sugerencias: parecidos };
 
   return { nivel: NIVEL.NUEVO, destino: null, origen: o };
 };

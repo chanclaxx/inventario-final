@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../api/axios.config';
 import { escanearCodigo } from '../api/busqueda.api';
 import useCarritoStore from '../store/carritoStore';
-import { corregirGuiones, correccionGuionesActiva } from '../utils/codigoEscaneado';
+import { corregirGuiones, correccionGuionesActiva, nodoPideVariante } from '../utils/codigoEscaneado';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Escaneo hacia el carrito — un solo campo para los DOS catálogos.
@@ -124,6 +124,20 @@ export function useEscanerCarrito({
       return;
     }
 
+    // El código es de una TALLA que tiene colores debajo: tampoco dice cuál se
+    // vende, y agregarla así haría que la venta se rechace al final
+    // (VARIANTE_REQUERIDA). Se trata igual que el código de un producto con
+    // tallas: el inventario abre el árbol, el carrito lo explica.
+    if (nodo.atributo_id && nodoPideVariante(nodo, variantesActivo)) {
+      const etiqueta = [nodo.nombre, nodo.atributo_valor].filter(Boolean).join(' · ');
+      if (onProducto) { setScanMsg(null); onProducto(nodo); return; }
+      setScanMsg({
+        tipo:  'error',
+        texto: `"${etiqueta}" tiene variantes: escanea el código de la variante o elígela en el inventario`,
+      });
+      return;
+    }
+
     // El código es de una VARIANTE: identifica exactamente qué se vende, así
     // que va derecho al carrito con la misma `key` que arma el árbol — dos
     // claves distintas guardarían dos líneas para la misma variante.
@@ -158,8 +172,12 @@ export function useEscanerCarrito({
       return;
     }
 
-    // El código es del PRODUCTO. Con variantes activas no dice cuál se vende.
-    if (variantesActivo) {
+    // El código es del PRODUCTO. Con variantes activas no dice cuál se vende…
+    // si el producto TIENE variantes. Uno sin tallas (un cargador, un case) se
+    // vende entero aunque la feature esté encendida: el backend lo dice en
+    // `tiene_hijos`. Sin esa clave (un backend anterior) se conserva la regla
+    // de siempre, que es la que no puede vender una talla equivocada.
+    if (nodoPideVariante(nodo, variantesActivo)) {
       if (onProducto) { setScanMsg(null); onProducto(nodo); return; }
       setScanMsg({
         tipo:  'error',
@@ -205,7 +223,10 @@ export function useEscanerCarrito({
     // El servidor hace el mismo reintento por su lado.
     const corregido = corregirActivo ? corregirGuiones(codigo) : null;
     const local = resolverLocal?.(codigo) || (corregido && resolverLocal?.(corregido)) || null;
-    if (local) { _agregarNodo(local); return; }
+    // Con variantes activas, la lista en memoria no sabe si el producto tiene
+    // tallas: esa respuesta la da el servidor (`tiene_hijos`). Ir allá cuesta
+    // una petición; adivinar abriría el árbol vacío de un producto sin tallas.
+    if (local && !(variantesActivo && local.tiene_hijos === undefined)) { _agregarNodo(local); return; }
 
     setBuscando(true);
     try {

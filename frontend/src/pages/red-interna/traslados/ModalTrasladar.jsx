@@ -1,12 +1,16 @@
 import { useState, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { trasladar, buscarParaTraslado } from '../../../api/redInterna.api';
+import {
+  trasladar, buscarParaTraslado, previsualizarTraslado, buscarReferenciasTraslado,
+} from '../../../api/redInterna.api';
 import { useClaveIdempotencia } from '../../../utils/claveIdempotencia';
 import { useCorregirGuiones } from '../../../hooks/useCorregirGuiones';
 import { corregirGuiones } from '../../../utils/codigoEscaneado';
 import { Modal }   from '../../../components/ui/Modal';
 import { Button }  from '../../../components/ui/Button';
 import { ModalDocumentoEnvio } from '../documentos/ModalDocumentoEnvio';
+import { PanelRevisionDestino } from '../PanelRevisionDestino';
+import { claveItem } from '../claveItem';
 import {
   ArrowRightLeft, ScanLine, X, Minus, Plus, AlertTriangle, CheckCircle, Printer, Info,
 } from 'lucide-react';
@@ -172,6 +176,10 @@ export function ModalTrasladar({
   const [notas, setNotas]           = useState('');
   const [listo, setListo]           = useState(null);   // el traslado ya hecho
   const [imprimir, setImprimir]     = useState(false);
+  // Revisión de destino (la misma del despacho): qué producto de la otra sede
+  // recibe cada uno. Solo aparece si algo no se emparejó con seguridad.
+  const [revision, setRevision]     = useState(null);
+  const [decisiones, setDecisiones] = useState({});
   const clave = useClaveIdempotencia();
   const corregir = useCorregirGuiones();
   const inputRef = useRef(null);
@@ -211,14 +219,58 @@ export function ModalTrasladar({
     }
   };
 
+  // La decisión tomada para este ítem en la revisión (mismas claves que el
+  // panel). 'nueva' viaja sin destino: el backend crea la referencia al recibir.
+  const decisionDe = (item) => {
+    if (!revision) return null;
+    const dudosos = revision.items.filter((x) => !x.seguro);
+    const n = dudosos.findIndex((x) => (item.tipo === 'serial'
+      ? Number(x.serial_id) === Number(item.serial_id)
+      : Number(x.producto_id) === Number(item.producto_id)));
+    return n === -1 ? null : decisiones[claveItem(dudosos[n], n)];
+  };
+  const destinoDe = (item) => {
+    const d = decisionDe(item);
+    return d?.tipo === 'existente' ? { producto_destino_id: d.id } : {};
+  };
+
+  // Paso previo: ¿a qué producto de la otra sede va cada uno? Con nombres
+  // iguales (o el mismo código) se resuelve solo y se traslada de una; con un
+  // nombre PARECIDO o sin nada igual, se pregunta antes de duplicar su
+  // catálogo. Un producto con varias tallas se revisa una sola vez.
+  const revisar = useMutation({
+    mutationFn: () => {
+      const vistos = new Set();
+      const lineas = items.filter((i) => {
+        if (i.tipo === 'serial') return true;
+        if (vistos.has(i.producto_id)) return false;
+        vistos.add(i.producto_id); return true;
+      }).map((i) => ({
+        tipo: i.tipo, serial_id: i.serial_id, producto_id: i.producto_id,
+        cantidad: i.cantidad || 1, nombre: i.nombre_base || i.nombre,
+      }));
+      return previsualizarTraslado({ sucursal_destino_id: destino, lineas }).then((r) => r.data.data);
+    },
+    onSuccess: (data) => {
+      setError('');
+      if (!data.requiere_confirmacion) { enviar.mutate(); return; }
+      setDecisiones({});
+      setRevision(data);
+    },
+    onError: (err) => setError(err.response?.data?.error || 'No se pudo revisar el destino'),
+  });
+
   const enviar = useMutation({
     mutationFn: () => trasladar({
       sucursal_destino_id: destino,
       notas: notas.trim() || null,
       clave_idempotencia: clave(),
       lineas: items.map((i) => (i.tipo === 'serial'
-        ? { tipo: 'serial', serial_id: i.serial_id }
-        : { tipo: 'cantidad', producto_id: i.producto_id, atributo_id: i.atributo_id, variante_id: i.variante_id, cantidad: Number(i.cantidad) })),
+        ? { tipo: 'serial', serial_id: i.serial_id, ...destinoDe(i) }
+        : {
+          tipo: 'cantidad', producto_id: i.producto_id, atributo_id: i.atributo_id,
+          variante_id: i.variante_id, cantidad: Number(i.cantidad), ...destinoDe(i),
+        })),
     }).then((r) => r.data.data),
     onSuccess: (t) => { guardarUltimo(destino); setListo(t); },
     onError: (err) => setError(
@@ -232,6 +284,26 @@ export function ModalTrasladar({
 
   if (imprimir && listo) {
     return <ModalDocumentoEnvio remisionId={listo.id} onClose={() => { setImprimir(false); onListo(listo); }} />;
+  }
+
+  // ── Hay dudas: la pantalla se dedica solo a eso (igual que el despacho) ────
+  if (revision && !listo) {
+    return (
+      <Modal open onClose={onCerrar} title={`¿A qué producto de ${nombreDestino || 'la otra sede'} va?`} size="lg">
+        <PanelRevisionDestino
+          revision={revision}
+          localNombre={nombreDestino || 'la otra sede'}
+          decisiones={decisiones}
+          onDecidir={(k, d) => setDecisiones((prev) => ({ ...prev, [k]: d }))}
+          onVolver={() => { setRevision(null); setError(''); }}
+          onConfirmar={() => enviar.mutate()}
+          enviando={enviar.isPending}
+          textoConfirmar="Confirmar y trasladar"
+          buscarRefs={buscarReferenciasTraslado}
+        />
+        {error && <p className="text-sm text-red-500 mt-3">{error}</p>}
+      </Modal>
+    );
   }
 
   // ── Hecho ──────────────────────────────────────────────────────────────────
@@ -376,8 +448,8 @@ export function ModalTrasladar({
           <Button variant="secondary" className="flex-1" onClick={onCerrar}>Cancelar</Button>
           <Button className="flex-1"
             disabled={!destino || !items.length || pendientes.length > 0}
-            loading={enviar.isPending}
-            onClick={() => enviar.mutate()}>
+            loading={revisar.isPending || enviar.isPending}
+            onClick={() => { setError(''); revisar.mutate(); }}>
             <ArrowRightLeft size={15} />
             {items.length ? `Trasladar ${unidades} ud${unidades !== 1 ? 's' : ''}` : 'Trasladar'}
           </Button>

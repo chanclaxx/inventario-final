@@ -1692,6 +1692,15 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > puede abrir el árbol cuando el código es del producto y hay variantes activas
 > (`onProducto`): el carrito es una columna, no una pantalla, y lo explica en
 > vez de agregar a ciegas.
+> **Solo si ese nodo TIENE hijos** (`tiene_hijos` en la respuesta del escaneo,
+> `nodoPideVariante` en `utils/codigoEscaneado.js`; reportado 30-oct-2026): con
+> «Variantes» encendida se rechazaba el código de CUALQUIER producto, también
+> el de uno sin tallas (un cargador). Ahora un producto sin tallas activas se
+> agrega entero, y una talla CON colores pide el color (antes entraba y la
+> venta reventaba con `VARIANTE_REQUERIDA`). Sin `tiene_hijos` (backend viejo)
+> el código de producto conserva la regla de antes; con variantes activas el
+> atajo local del inventario va al servidor, que es quien sabe.
+> Prueba: `88-escaneo-sin-variantes` (20).
 > **El guion que llega como `'`** (`utils/codigoEscaneado.util.js`, opt-in
 > `escaneo_corregir_guiones`, **ausente = apagado**; Ajustes → Código único):
 > un lector configurado con teclado en inglés sobre Windows en español manda el
@@ -2920,8 +2929,18 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > despacho); en la sede propia, «Trasladar»; la página Bodega tiene la cara de
 > sede propia y los traslados arriba en la bodega. El módulo viejo `traslados`
 > no se tocó (mueve el producto y no la talla: no sirve con variantes).
-> Prueba: `87-traslados-internos` (94; la sección 1 es la de apagado, la 5 —★—
-> que no genera cuenta ni venta de la bodega, la 11 que no viaja ningún costo).
+> **Antes de trasladar se revisa el destino, como en el despacho**
+> (`POST /traslados/previsualizar`, `PanelRevisionDestino` reusado): lo que no
+> se empareja con seguridad se pregunta, y la elección viaja en
+> `producto_destino_id`. La cascada de `redInterna.referencias` ganó un nivel
+> **`similar`** (nombre PARECIDO, `utils/similitudNombre.util.puntaje`, el mismo
+> `_score` del traslado viejo, ahora compartido): sin `destino`, solo
+> `sugerencias` — nunca se aplica solo; sin decisión se crea como siempre. Lo
+> ven también el despacho y la recepción. «Buscar otra» del traslado va por
+> `/traslados/referencias/:sucursalId` (permiso «Traslados», ruta validada).
+> Prueba: `87-traslados-internos` (106; la sección 1 es la de apagado, la 5 —★—
+> que no genera cuenta ni venta de la bodega, la 11 que no viaja ningún costo,
+> la 14 que un nombre parecido no se duplica).
 > Probado en Chrome contra una base local aislada (escritorio y 390 px).
 
 > **Los despachos salen en el historial de FACTURAS — sin ser facturas**

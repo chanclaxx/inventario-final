@@ -201,3 +201,8 @@ export const anularTraslado      = (id) => api.post(`/red-interna/traslados/${id
 export const getSedesTraslado    = () => api.get('/red-interna/traslados/sedes');
 export const cerrarCuentaSede    = (sucursalId, nota) =>
   api.post(`/red-interna/traslados/sedes/${sucursalId}/cerrar-cuenta`, { nota });
+// Antes de trasladar: a qué producto de la otra sede va cada uno (la misma
+// revisión del despacho), y el catálogo de esa sede para «Buscar otra».
+export const previsualizarTraslado = (payload) => api.post('/red-interna/traslados/previsualizar', payload);
+export const buscarReferenciasTraslado = (sucursalId, { tipo, q } = {}) =>
+  api.get(`/red-interna/traslados/referencias/${sucursalId}`, { params: { tipo, q } });

@@ -20,11 +20,13 @@ import {
 // ya tiene, o crear una nueva a propósito.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function BuscadorReferencia({ sucursalId, tipo, onElegir, onCerrar }) {
+function BuscadorReferencia({ sucursalId, tipo, onElegir, onCerrar, buscarRefs = buscarReferencias }) {
   const [q, setQ] = useState('');
   const { data: refs = [], isLoading } = useQuery({
-    queryKey: ['red-referencias', sucursalId, tipo, q],
-    queryFn:  () => buscarReferencias(sucursalId, { tipo, q }).then((r) => r.data.data),
+    // El traslado entre sedes usa su propia ruta (otro permiso), así que la
+    // función entra en la clave: dos fuentes no comparten caché.
+    queryKey: ['red-referencias', buscarRefs === buscarReferencias ? 'despacho' : 'traslado', sucursalId, tipo, q],
+    queryFn:  () => buscarRefs(sucursalId, { tipo, q }).then((r) => r.data.data),
   });
 
   return (
@@ -68,7 +70,7 @@ function BuscadorReferencia({ sucursalId, tipo, onElegir, onCerrar }) {
 
 const nombreRef = (r) => [r.nombre, r.marca, r.modelo].filter(Boolean).join(' ');
 
-function FilaDudosa({ item, sucursalId, decision, onDecidir }) {
+function FilaDudosa({ item, sucursalId, decision, onDecidir, buscarRefs }) {
   const [buscando, setBuscando] = useState(false);
 
   // Las opciones son las sugerencias del backend MÁS la que el usuario haya
@@ -149,6 +151,7 @@ function FilaDudosa({ item, sucursalId, decision, onDecidir }) {
           <BuscadorReferencia
             sucursalId={sucursalId}
             tipo={item.tipo}
+            buscarRefs={buscarRefs}
             onCerrar={() => setBuscando(false)}
             onElegir={(r) => {
               // `ref` guarda la fila completa para poder pintarla como opción
@@ -165,6 +168,9 @@ function FilaDudosa({ item, sucursalId, decision, onDecidir }) {
 
 export function PanelRevisionDestino({
   revision, localNombre, decisiones, onDecidir, onVolver, onConfirmar, enviando,
+  // El traslado entre sedes propias reusa esta misma revisión: cambia el
+  // texto del botón y de dónde sale «Buscar otra».
+  textoConfirmar = 'Confirmar y despachar', buscarRefs,
 }) {
   const dudosos = revision.items.filter((i) => !i.seguro);
   const seguros = revision.items.filter((i) => i.seguro);
@@ -195,6 +201,7 @@ export function PanelRevisionDestino({
             sucursalId={revision.sucursal_destino_id}
             decision={decisiones[claveItem(item, n)]}
             onDecidir={(d) => onDecidir(claveItem(item, n), d)}
+            buscarRefs={buscarRefs}
           />
         ))}
       </div>
@@ -207,7 +214,7 @@ export function PanelRevisionDestino({
           loading={enviando}
           onClick={onConfirmar}
         >
-          {faltan > 0 ? `Falta decidir ${faltan}` : 'Confirmar y despachar'}
+          {faltan > 0 ? `Falta decidir ${faltan}` : textoConfirmar}
         </Button>
       </div>
     </div>

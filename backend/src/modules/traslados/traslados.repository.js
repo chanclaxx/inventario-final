@@ -2,67 +2,10 @@ const { pool } = require('../../config/db');
 
 // ─── Utilidades de similitud ──────────────────────────────────────────────────
 
-/** Normaliza un string: minúsculas, sin tildes, sin guiones, espacios simples */
-const _norm = (s) =>
-  (s || '')
-    .toLowerCase()
-    .trim()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[-_]/g, ' ')
-    .replace(/\s+/g, ' ');
-
-/** Divide en tokens de 2+ caracteres */
-const _tokens = (s) => _norm(s).split(/\s+/).filter((t) => t.length >= 2);
-
-/**
- * Calcula un score de similitud entre un producto destino y los datos del origen.
- * Insensible a: orden de palabras, tildes, mayúsculas, guiones.
- *
- * Escala:
- *  100 → cadena exacta
- *   99 → mismas palabras, distinto orden
- *  20–98 → superposición parcial de tokens + bonos de marca/modelo/línea
- *   0–19 → muy poca o ninguna similitud
- */
-const _score = (prod, { nombre, marca, modelo, linea_id }) => {
-  const n1 = _norm(nombre);
-  const n2 = _norm(prod.nombre);
-
-  if (n1 === n2) return 100;
-
-  const t1 = _tokens(nombre);
-  const t2 = _tokens(prod.nombre);
-
-  // Mismas palabras, distinto orden → casi exacto
-  if (
-    t1.length > 0 &&
-    t1.length === t2.length &&
-    t1.every((t) => t2.includes(t)) &&
-    t2.every((t) => t1.includes(t))
-  ) return 99;
-
-  let score = 0;
-
-  if (t1.length && t2.length) {
-    const hits = t1.filter((t) => t2.includes(t)).length;
-    const union = new Set([...t1, ...t2]).size;
-    score += (hits / union) * 60;
-    if (hits === t1.length) score += 15; // todos los tokens del origen están en el destino
-  }
-
-  // Coincidencia de subcadena (bidireccional)
-  if (n2.includes(n1) || n1.includes(n2)) score += 10;
-
-  // Bono por marca y modelo
-  if (marca && prod.marca && _norm(marca) === _norm(prod.marca))   score += 12;
-  if (modelo && prod.modelo && _norm(modelo) === _norm(prod.modelo)) score += 10;
-
-  // Bono por misma línea
-  if (linea_id && prod.linea_id === linea_id) score += 5;
-
-  return score;
-};
+// La normalización y el puntaje de parecido viven en un util compartido: la
+// red interna los usa para sugerir el producto del destino, y una copia aquí
+// acabaría puntuando distinto el mismo par de nombres.
+const { norm: _norm, tokens: _tokens, puntaje: _score } = require('../../utils/similitudNombre.util');
 
 /**
  * Scoring para búsqueda libre: usa coincidencia de prefijo/subcadena por token
