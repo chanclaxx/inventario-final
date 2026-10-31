@@ -221,11 +221,16 @@ const recolectar = async (negocioId) => {
   // una semana ya no es "en camino": es mercancía congelada, y es urgente.
   if (sinRecibir?.total) {
     const peor = sinRecibir.items[0];
+    // Un traslado entre sedes propias (20261030) congela su mercancía igual que
+    // un envío; el título los nombra a los dos solo cuando hay alguno.
+    const conTraslados = sinRecibir.items.some((i) => i.tipo === 'traslado');
     senales.push(_senal({
       clave: 'red_envios_sin_recibir',
       prioridad: peor.dias >= 7 ? 'urgente' : 'normal',
       categoria: 'red_interna',
-      titulo: `${_plural(sinRecibir.total, 'envío sin recibir', 'envíos sin recibir')}`,
+      titulo: conTraslados
+        ? `${_plural(sinRecibir.total, 'envío o traslado sin recibir', 'envíos o traslados sin recibir')}`
+        : `${_plural(sinRecibir.total, 'envío sin recibir', 'envíos sin recibir')}`,
       cuerpo: `El más viejo lleva ${_plural(peor.dias, 'día', 'días')} en camino hacia ${peor.destino}. `
         + 'Su mercancía está bloqueada hasta que se reciba o se anule.',
       url: '/bodega', n: sinRecibir.total,

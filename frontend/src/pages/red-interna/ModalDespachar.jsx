@@ -245,9 +245,14 @@ function PanelAccesorios({ yaEnLista, onAgregar, onCerrar }) {
 // demás —el escáner, los valores, la revisión de destino— funciona igual.
 export function ModalDespachar({
   locales, itemsIniciales = null, descartados = [], pedido = null, onCerrar, onListo,
+  // El local que ya se eligió en «¿A dónde va?» del carrito (traslados entre
+  // sedes propias). Ausente, todo igual que antes.
+  destinoInicial = null,
 }) {
   const [destino,     setDestino]     = useState(
-    pedido ? Number(pedido.sucursal_id) : locales.length === 1 ? locales[0].id : null);
+    pedido ? Number(pedido.sucursal_id)
+      : destinoInicial && locales.some((l) => Number(l.id) === Number(destinoInicial)) ? Number(destinoInicial)
+        : locales.length === 1 ? locales[0].id : null);
   const [items,       setItems]       = useState(
     () => (itemsIniciales || []).map((i) => conValorInicial(i)));
   // Lista de precios aplicada a TODO el envío (feature opt-in). Null = cada

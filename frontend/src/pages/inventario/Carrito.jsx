@@ -10,7 +10,7 @@ import { InputMoneda } from '../../components/ui/InputMoneda';
 import { formatCOP } from '../../utils/formatters';
 import { getSucursales } from '../../api/sucursales.api';
 import api from '../../api/axios.config';
-import { getContextoRed, resolverItemsCarrito } from '../../api/redInterna.api';
+import { getContextoRed, resolverItemsCarrito, resolverTraslado } from '../../api/redInterna.api';
 import useCarritoStore from '../../store/carritoStore';
 import { useTarifas }   from '../../hooks/useTarifas';
 import { SelectorTarifa, TarifaItem } from '../../components/ui/SelectorTarifa';
@@ -21,6 +21,8 @@ import { ModalTraslado } from './ModalTraslado';
 import { ModalRutaRecogida } from './ModalRutaRecogida';
 import { ModalDespachar } from '../red-interna/ModalDespachar';
 import { ModalDevolver }  from '../red-interna/ModalDevolver';
+import { ModalTrasladar } from '../red-interna/traslados/ModalTrasladar';
+import { HojaEnviar }     from '../red-interna/traslados/HojaEnviar';
 import { ListaBorradores }      from './ListaBorradores';
 import { useBorradores }        from '../../hooks/useBorradores';
 import { unidadesLibres }       from '../../utils/reservas';
@@ -240,7 +242,10 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   const regalados       = unidadesObsequio(items);
 
   const [modalTraslado, setModalTraslado] = useState(false);
-  const [despacho,      setDespacho]      = useState(null); // { items, descartados }
+  const [despacho,      setDespacho]      = useState(null); // { items, descartados, destino }
+  // Traslados entre sedes propias: la hoja «¿A dónde va?» y el modal.
+  const [hojaEnviar,    setHojaEnviar]    = useState(false);
+  const [trasladoAbierto, setTrasladoAbierto] = useState(null); // { items, descartados, sin_variante, destino }
   const [devolucion,    setDevolucion]    = useState(false);
   const [errorRed,      setErrorRed]      = useState('');
 
@@ -292,6 +297,19 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
   });
   const esBodega = contextoRed?.es_bodega === true;
   const redLista = redActiva && !!contextoRed;
+  // Traslados entre sedes propias (opt-in: sin sedes propias `activos` es
+  // false y todo lo de abajo se pinta como siempre). A una sede propia no se le
+  // despacha, así que sale de la lista de locales del despacho.
+  const tr = contextoRed?.traslados || {};
+  const sedesPropias = tr.activos ? (tr.sedes_propias || []).map(Number) : [];
+  const localesDespacho = (contextoRed?.locales || []).filter((l) => !sedesPropias.includes(Number(l.id)));
+  const puedeTrasladar = redLista && tr.activos && tr.puede_trasladar && (tr.destinos || []).length > 0;
+  const esSedePropia = redLista && tr.es_sede_propia === true;
+  const itemsParaRed = () => items.map((i) => ({
+    tipo: i.tipo, serial_id: i.serial_id, producto_id: i.producto_id,
+    atributo_id: i.atributo_id ?? null, variante_id: i.variante_id ?? null,
+    cantidad: i.cantidad || 1, nombre: i.nombre,
+  }));
 
   // El carrito guarda el precio de VENTA; el despacho va al costo. El backend
   // re-resuelve cada ítem (y de paso valida stock, propiedad y disponibilidad).
@@ -316,22 +334,44 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
         precio_carrito: esObsequio(i) ? null : (i.precioFinal ?? i.precio ?? null),
       }))
     ).then((r) => r.data.data),
-    onSuccess: (data) => {
+    onSuccess: (data, destino) => {
+      setHojaEnviar(false);
       if (!data.items.length) {
         setErrorRed('Ninguno de los productos del carrito se puede despachar.');
         return;
       }
       setErrorRed('');
-      setDespacho(data);
+      setDespacho({ ...data, destino: destino || null });
     },
-    onError: (err) => setErrorRed(err.response?.data?.error || 'No se pudo preparar el despacho'),
+    onError: (err) => { setHojaEnviar(false); setErrorRed(err.response?.data?.error || 'No se pudo preparar el despacho'); },
+  });
+
+  // El traslado no lleva precio: el backend solo dice qué se puede mover,
+  // cuánto hay y qué producto con tallas necesita que se elija la talla.
+  const prepararTraslado = useMutation({
+    mutationFn: () => resolverTraslado(itemsParaRed()).then((r) => r.data.data),
+    onSuccess: (data, destino) => {
+      setHojaEnviar(false);
+      if (!data.items.length && !data.sin_variante.length) {
+        setErrorRed(data.descartados[0]
+          ? `Ninguno se puede trasladar: ${data.descartados[0].nombre} ${data.descartados[0].motivo}.`
+          : 'Ninguno de los productos del carrito se puede trasladar.');
+        return;
+      }
+      setErrorRed('');
+      setTrasladoAbierto({ ...data, destino: destino || null });
+    },
+    onError: (err) => { setHojaEnviar(false); setErrorRed(err.response?.data?.error || 'No se pudo preparar el traslado'); },
   });
 
   // Las explicaciones que antes vivían fijas bajo los botones. Se arman aquí
   // para que la ⓘ solo aparezca cuando de verdad hay algo que contar.
   const ayudas = [
-    redLista && !esBodega && contextoRed?.bodega_nombre
+    redLista && !esBodega && !esSedePropia && contextoRed?.bodega_nombre
       ? `Para despachar a un local, entra con la sucursal ${contextoRed.bodega_nombre}.`
+      : null,
+    esSedePropia && !puedeTrasladar
+      ? 'Para trasladar mercancía a otra sede, el administrador te da el permiso «Traslados» en Ajustes → Usuarios.'
       : null,
     borradoresActivos
       ? '¿El cliente vuelve luego? Guarda el borrador desde Factura o Préstamo, con sus datos incluidos.'
@@ -340,6 +380,9 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
 
   const cerrarYLimpiar = () => {
     setDespacho(null);
+    setTrasladoAbierto(null);
+    queryClient.invalidateQueries({ queryKey: ['red-traslados-panel'] });
+    queryClient.invalidateQueries({ queryKey: ['red-en-transito'] });
     setDevolucion(false);
     limpiarCarrito();
     queryClient.invalidateQueries({ queryKey: ['red-panel'] });
@@ -767,11 +810,35 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
                   estoy — despachar si soy la bodega, devolver si soy un local. */}
               {redLista && (
                 esBodega ? (
-                  <Button variant="secondary" className="flex-1 min-w-0"
-                    loading={prepararDespacho.isPending}
-                    onClick={() => prepararDespacho.mutate()}>
-                    <Truck size={16} /> Despachar
-                  </Button>
+                  // Con sedes propias y permiso de trasladar, el mismo hueco
+                  // pregunta «¿a dónde va?»: el destino decide si es traslado
+                  // o despacho. Sin eso, el botón de siempre.
+                  puedeTrasladar ? (
+                    <Button variant="secondary" className="flex-1 min-w-0"
+                      loading={prepararDespacho.isPending || prepararTraslado.isPending}
+                      onClick={() => { setErrorRed(''); setHojaEnviar(true); }}>
+                      <Truck size={16} /> Enviar
+                    </Button>
+                  ) : (
+                    <Button variant="secondary" className="flex-1 min-w-0"
+                      loading={prepararDespacho.isPending}
+                      onClick={() => prepararDespacho.mutate()}>
+                      <Truck size={16} /> Despachar
+                    </Button>
+                  )
+                ) : esSedePropia ? (
+                  // Una sede propia no tiene cuenta con la bodega: lo suyo se
+                  // mueve por traslado, nunca por «Devolver».
+                  puedeTrasladar ? (
+                    <Button variant="secondary" className="flex-1 min-w-0"
+                      loading={prepararTraslado.isPending}
+                      onClick={() => {
+                        setErrorRed('');
+                        prepararTraslado.mutate(tr.destinos.length === 1 ? tr.destinos[0].id : null);
+                      }}>
+                      <ArrowRightLeft size={16} /> Trasladar
+                    </Button>
+                  ) : null
                 ) : (
                   <Button variant="secondary" className="flex-1 min-w-0"
                     onClick={() => { setErrorRed(''); setDevolucion(true); }}>
@@ -831,9 +898,35 @@ export function Carrito({ onFacturar, onPrestar, onBorradorCargado, sinHeader = 
         <ModalTraslado open={modalTraslado} onClose={() => setModalTraslado(false)} />
       )}
 
+      {hojaEnviar && (
+        <HojaEnviar
+          sedes={tr.destinos || []}
+          locales={localesDespacho}
+          cargando={prepararTraslado.isPending ? prepararTraslado.variables
+            : prepararDespacho.isPending ? prepararDespacho.variables : null}
+          onTrasladar={(id) => prepararTraslado.mutate(id)}
+          onDespachar={(id) => prepararDespacho.mutate(id)}
+          onCerrar={() => setHojaEnviar(false)}
+        />
+      )}
+
+      {trasladoAbierto && (
+        <ModalTrasladar
+          destinos={tr.destinos || []}
+          destinoInicial={trasladoAbierto.destino}
+          itemsIniciales={trasladoAbierto.items}
+          descartados={trasladoAbierto.descartados}
+          sinVariante={trasladoAbierto.sin_variante}
+          confirmar={!!tr.confirmar}
+          onCerrar={() => setTrasladoAbierto(null)}
+          onListo={cerrarYLimpiar}
+        />
+      )}
+
       {despacho && (
         <ModalDespachar
-          locales={contextoRed?.locales || []}
+          locales={tr.activos ? localesDespacho : (contextoRed?.locales || [])}
+          destinoInicial={despacho.destino}
           itemsIniciales={despacho.items}
           descartados={despacho.descartados}
           onCerrar={() => setDespacho(null)}

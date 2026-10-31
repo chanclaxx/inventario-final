@@ -37,6 +37,16 @@ const CLAVES = {
   moraPlazo:         'red_interna_mora_plazo_default_dias',
   moraTecho:         'red_interna_mora_tope_tasa_mensual',
   moraAvisoPrevio:   'red_interna_mora_aviso_previo_dias',
+  // Traslados entre sedes propias (20261030_traslados_internos.sql). Las sedes
+  // de la lista no se DESPACHAN: se les TRASLADA, sin cuenta ni deuda. Arreglo
+  // JSON de ids de sucursal. Ausente o vacío = ninguna: todo igual que antes.
+  sedesPropias:      'red_interna_sedes_propias',
+  // '1' = el destino confirma lo que le llegó. Ausente = entra directo
+  // (decisión del usuario, 30-oct-2026).
+  trasladosConfirmar:'red_interna_traslados_confirmar',
+  // 'bodega' (por defecto) = solo bodega ↔ sede propia; 'entre_sedes' = además
+  // entre dos sedes propias. Un local con cuenta nunca entra en un traslado.
+  trasladosRutas:    'red_interna_traslados_rutas',
 };
 
 const DEFAULTS = {
@@ -111,6 +121,12 @@ const getConfigRed = async (negocioId) => {
     // (`hayMoraEnvios`) también: pactar un plazo que la recepción no tiene
     // dónde guardar sería prometer una mora que nunca se cobraría.
     mora: require('../modules/red-interna/redInterna.mora').leerConfigMoraRed(map),
+    // La bodega nunca es sede propia: es el origen de todo. Se filtra aquí
+    // también por si quedó guardada de una configuración anterior.
+    sedes_propias:       _idsDeLista(map[CLAVES.sedesPropias])
+      .filter((id) => id !== (Number.isInteger(bodegaId) ? bodegaId : null)),
+    traslados_confirmar: map[CLAVES.trasladosConfirmar] === '1',
+    traslados_rutas:     map[CLAVES.trasladosRutas] === 'entre_sedes' ? 'entre_sedes' : 'bodega',
   };
 
   _cache.set(negocioId, { valor, expira: Date.now() + TTL_MS });

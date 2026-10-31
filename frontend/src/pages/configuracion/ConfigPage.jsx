@@ -1876,6 +1876,10 @@ export default function ConfigPage() {
     mutationFn: (payload) => api.put('/config', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['config'], exact: false });
+      // Las sedes propias cambian qué botón pinta el carrito (contexto de la
+      // red, cacheado 5 min) y el estado de cada sede en esta misma pantalla.
+      queryClient.invalidateQueries({ queryKey: ['red-contexto'] });
+      queryClient.invalidateQueries({ queryKey: ['red-traslados-sedes'] });
       setForm((f) => {
         const siguiente = { ...f };
         delete siguiente['pin_eliminacion'];

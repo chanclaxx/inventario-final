@@ -16,7 +16,10 @@ export function ChipEnCamino({ reserva, stock, tipo = 'cantidad', className = ''
   if (!reserva?.cantidad) return null;
 
   const envio = reserva.envios?.[0];
-  const doc = envio ? `${envio.tipo === 'devolucion' ? 'devolución' : 'envío'} #${envio.numero}` : 'un envío';
+  // Un traslado entre sedes propias lleva su propio consecutivo («T-12»).
+  const nombreDoc = (e, mayus) => (e.tipo === 'traslado' ? `${mayus ? 'Traslado' : 'traslado'} T-${e.numero}`
+    : `${e.tipo === 'devolucion' ? (mayus ? 'Devolución' : 'devolución') : (mayus ? 'Envío' : 'envío')} #${e.numero}`);
+  const doc = envio ? nombreDoc(envio, false) : 'un envío';
   const libres = stock != null ? Math.max(0, Number(stock) - Number(reserva.cantidad)) : null;
 
   const texto = tipo === 'serial'
@@ -25,7 +28,7 @@ export function ChipEnCamino({ reserva, stock, tipo = 'cantidad', className = ''
       + (libres == null ? '' : ` · ${libres} libre${libres !== 1 ? 's' : ''}`);
 
   const donde = (reserva.envios || [])
-    .map((e) => `${e.tipo === 'devolucion' ? 'Devolución' : 'Envío'} #${e.numero} hacia ${e.destino}`)
+    .map((e) => `${nombreDoc(e, true)} hacia ${e.destino}`)
     .join(' · ');
 
   return (

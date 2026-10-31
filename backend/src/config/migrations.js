@@ -1827,6 +1827,21 @@ const aplicarMigraciones = async (client) => {
     if (sqlAnulacion) await migrar(client, 'Servicio técnico: anulación', sqlAnulacion);
   }
 
+  // Red interna: traslados entre sedes propias (remisión tipo 'traslado'). Ver
+  // migrations/20261030_traslados_internos.sql. Bloque PROPIO: si fallara, los
+  // despachos siguen exactamente igual y `hayTrasladosInternos()` apaga la
+  // función (el CHECK viejo rechazaría el tipo nuevo).
+  {
+    let sqlTraslados = null;
+    try {
+      sqlTraslados = require('fs').readFileSync(
+        require('path').join(__dirname, '../../migrations/20261030_traslados_internos.sql'), 'utf8');
+    } catch (err) {
+      console.error('⚠️  Traslados internos: no se encontró el archivo de migración —', err.message);
+    }
+    if (sqlTraslados) await migrar(client, 'Red interna: traslados entre sedes propias', sqlTraslados);
+  }
+
   // Aplicadas manualmente en producción:
   // - lineas_traslado: revertida_por_usuario_id, fecha_reversion
   // - traslados: revertido_por_usuario_id, fecha_reversion

@@ -17,6 +17,13 @@ const { copiarCodigoSiLibre }    = require('../../utils/codigoAuto.util');
 const { exigirNoEnTecnico }      = require('../../utils/serialEnTecnico.util');
 const { exigirNoEnGarantia }     = require('../../utils/serialEnGarantia.util');
 const precioMinimo            = require('../../utils/precioMinimo.util');
+const reglasTraslado          = require('./redInterna.traslados.reglas');
+const { hayTrasladosInternos } = require('../../config/columnas');
+
+// La config de la red tal como la ven las reglas de traslado: sin la migración
+// (20261030) no hay sedes propias, pase lo que pase en Ajustes. Así una lista
+// guardada contra una base vieja no deja a una sede sin despacho NI traslado.
+const _redTraslados = (red) => (hayTrasladosInternos() ? red : { ...red, sedes_propias: [] });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RED INTERNA — lógica de negocio
@@ -826,6 +833,11 @@ const despachar = async (req, {
     throw { status: 400, message: 'Agrega al menos un producto' };
   }
   await _verificarSucursal(null, destinoId, negocioId);
+  // A una sede propia no se le despacha: le crearía una deuda consigo misma.
+  // Sin sedes propias configuradas (el caso de todos los negocios hasta hoy)
+  // esto no hace nada.
+  const despachoInvalido = reglasTraslado.motivoDespachoInvalido(_redTraslados(req.red), destinoId);
+  if (despachoInvalido) throw { status: 409, code: 'SEDE_PROPIA', message: despachoInvalido };
 
   // El plazo de pago del envío (opt-in). `mora` ausente = el que el negocio
   // tenga por defecto; `null` = sin plazo, a propósito. Se resuelve ANTES de
@@ -905,9 +917,11 @@ const despachar = async (req, {
         // Lo mismo con una garantía abierta con el proveedor.
         await exigirNoEnGarantia(client, s.id, s.imei);
 
+        // Un traslado YA RECIBIDO no ata al equipo: a diferencia de una
+        // entrega, no lo deja en la cuenta de nadie (ver repo.SQL_LINEA_VIVA).
         const { rows: dup } = await client.query(`
           SELECT lr.id FROM lineas_remision lr
-          WHERE lr.serial_id = $1 AND lr.estado_linea IN ('Pendiente', 'Recibida')
+          WHERE lr.serial_id = $1 AND ${repo.SQL_LINEA_VIVA('lr')}
         `, [s.id]);
         if (dup.length) {
           throw { status: 409, message: `El equipo ${s.imei} ya está en otra remisión activa` };
@@ -1130,6 +1144,15 @@ const _ejecutarRecepcion = async (client, {
   const setRecibidas = new Set(recibidasIds.map(Number));
   const origenId  = remision.sucursal_origen_id;
   const destinoId = remision.sucursal_destino_id;
+  // Un TRASLADO entre sedes propias (20261030) recorre exactamente el mismo
+  // camino —mismo nodo, misma referencia de destino, mismo candado— con tres
+  // diferencias, y las tres son plata: el costo que llega es el REAL de la
+  // sucursal que lo manda (`costo_origen`), no un precio de despacho; no hay
+  // plazo de pago, y no se aplica saldo a favor porque no hay cuenta.
+  const esTraslado = remision.tipo === 'traslado';
+  const etiquetaDoc = esTraslado
+    ? `Traslado T-${remision.numero ?? remision.id}`
+    : `Remisión #${remision.numero ?? remision.id}`;
 
   // La mercancía de este envío está RESERVADA (20260926_reserva_transito.sql):
   // los triggers no dejan bajar ese stock ni mover esos IMEI. Recibir es
@@ -1144,7 +1167,7 @@ const _ejecutarRecepcion = async (client, {
     sucursal_origen_id:  origenId,
     sucursal_destino_id: destinoId,
     usuario_id: usuarioId,
-    notas: `Remisión #${remision.numero ?? remision.id}`,
+    notas: etiquetaDoc,
   });
 
   const idsOk = [], idsFaltante = [];
@@ -1220,14 +1243,21 @@ const _ejecutarRecepcion = async (client, {
       // Costo promedio ponderado EN EL NODO del destino. El flujo viejo de
       // traslados no lo hace y desvía el costo; aquí importa doble, porque de
       // ese costo salen la utilidad que reporta el local y la base de su tarifa.
+      //
+      // En un traslado lo que llega vale lo que le costó a quien lo manda. Sin
+      // costo registrado en el origen no se inventa uno: el destino conserva el
+      // suyo (mezclarlo con un 0 bajaría el promedio de lo que ya tenía).
       const previo = await _stockYCostoNodo(client, nodoDestino);
-      const nuevoCosto = calcularCostoPromedio(
-        previo.stock, previo.costo, recibida, _num(l.valor_interno)
-      );
+      const costoEntra = esTraslado
+        ? (l.costo_origen == null ? null : _num(l.costo_origen))
+        : _num(l.valor_interno);
+      const nuevoCosto = costoEntra == null
+        ? previo.costo
+        : calcularCostoPromedio(previo.stock, previo.costo, recibida, costoEntra);
 
       await _moverStockNodo(client, nodoOrigen, -recibida);
       await _moverStockNodo(client, nodoDestino,  recibida);
-      await _fijarCostoNodo(client, nodoDestino, nuevoCosto);
+      if (nuevoCosto != null) await _fijarCostoNodo(client, nodoDestino, nuevoCosto);
 
       await client.query(
         `UPDATE lineas_remision
@@ -1239,14 +1269,18 @@ const _ejecutarRecepcion = async (client, {
       await trasladosRepo.insertarHistorialEnTransaccion(client, {
         producto_id: l.producto_origen_id, sucursal_id: origenId,
         atributo_id: nodoOrigen.atributoId, variante_id: nodoOrigen.varianteId,
-        cantidad: -recibida, costo_unitario: _num(l.valor_interno),
-        notas: `Remisión #${remision.numero ?? remision.id} → ${destinoId}`,
+        cantidad: -recibida, costo_unitario: esTraslado ? costoEntra : _num(l.valor_interno),
+        notas: esTraslado
+          ? `${etiquetaDoc} → ${remision.sucursal_destino_nombre || destinoId}`
+          : `Remisión #${remision.numero ?? remision.id} → ${destinoId}`,
       });
       await trasladosRepo.insertarHistorialEnTransaccion(client, {
         producto_id: productoDestinoId, sucursal_id: destinoId,
         atributo_id: nodoDestino.atributoId, variante_id: nodoDestino.varianteId,
-        cantidad: recibida, costo_unitario: _num(l.valor_interno),
-        notas: `Remisión #${remision.numero ?? remision.id} ← bodega`,
+        cantidad: recibida, costo_unitario: esTraslado ? costoEntra : _num(l.valor_interno),
+        notas: esTraslado
+          ? `${etiquetaDoc} ← ${remision.sucursal_origen_nombre || origenId}`
+          : `Remisión #${remision.numero ?? remision.id} ← bodega`,
       });
       await trasladosRepo.insertarLineaTraslado(client, {
         traslado_id: traslado.id, tipo: 'cantidad',
@@ -1282,7 +1316,7 @@ const _ejecutarRecepcion = async (client, {
   // La deuda nace ahora, y con ella el plazo: hoy + los días pactados al
   // despachar. Contar desde el despacho le quitaría al local los días que el
   // envío pasó en camino, que no son culpa suya.
-  const fechaLimite = moraRed.fechaLimiteAlRecibir(remision);
+  const fechaLimite = esTraslado ? null : moraRed.fechaLimiteAlRecibir(remision);
   if (fechaLimite) {
     await client.query(`UPDATE remisiones SET fecha_limite = $2 WHERE id = $1`,
       [remision.id, fechaLimite]);
@@ -1293,11 +1327,13 @@ const _ejecutarRecepcion = async (client, {
   // mismo: es lo que el cliente pidió, "que se descuente del siguiente envío".
   // Va dentro de esta transacción para que dos recepciones al tiempo no se
   // repartan el mismo crédito.
-  const favor = await _aplicarSaldoAFavor(client, {
-    negocioId,
-    sucursalId: Number(remision.sucursal_destino_id),
-    usuarioId,
-  });
+  const favor = esTraslado
+    ? { aplicado: 0 }
+    : await _aplicarSaldoAFavor(client, {
+        negocioId,
+        sucursalId: Number(remision.sucursal_destino_id),
+        usuarioId,
+      });
 
   return {
     traslado_id: traslado.id, recibidas: hubo, faltantes: idsFaltante.length,
@@ -1343,6 +1379,12 @@ const recibir = async (req, remisionId, { lineas_recibidas, cantidades } = {}) =
 
     await client.query('COMMIT');
     const recibida = { ...(await repo.findRemisionById(negocioId, remisionId)), ...res };
+
+    // Un traslado no genera deuda: se avisa sin plata, con su propio número.
+    if (remision.tipo === 'traslado') {
+      require('./redInterna.traslados').avisarRecibido(negocioId, remision, res);
+      return recibida;
+    }
 
     // Recibir GENERA LA DEUDA desde el cambio de modelo, y lo puede hacer un
     // vendedor. Que la deuda nazca en silencio sería el peor de los descuidos:
@@ -1560,6 +1602,9 @@ const devolver = async (req, { lineas, notas, clave_idempotencia, motivo }) => {
   if (!Array.isArray(lineas) || !lineas.length) {
     throw { status: 400, message: 'Selecciona al menos un producto para devolver' };
   }
+  // Una sede propia no tiene cuenta que bajar: lo suyo vuelve por traslado.
+  const devolucionInvalida = reglasTraslado.motivoDevolucionInvalida(_redTraslados(req.red), origenId);
+  if (devolucionInvalida) throw { status: 409, code: 'SEDE_PROPIA', message: devolucionInvalida };
   if (clave_idempotencia) {
     const previa = await repo.findRemisionPorClave(clave_idempotencia);
     if (previa) return { ...previa, repetido: true };
@@ -3077,6 +3122,7 @@ const getPanelLocal = async (req) => {
     }),
   ]);
   const salida = { es_bodega: false, sucursal_id: sucursalId, ...estado,
+                   es_sede_propia: reglasTraslado.esSedePropia(_redTraslados(req.red), sucursalId),
                    por_recibir: porRecibir, remesas,
                    devoluciones_enviadas: devolucionesEnviadas,
                    // Lo que este local pidió y la bodega todavía no ha
@@ -3094,8 +3140,12 @@ const getPanelBodega = async (req) => {
   const bodegaId  = Number(req.red.bodega_id);
 
   const sucursales = (await repo.getSucursales(negocioId)).filter((s) => s.id !== bodegaId);
+  const redT = _redTraslados(req.red);
   const locales = await Promise.all(sucursales.map(async (s) => ({
     sucursal_id: s.id, sucursal_nombre: s.nombre,
+    // Una sede propia sigue saliendo aquí (con su cuenta vieja en $0), marcada:
+    // la pantalla la pinta aparte, sin deuda, y con sus traslados.
+    es_sede_propia: reglasTraslado.esSedePropia(redT, s.id),
     ...(await getEstadoLocal(negocioId, s.id)),
   })));
 
@@ -3613,8 +3663,8 @@ const getRemision = async (req, id) => {
     },
     // Con la remisión en tránsito el valor se edita directo; ya recibida, solo
     // por nota de corrección (nunca se reescribe la historia en silencio).
-    puede_editar_valores: remision.estado === 'En transito' && req.esBodega,
-    puede_corregir:       remision.estado !== 'En transito' && req.esBodega,
+    puede_editar_valores: remision.tipo !== 'traslado' && remision.estado === 'En transito' && req.esBodega,
+    puede_corregir:       remision.tipo !== 'traslado' && remision.estado !== 'En transito' && req.esBodega,
   };
 
   if (await _puedeVerCostos(req)) return salida;
@@ -3675,6 +3725,11 @@ const corregirValorLinea = async (req, lineaId, { valor_nuevo, motivo }) => {
 
     if (l.remision_estado === 'Anulada') {
       throw { status: 409, message: 'La remisión está anulada' };
+    }
+    // Un traslado entre sedes propias no tiene valor: darle uno a una línea
+    // le abriría una cuenta a quien no debe nada.
+    if (l.remision_tipo === 'traslado') {
+      throw { status: 409, message: 'Un traslado entre sedes no lleva valor: no hay nada que corregir' };
     }
     const anterior = _num(l.valor_interno);
     if (Math.abs(anterior - nuevo) < 0.01) {
@@ -4030,6 +4085,30 @@ const getContexto = async (req) => {
     // condición y cuántos días) y el de cambiar el plazo. Solo lo que se pinta:
     // condiciones, la de por defecto y el plazo sugerido.
     mora: _configMoraPublica(req.red?.mora),
+    // Traslados entre sedes propias. Sin sedes propias (todos los negocios
+    // hasta hoy) `activos` es false y el carrito pinta lo de siempre.
+    traslados: _contextoTraslados(req, todas),
+  };
+};
+
+// Qué puede hacer con los traslados quien está parado en esta sucursal. Los
+// destinos salen de las MISMAS reglas que valida el backend al trasladar: la
+// pantalla nunca ofrece uno que después se rechace.
+const _contextoTraslados = (req, todas) => {
+  const red = _redTraslados(req.red);
+  const sucursalId = Number(req.sucursal_id);
+  const activos = reglasTraslado.trasladosActivos(red);
+  const { tieneAcceso } = require('../../config/modulos');
+  return {
+    activos,
+    es_sede_propia: activos && reglasTraslado.esSedePropia(red, sucursalId),
+    sedes_propias:  activos ? red.sedes_propias : [],
+    confirmar:      !!red.traslados_confirmar,
+    rutas:          red.traslados_rutas || 'bodega',
+    // El permiso es el módulo «Traslados» de Ajustes → Usuarios: el mismo que
+    // ya daba los traslados libres, así nadie gana ni pierde nada.
+    puede_trasladar: activos && tieneAcceso(req.user, 'traslados'),
+    destinos: activos ? reglasTraslado.destinosTraslado(red, sucursalId, todas) : [],
   };
 };
 
@@ -4184,4 +4263,19 @@ module.exports = {
   previsualizarDestino, catalogoReferencias,
   getSucursalesRed, getContexto, getMovimientosCuenta, getEnTransito,
   ETIQUETAS_ESTADO,
+  // Piezas internas que reusa el módulo de traslados entre sedes propias
+  // (redInterna.traslados.js). No son API: el traslado no tiene un motor de
+  // inventario propio, usa el mismo de la remisión.
+  _internos: {
+    redTraslados: _redTraslados,
+    ejecutarRecepcion: (...a) => _ejecutarRecepcion(...a),
+    resolverNodoOrigen: (...a) => _resolverNodoOrigen(...a),
+    comprometidoSinRecibir: (...a) => _comprometidoSinRecibir(...a),
+    destinoElegido: (...a) => _destinoElegido(...a),
+    exigirFormaCompatible: (...a) => _exigirFormaCompatible(...a),
+    verificarSucursal: (...a) => _verificarSucursal(...a),
+    imputarFIFO: (...a) => _imputarFIFO(...a),
+    aplicarSaldoAFavor: (...a) => _aplicarSaldoAFavor(...a),
+    estadoLocal: (...a) => _estadoLocal(...a),
+  },
 };

@@ -58,6 +58,7 @@ const detectarColumnas = async () => {
   await _detectarReclamosGarantia();
   await _detectarReclamosFase2();
   await _detectarServicioV2();
+  await _detectarTrasladosInternos();
   return _ubicacionDisponible;
 };
 
@@ -731,6 +732,26 @@ const _setTecnicosServicioDisponible = (v) => { _tecnicosServicioDisponible = !!
 const hayServicioAnulacion = () => _servicioAnulacionDisponible;
 const _setServicioAnulacionDisponible = (v) => { _servicioAnulacionDisponible = !!v; };
 
+// Traslados entre sedes propias (20261030): el CHECK de `remisiones.tipo` ya
+// admite 'traslado'. Sin él, crear un traslado reventaría contra la base: la
+// función se apaga y los despachos siguen igual que siempre.
+let _trasladosInternosDisponible = false;
+const _detectarTrasladosInternos = async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT EXISTS (SELECT 1 FROM pg_constraint
+                      WHERE conname = 'remisiones_tipo_chk'
+                        AND pg_get_constraintdef(oid) LIKE '%traslado%') AS chk`
+    );
+    _trasladosInternosDisponible = !!rows[0]?.chk;
+  } catch (err) {
+    _trasladosInternosDisponible = false;
+    console.error('⚠️  No se pudo verificar los traslados internos (quedan apagados):', err.message);
+  }
+};
+const hayTrasladosInternos = () => _trasladosInternosDisponible;
+const _setTrasladosInternosDisponible = (v) => { _trasladosInternosDisponible = !!v; };
+
 // Solo para pruebas: permite simular una BD sin la columna sin tocar la BD real.
 const _setUbicacionDisponible  = (valor) => { _ubicacionDisponible  = !!valor; };
 const _setCatalogoDisponible   = (valor) => { _catalogoDisponible   = !!valor; };
@@ -768,4 +789,5 @@ module.exports = {
   hayServicioAbonosV2, _setServicioAbonosV2Disponible,
   hayTecnicosServicio, _setTecnicosServicioDisponible,
   hayServicioAnulacion, _setServicioAnulacionDisponible,
+  hayTrasladosInternos, _setTrasladosInternosDisponible,
 };

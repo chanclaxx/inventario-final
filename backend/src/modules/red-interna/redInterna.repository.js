@@ -1902,6 +1902,16 @@ const findNodoCantidadById = async (negocioId, sucursalOrigenId, { productoId, a
 };
 
 // Serial por id (para resolver ítems que vienen del carrito, donde no hay IMEI).
+// ¿La línea todavía ATA al equipo a una remisión? Una pendiente siempre (va en
+// camino); una recibida solo si es de una entrega o una devolución, que dejan
+// la unidad dentro de una cuenta. Un TRASLADO recibido (20261030) no: entre
+// sedes propias no hay cuenta, y si contara, un equipo que fue y volvió no se
+// podría volver a mover nunca. Para entregas y devoluciones es exactamente la
+// condición de siempre (IS NOT DISTINCT FROM: con un `remision_tipo` NULL la
+// comparación simple daría NULL y la línea dejaría de contar como viva).
+const SQL_LINEA_VIVA = (a) => `(${a}.estado_linea IN ('Pendiente', 'Recibida')
+  AND NOT (${a}.estado_linea = 'Recibida' AND ${a}.remision_tipo IS NOT DISTINCT FROM 'traslado'))`;
+
 const findSerialById = async (negocioId, sucursalOrigenId, serialId) => {
   const { rows } = await pool.query(`
     SELECT s.id AS serial_id, s.imei, s.vendido, s.prestado,
@@ -1911,7 +1921,7 @@ const findSerialById = async (negocioId, sucursalOrigenId, serialId) => {
            ps.id AS producto_id, ps.nombre, ps.marca, ps.modelo,
            EXISTS (
              SELECT 1 FROM lineas_remision lr
-             WHERE lr.serial_id = s.id AND lr.estado_linea IN ('Pendiente', 'Recibida')
+             WHERE lr.serial_id = s.id AND ${SQL_LINEA_VIVA('lr')}
            ) AS ya_remisionado
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
@@ -1930,7 +1940,7 @@ const buscarSerialDisponible = async (negocioId, sucursalOrigenId, imei) => {
            ps.id AS producto_id, ps.nombre, ps.marca, ps.modelo, ps.linea_id,
            EXISTS (
              SELECT 1 FROM lineas_remision lr
-             WHERE lr.serial_id = s.id AND lr.estado_linea IN ('Pendiente', 'Recibida')
+             WHERE lr.serial_id = s.id AND ${SQL_LINEA_VIVA('lr')}
            ) AS ya_remisionado
     FROM seriales s
     JOIN productos_serial ps ON ps.id = s.producto_id
@@ -2273,6 +2283,7 @@ const getValorConsignacionSeriales = async (negocioId, sucursalId, serialIds) =>
 };
 
 module.exports = {
+  SQL_LINEA_VIVA,
   // Definiciones compartidas de "qué le genera cargo al local" y "qué abono
   // cuenta de verdad". Las exporta para que los REPORTES midan la venta de la
   // bodega con la misma vara con la que el local ve su deuda: dos definiciones

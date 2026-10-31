@@ -184,3 +184,20 @@ export const getSalud = () => api.get('/red-interna/salud');
 // recibir): está bloqueado hasta que se reciba o se anule. Lo pinta el chip
 // «En camino» del inventario.
 export const getEnTransito = () => api.get('/red-interna/en-transito');
+
+// ── Traslados entre sedes propias (sin cuenta) ───────────────────────────────
+// Un traslado es una remisión de tipo 'traslado': se RECIBE con la misma
+// `recibirRemision` de siempre y se imprime con el mismo PDF. Lo que cambia es
+// que no lleva un peso: ninguna de estas respuestas trae costo ni precio.
+export const getPanelTraslados   = () => api.get('/red-interna/traslados/panel');
+export const listarTraslados     = (params = {}) => api.get('/red-interna/traslados', { params });
+export const getTraslado         = (id) => api.get(`/red-interna/traslados/${id}`);
+export const resolverTraslado    = (items) => api.post('/red-interna/traslados/resolver', { items });
+export const buscarParaTraslado  = (q) => api.get('/red-interna/traslados/buscar', { params: { q } });
+// Mismo tope que despachar: con «entra directo» se recibe en la misma petición.
+export const trasladar           = (payload) => api.post('/red-interna/traslados', payload, { timeout: 180000 });
+export const anularTraslado      = (id) => api.post(`/red-interna/traslados/${id}/anular`);
+// Ajustes → Bodega: qué sedes pueden pasar a «propia» y cerrar su cuenta en $0.
+export const getSedesTraslado    = () => api.get('/red-interna/traslados/sedes');
+export const cerrarCuentaSede    = (sucursalId, nota) =>
+  api.post(`/red-interna/traslados/sedes/${sucursalId}/cerrar-cuenta`, { nota });

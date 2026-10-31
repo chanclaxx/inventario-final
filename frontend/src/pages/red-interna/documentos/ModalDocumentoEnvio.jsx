@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useConfigDocumento } from '../../../hooks/useConfigDocumento';
-import { Printer, FileDown, Share2, Loader2, Truck, Undo2 } from 'lucide-react';
+import { Printer, FileDown, Share2, Loader2, Truck, Undo2, ArrowRightLeft } from 'lucide-react';
 import { Modal }   from '../../../components/ui/Modal';
 import { Spinner } from '../../../components/ui/Spinner';
 import api from '../../../api/axios.config';
@@ -32,27 +32,31 @@ const ESTADO = {
 const ESTADO_LINEA = { Pendiente: 'En camino', Recibida: 'Recibido', Faltante: 'NO LLEGÓ', Devuelta: 'DEVUELTO' };
 
 const numeroDe = (r) => r?.numero ?? r?.id;
+// Un traslado entre sedes propias tiene su propio consecutivo: «T-12».
+const etiquetaNumero = (r) => (r?.tipo === 'traslado' ? `T-${numeroDe(r)}` : `#${numeroDe(r)}`);
 
 // ─── Ticket térmico ──────────────────────────────────────────────────────────
 
 function EnvioTermico({ r, config, onClose }) {
   const esDevolucion = r.tipo === 'devolucion';
-  const verValores = !r.costos_ocultos;
+  // Traslado entre sedes propias: la guía viaja sin un solo valor y sin cuenta.
+  const esTraslado = r.tipo === 'traslado';
+  const verValores = !r.costos_ocultos && !esTraslado;
   const s = r.resumen || {};
   return (
     <DocumentoTermico
       id="envio-red-termico"
       config={config}
-      tituloModal={esDevolucion ? 'Devolución lista para imprimir' : 'Guía de envío lista para imprimir'}
+      tituloModal={esTraslado ? 'Guía de traslado lista para imprimir' : esDevolucion ? 'Devolución lista para imprimir' : 'Guía de envío lista para imprimir'}
       descripcionModal="Se enviará a la impresora térmica."
       onClose={onClose}
     >
       {({ fuenteSize }) => (
         <>
-          <EncabezadoNegocio config={config} titulo={esDevolucion ? 'DEVOLUCIÓN A BODEGA' : 'ENVÍO DE MERCANCÍA'} fuenteSize={fuenteSize} />
-          <Fila label="No." valor={`#${numeroDe(r)}`} />
+          <EncabezadoNegocio config={config} titulo={esTraslado ? 'TRASLADO ENTRE SEDES' : esDevolucion ? 'DEVOLUCIÓN A BODEGA' : 'ENVÍO DE MERCANCÍA'} fuenteSize={fuenteSize} />
+          <Fila label="No." valor={etiquetaNumero(r)} />
           <Fila label="Estado:" valor={ESTADO[r.estado]?.texto || r.estado} />
-          <Fila label="Despacho:" valor={formatFechaHora(r.fecha_emision)} />
+          <Fila label={esTraslado ? 'Enviado:' : 'Despacho:'} valor={formatFechaHora(r.fecha_emision)} />
           {r.fecha_recepcion && <Fila label="Recibido:" valor={formatFechaHora(r.fecha_recepcion)} />}
           <Divisor />
           <Fila label="De:" valor={r.sucursal_origen_nombre} negrita />
@@ -81,7 +85,11 @@ function EnvioTermico({ r, config, onClose }) {
             );
           })}
           <Divisor />
-          {esDevolucion ? (
+          {esTraslado ? (
+            <div className="centrado" style={{ fontSize: '10px' }}>
+              Movimiento interno entre sedes del mismo negocio: no genera cuenta ni deuda.
+            </div>
+          ) : esDevolucion ? (
             <Fila label="Acreditado:" negrita
               valor={r.estado === 'Recibida' || r.estado === 'Parcial' ? formatCOP(s.acreditado) : 'Pendiente'} />
           ) : r.estado === 'En transito' ? (
@@ -105,13 +113,13 @@ function EnvioTermico({ r, config, onClose }) {
           )}
           {/* El plazo de pago es condición del documento: va en la guía que
               viaja con la mercancía, donde el local la firma. */}
-          {!esDevolucion && r.mora?.aplica && (
+          {!esDevolucion && !esTraslado && r.mora?.aplica && (
             <div style={{ fontSize: '10px', marginTop: '4px' }}>
               Plazo de pago: vence {String(r.mora.fecha_limite).split('-').reverse().join('/')}
               {r.mora.condicion?.nombre ? ` · mora ${r.mora.condicion.nombre}: ${r.mora.descripcion}` : ''}
             </div>
           )}
-          {!esDevolucion && !r.mora?.aplica && r.mora?.plazo_dias && (
+          {!esDevolucion && !esTraslado && !r.mora?.aplica && r.mora?.plazo_dias && (
             <div style={{ fontSize: '10px', marginTop: '4px' }}>
               Plazo de pago: {r.mora.plazo_dias} días desde que se reciba
               {r.mora.condicion?.nombre ? ` · mora ${r.mora.condicion.nombre}: ${r.mora.descripcion}` : ''}
@@ -154,7 +162,8 @@ export function ModalDocumentoEnvio({ remisionId, onClose }) {
   if (vista === 'pos' && r) return <EnvioTermico r={r} config={config} onClose={onClose} />;
 
   const esDevolucion = r?.tipo === 'devolucion';
-  const titulo = esDevolucion ? 'Imprimir devolución' : 'Imprimir envío';
+  const esTraslado = r?.tipo === 'traslado';
+  const titulo = esTraslado ? 'Imprimir traslado' : esDevolucion ? 'Imprimir devolución' : 'Imprimir envío';
   if (isLoading || isError || !r) {
     return (
       <Modal open onClose={onClose} title={titulo} size="sm">
@@ -165,16 +174,16 @@ export function ModalDocumentoEnvio({ remisionId, onClose }) {
     );
   }
 
-  const nombreDoc = `${esDevolucion ? 'Devolución' : 'Envío'} #${numeroDe(r)}`;
+  const nombreDoc = `${esTraslado ? 'Traslado' : esDevolucion ? 'Devolución' : 'Envío'} ${etiquetaNumero(r)}`;
   const pdf = {
     ruta: `/red-interna/remisiones/${r.id}/pdf`,
-    nombreArchivo: `${esDevolucion ? 'devolucion' : 'envio'}-${numeroDe(r)}.pdf`,
+    nombreArchivo: `${esTraslado ? 'traslado-T' : esDevolucion ? 'devolucion-' : 'envio-'}${numeroDe(r)}.pdf`,
     titulo: `${nombreDoc} · ${r.sucursal_origen_nombre} a ${r.sucursal_destino_nombre}`,
     texto: `${nombreDoc} de ${r.sucursal_origen_nombre} para ${r.sucursal_destino_nombre}`,
   };
   const est = ESTADO[r.estado] || { texto: r.estado, clase: 'bg-gray-100 text-gray-500' };
   const s = r.resumen || {};
-  const Icono = esDevolucion ? Undo2 : Truck;
+  const Icono = esTraslado ? ArrowRightLeft : esDevolucion ? Undo2 : Truck;
   const unidades = (r.lineas || []).reduce(
     (n, l) => n + (l.tipo === 'cantidad' ? Number(l.cantidad_recibida ?? l.cantidad ?? 0) : 1), 0);
 
@@ -194,7 +203,10 @@ export function ModalDocumentoEnvio({ remisionId, onClose }) {
           <p className="text-xs text-gray-500">
             {(r.lineas || []).length} producto(s) · {unidades} unidad(es)
           </p>
-          {!esDevolucion && r.estado !== 'En transito' && r.estado !== 'Anulada' && (
+          {esTraslado && (
+            <p className="text-[11px] text-gray-500">Traslado entre sedes propias: sin valores y sin cuenta.</p>
+          )}
+          {!esDevolucion && !esTraslado && r.estado !== 'En transito' && r.estado !== 'Anulada' && (
             <div className="flex items-center justify-between text-xs mt-1 pt-1.5 border-t border-gray-200">
               <span className="text-gray-500">Cargo {formatCOP(s.cargo)} · abonado {formatCOP(s.abonado)}</span>
               <span className={`font-semibold ${Number(s.total_a_pagar ?? s.saldo) > 0 ? 'text-red-600' : 'text-green-700'}`}>
@@ -204,7 +216,7 @@ export function ModalDocumentoEnvio({ remisionId, onClose }) {
               </span>
             </div>
           )}
-          {r.costos_ocultos && (
+          {r.costos_ocultos && !esTraslado && (
             <p className="text-[11px] text-gray-400">Sale sin el valor de cada producto: tu usuario no lo ve.</p>
           )}
         </div>

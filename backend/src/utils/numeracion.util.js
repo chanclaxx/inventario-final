@@ -21,6 +21,10 @@ const TABLAS = {
   // consumir números del consecutivo de facturas.
   remision:       'remisiones',
   remesa:         'remesas',
+  // Un traslado entre sedes propias también es una fila de `remisiones`, pero
+  // se numera aparte («T-12»): no puede abrir huecos en el consecutivo de los
+  // envíos, que es el que el local tiene en su cuenta.
+  traslado_interno: 'remisiones',
   // Un pedido del local a la bodega tampoco es una remisión: se numera aparte
   // porque un pedido puede responderse con varias remisiones (o con ninguna).
   pedido_interno: 'pedidos_internos',

@@ -89,10 +89,14 @@ BEGIN
    LIMIT 1;
 
   IF v_envio IS NOT NULL THEN
-    RAISE EXCEPTION 'El equipo % va en camino en % #% hacia %. No se puede vender, prestar ni mover hasta que se reciba o se anule.',
+    -- Un traslado (20261030) lleva su propio consecutivo, «T-n»: con «#n» se
+    -- confundiría con el envío del mismo número.
+    RAISE EXCEPTION 'El equipo % va en camino en % hacia %. No se puede vender, prestar ni mover hasta que se reciba o se anule.',
       OLD.imei,
-      CASE WHEN v_tipo = 'devolucion' THEN 'la devolución' ELSE 'el envío' END,
-      v_envio, v_destino
+      CASE WHEN v_tipo = 'devolucion' THEN 'la devolución #' || v_envio
+           WHEN v_tipo = 'traslado'   THEN 'el traslado T-' || v_envio
+           ELSE 'el envío #' || v_envio END,
+      v_destino
       USING ERRCODE = 'RT001';
   END IF;
 
@@ -142,20 +146,20 @@ BEGIN
   IF NOT v_baja THEN RETURN NEW; END IF;
 
   IF TG_TABLE_NAME = 'productos_cantidad' THEN
-    SELECT COALESCE(SUM(lr.cantidad), 0), string_agg(DISTINCT '#' || COALESCE(r.numero::text, r.id::text), ', ')
+    SELECT COALESCE(SUM(lr.cantidad), 0), string_agg(DISTINCT CASE WHEN r.tipo = 'traslado' THEN 'traslado T-' ELSE 'envío #' END || COALESCE(r.numero::text, r.id::text), ', ')
       INTO v_reservado, v_envios
       FROM lineas_remision lr JOIN remisiones r ON r.id = lr.remision_id
      WHERE lr.tipo = 'cantidad' AND lr.estado_linea = 'Pendiente' AND r.estado = 'En transito'
        AND lr.producto_origen_id = OLD.id
        AND lr.atributo_origen_id IS NULL AND lr.variante_origen_id IS NULL;
   ELSIF TG_TABLE_NAME = 'atributos_producto' THEN
-    SELECT COALESCE(SUM(lr.cantidad), 0), string_agg(DISTINCT '#' || COALESCE(r.numero::text, r.id::text), ', ')
+    SELECT COALESCE(SUM(lr.cantidad), 0), string_agg(DISTINCT CASE WHEN r.tipo = 'traslado' THEN 'traslado T-' ELSE 'envío #' END || COALESCE(r.numero::text, r.id::text), ', ')
       INTO v_reservado, v_envios
       FROM lineas_remision lr JOIN remisiones r ON r.id = lr.remision_id
      WHERE lr.tipo = 'cantidad' AND lr.estado_linea = 'Pendiente' AND r.estado = 'En transito'
        AND lr.atributo_origen_id = OLD.id AND lr.variante_origen_id IS NULL;
   ELSE
-    SELECT COALESCE(SUM(lr.cantidad), 0), string_agg(DISTINCT '#' || COALESCE(r.numero::text, r.id::text), ', ')
+    SELECT COALESCE(SUM(lr.cantidad), 0), string_agg(DISTINCT CASE WHEN r.tipo = 'traslado' THEN 'traslado T-' ELSE 'envío #' END || COALESCE(r.numero::text, r.id::text), ', ')
       INTO v_reservado, v_envios
       FROM lineas_remision lr JOIN remisiones r ON r.id = lr.remision_id
      WHERE lr.tipo = 'cantidad' AND lr.estado_linea = 'Pendiente' AND r.estado = 'En transito'
@@ -179,7 +183,7 @@ BEGIN
   END IF;
 
   IF TRUE THEN
-    RAISE EXCEPTION '% unidad(es) van en camino en el envío % sin recibir: el stock no puede quedar en % (mínimo %). Recibe o anula el envío primero.',
+    RAISE EXCEPTION '% unidad(es) van en camino (%) sin recibir: el stock no puede quedar en % (mínimo %). Recibe o anula primero lo que va en camino.',
       v_reservado, v_envios, v_nuevo, v_reservado
       USING ERRCODE = 'RT001';
   END IF;

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getSucursales } from '../../api/sucursales.api';
 import { MoraConfig } from './MoraConfig';
 import { UsuariosAutorizados } from './UsuariosAutorizados';
+import { SedesPropiasConfig } from './SedesPropiasConfig';
 import {
   ToggleLeft, ToggleRight, Warehouse, Info, AlertTriangle,
 } from 'lucide-react';
@@ -139,6 +140,12 @@ export function RedInternaConfig({ valores, set }) {
               label="Cerrar los traslados libres"
               description="Impide mover mercancía por fuera de las remisiones. Apágalo solo si necesitas traslados directos entre locales."
             />
+          </div>
+
+          {/* Sedes propias: a ellas se les traslada (sin cuenta) en vez de
+              despacharles. Opt-in: sin ninguna marcada, todo igual que hoy. */}
+          <div className="pl-4 pt-2 border-t border-gray-100">
+            <SedesPropiasConfig valores={valores} set={set} />
           </div>
 
           {/* Ausente = ENCENDIDO, al revés que casi todo lo demás. Es

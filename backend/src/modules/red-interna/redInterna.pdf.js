@@ -328,14 +328,19 @@ const _tablaAbonos = (doc, y, abonos) => {
 
 const construirPdfEnvio = (r, config) => {
   const esDevolucion = r.tipo === 'devolucion';
-  const verValores = !r.costos_ocultos;
+  // Un TRASLADO entre sedes propias (20261030) es la guía que viaja con la
+  // mercancía: productos, quién manda, quién recibe y firmas. Sin un solo
+  // valor —no genera cuenta— y con su propio número («T-12»).
+  const esTraslado = r.tipo === 'traslado';
+  const verValores = !r.costos_ocultos && !esTraslado;
   const estado = ESTADO_REMISION[r.estado] || { texto: r.estado, tono: 'gris', franja: C.gris };
-  const titulo = esDevolucion ? 'Devolución a bodega' : 'Envío de mercancía';
-  const doc = _nuevoDoc(`${titulo} ${_numeroDoc(r)}`, config);
-  encabezadoContinuo(doc, _continuacion(`${titulo} ${_numeroDoc(r)} · de ${r.sucursal_origen_nombre} a ${r.sucursal_destino_nombre}`));
+  const titulo = esTraslado ? 'Traslado entre sedes' : esDevolucion ? 'Devolución a bodega' : 'Envío de mercancía';
+  const numeroDoc = esTraslado ? `T-${r.numero ?? r.id}` : _numeroDoc(r);
+  const doc = _nuevoDoc(`${titulo} ${numeroDoc}`, config);
+  encabezadoContinuo(doc, _continuacion(`${titulo} ${numeroDoc} · de ${r.sucursal_origen_nombre} a ${r.sucursal_destino_nombre}`));
 
   let y = encabezado(doc, {
-    config, titulo, numero: _numeroDoc(r),
+    config, titulo, numero: numeroDoc,
     subtitulo: `Emitido ${formatFecha(r.fecha_emision)}`,
     franja: estado.franja,
   });
@@ -348,22 +353,31 @@ const construirPdfEnvio = (r, config) => {
   y += 30;
 
   y = _bloquePartes(doc, y,
-    { titulo: esDevolucion ? 'Devuelve (local)' : 'Sale de (bodega)', nombre: r.sucursal_origen_nombre,
-      lineas: [`Despachó: ${r.usuario_emisor_nombre || '—'}`, `Fecha: ${formatFechaHora(r.fecha_emision)}`] },
-    { titulo: esDevolucion ? 'Recibe (bodega)' : 'Llega a (local)', nombre: r.sucursal_destino_nombre,
+    { titulo: esTraslado ? 'Sale de' : esDevolucion ? 'Devuelve (local)' : 'Sale de (bodega)', nombre: r.sucursal_origen_nombre,
+      lineas: [`${esTraslado ? 'Envió' : 'Despachó'}: ${r.usuario_emisor_nombre || '—'}`, `Fecha: ${formatFechaHora(r.fecha_emision)}`] },
+    { titulo: esTraslado ? 'Llega a' : esDevolucion ? 'Recibe (bodega)' : 'Llega a (local)', nombre: r.sucursal_destino_nombre,
       lineas: r.fecha_recepcion
         ? [`Recibió: ${r.usuario_receptor_nombre || '—'}`, `Fecha: ${formatFechaHora(r.fecha_recepcion)}`]
         : ['Aún no se ha recibido'] });
 
   // El plazo de pago va ANTES de los productos: es la condición del
   // documento, y quien lo firma tiene que leerla.
-  const textoPlazo = esDevolucion ? null : _textoPlazo(r.mora, r.estado === 'En transito');
+  const textoPlazo = (esDevolucion || esTraslado) ? null : _textoPlazo(r.mora, r.estado === 'En transito');
   if (textoPlazo) y = _nota(doc, y, textoPlazo, r.mora?.en_mora ? 'rojo' : 'azul');
 
   y = labelSeccion(doc, y, `Productos (${(r.lineas || []).length})`, { reservar: 44 });
   y = _tablaProductos(doc, y, r.lineas || [], { verValores });
 
-  if (esDevolucion) {
+  if (esTraslado) {
+    const unidades = (r.lineas || []).reduce((acc, l) => acc + (l.tipo === 'cantidad' ? Number(l.cantidad || 0) : 1), 0);
+    y = _cajaTotales(doc, y, [], { destacada: ['Unidades trasladadas', String(unidades), C.azul] });
+    y = _nota(doc, y, 'Movimiento interno entre sedes del mismo negocio: no genera cuenta ni deuda.', 'azul');
+    if (r.estado === 'En transito') {
+      y = _nota(doc, y, 'Todavía no se ha recibido: la mercancía sigue reservada en la sucursal que la envió.', 'naranja');
+    } else if (r.estado === 'Anulada') {
+      y = _nota(doc, y, 'Traslado anulado: la mercancía nunca salió.', 'gris');
+    }
+  } else if (esDevolucion) {
     const confirmada = r.estado === 'Recibida' || r.estado === 'Parcial';
     const filasTot = [];
     if (verValores) {

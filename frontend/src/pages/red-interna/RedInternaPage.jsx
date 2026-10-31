@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getPanel, getSucursales, confirmarRemesa, anularRemesa, anularRemision,
   confirmarDevolucion, getSalud, decidirGasto,
+  getContextoRed,
 } from '../../api/redInterna.api';
+import { PanelTraslados } from './traslados/PanelTraslados';
 import { formatCOP, formatFechaHora } from '../../utils/formatters';
 import { Button }     from '../../components/ui/Button';
 import { Badge }      from '../../components/ui/Badge';
@@ -498,6 +500,17 @@ export default function RedInternaPage() {
     queryFn:  () => getSucursales().then((r) => r.data.data),
     staleTime: 5 * 60 * 1000,
   });
+  // Mismo query que el carrito: dice si hay sedes propias (traslados sin
+  // cuenta) y si este usuario puede trasladar.
+  const { data: contexto } = useQuery({
+    queryKey: ['red-contexto'],
+    queryFn:  () => getContextoRed().then((r) => r.data.data),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  // En una sede propia, la cuenta vieja con la bodega (cerrada en $0) se puede
+  // abrir a pedido; la cara por defecto son sus traslados.
+  const [verCuentaVieja, setVerCuentaVieja] = useState(false);
 
   const refrescar = () => {
     qc.invalidateQueries({ queryKey: ['red-panel'] });
@@ -506,6 +519,7 @@ export default function RedInternaPage() {
     // El avance de un pedido es DERIVADO: despachar, anular o recibir lo mueven
     // sin que nadie escriba en él, así que su ficha hay que volver a pedirla.
     qc.invalidateQueries({ queryKey: ['red-pedido'] });
+    qc.invalidateQueries({ queryKey: ['red-traslados-panel'] });
     // El movimiento afecta inventario y dinero: refrescar lo que el usuario
     // podría estar mirando en otra pestaña.
     qc.invalidateQueries({ queryKey: ['inventario'] });
@@ -533,7 +547,16 @@ export default function RedInternaPage() {
     );
   }
 
-  const locales = (sucursales || []).filter((s) => !s.es_bodega);
+  const tr = contexto?.traslados || {};
+  const propias = tr.activos ? (tr.sedes_propias || []).map(Number) : [];
+  // A una sede propia no se le despacha: sale de la lista del despacho y del
+  // listado de locales con cuenta (se pinta aparte, en los traslados).
+  const locales = (sucursales || []).filter((s) => !s.es_bodega && !propias.includes(Number(s.id)));
+  const esSedePropia = !data.es_bodega && data.es_sede_propia === true;
+  const dataBodega = data.es_bodega
+    ? { ...data, locales: (data.locales || []).filter((l) => !l.es_sede_propia) }
+    : data;
+  const sedesPropiasBodega = data.es_bodega ? (data.locales || []).filter((l) => l.es_sede_propia) : [];
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5">
@@ -546,7 +569,9 @@ export default function RedInternaPage() {
         <div>
           <h1 className="text-lg font-bold text-gray-900">Bodega</h1>
           <p className="text-xs text-gray-400">
-            {data.es_bodega ? 'Distribución a los locales' : 'Tu cuenta con la bodega'}
+            {data.es_bodega
+              ? (tr.activos ? 'Traslados a tus sedes y despachos a los locales' : 'Distribución a los locales')
+              : esSedePropia ? 'Traslados con la bodega · sede propia, sin cuenta' : 'Tu cuenta con la bodega'}
           </p>
         </div>
       </div>
@@ -565,9 +590,32 @@ export default function RedInternaPage() {
           onAviso={setAviso}
         />
       ) : data.es_bodega ? (
-        <PanelBodega data={data} locales={locales} onRefrescar={refrescar} onAviso={setAviso}
-          onVerCuenta={(id, nombre) => setCuenta({ id, nombre })} />
+        <>
+          {tr.activos && (
+            <div className="mb-5">
+              <PanelTraslados contexto={contexto} sedesPropias={sedesPropiasBodega} onAviso={setAviso}
+                compacto onVerCuenta={(id, nombre) => setCuenta({ id, nombre })} />
+            </div>
+          )}
+          <PanelBodega data={dataBodega} locales={locales} onRefrescar={refrescar} onAviso={setAviso}
+            onVerCuenta={(id, nombre) => setCuenta({ id, nombre })} />
+        </>
+      ) : esSedePropia && !verCuentaVieja ? (
+        <>
+          <PanelTraslados contexto={contexto} onAviso={setAviso} />
+          <button type="button" onClick={() => setVerCuentaVieja(true)}
+            className="w-full py-3 mt-2 text-xs text-gray-400 hover:text-gray-600">
+            Ver la cuenta anterior con la bodega (cerrada)
+          </button>
+        </>
       ) : (
+        <>
+        {esSedePropia && (
+          <button type="button" onClick={() => setVerCuentaVieja(false)}
+            className="mb-3 text-sm text-blue-600 font-medium">
+            ← Volver a los traslados
+          </button>
+        )}
         <CuentaLocal
           sucursalId={data.sucursal_id}
           propia
@@ -575,6 +623,7 @@ export default function RedInternaPage() {
           onRefrescar={refrescar}
           onAviso={setAviso}
         />
+        </>
       )}
     </div>
   );

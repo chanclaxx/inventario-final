@@ -2885,6 +2885,45 @@ Key modules: `auth`, `registro`, `usuarios`, `productos`, `inventario`, `factura
 > fabrica a propósito el estado roto del #21 y con los triggers ya no se puede
 > producir: esa suite no carga esta migración.
 
+> **Traslados entre SEDES PROPIAS — despacho y traslado conviven**
+> (`red-interna/redInterna.traslados.js` + `.reglas.js` + `.routes.js`,
+> `20261030_traslados_internos.sql`, `pages/red-interna/traslados/`,
+> `SedesPropiasConfig.jsx`; pedido de Tesla, 30-oct-2026). La bodega le
+> DESPACHA a los locales que le pagan (Bunny, Camilo) y le TRASLADA a su propia
+> tienda, que no debe nada (hasta hoy se «pagaba a sí misma» cada envío).
+> Opt-in `red_interna_sedes_propias` (arreglo de ids, **ausente = ninguna =
+> todo como antes**), `red_interna_traslados_confirmar` (**ausente = entra
+> directo**, decisión del usuario) y `red_interna_traslados_rutas`
+> (`bodega` por defecto | `entre_sedes`). **Un traslado es una remisión de tipo
+> `'traslado'`**: mismo documento, recepción, faltantes, movimiento por NODO,
+> referencia creada en el destino y reserva en camino (los triggers RT001 no
+> miran el tipo). Lo distinto es la plata: líneas con **`valor_interno = 0`** y
+> el costo real en `costo_origen` (lo que entra al promedio del destino; un IMEI
+> conserva su `costo_compra`); sin plazo, sin saldo a favor, consecutivo propio
+> (`traslado_interno`, «T-12»). Todo lector de la cuenta y de los reportes
+> filtra `tipo = 'entrega'` y además el cargo de un traslado suma $0.
+> **Regla de ruta** (`reglas.motivoRutaInvalida`, la misma que pinta los
+> destinos del carrito): solo bodega ↔ sede propia (o propia ↔ propia con
+> `entre_sedes`); **un local con cuenta nunca entra en un traslado**; a una
+> sede propia no se le despacha (409 `SEDE_PROPIA`) ni devuelve por cuenta.
+> **Permiso**: trasladar = el módulo «Traslados» de Ajustes → Usuarios (el que
+> ya existía: supervisor por defecto, al vendedor se le marca); recibir =
+> cualquiera de la sede destino con «Bodega». **Sin un peso en pantalla**: los
+> buscadores arman la respuesta campo por campo; solo el admin ve lo que costó.
+> **Pasar una sede a propia**: Ajustes exige su cuenta en $0 y nada en camino;
+> el botón «Cerrar la cuenta en $0» deja UN ajuste («por decisión de diseño…»),
+> sin borrar envíos ni abonos. Un IMEI que llegó por despacho cuando la sede
+> era local sale por traslado liberando su línea vieja y compensando con un
+> ajuste: la cuenta no se mueve. `SQL_LINEA_VIVA` (repo): un traslado RECIBIDO
+> no ata al equipo (se puede volver a despachar). En pantalla: «Enviar» en el
+> carrito de la bodega abre «¿A dónde va?» (sedes = traslado, locales =
+> despacho); en la sede propia, «Trasladar»; la página Bodega tiene la cara de
+> sede propia y los traslados arriba en la bodega. El módulo viejo `traslados`
+> no se tocó (mueve el producto y no la talla: no sirve con variantes).
+> Prueba: `87-traslados-internos` (94; la sección 1 es la de apagado, la 5 —★—
+> que no genera cuenta ni venta de la bodega, la 11 que no viaja ningún costo).
+> Probado en Chrome contra una base local aislada (escritorio y 390 px).
+
 > **Los despachos salen en el historial de FACTURAS — sin ser facturas**
 > (`facturas/facturas.despachos.js`, `FilaDespacho` en `FacturarPage`; pedido
 > del usuario, 9-oct-2026): para la bodega un despacho es una salida más y se

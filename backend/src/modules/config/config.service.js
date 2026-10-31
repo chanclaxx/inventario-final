@@ -577,6 +577,33 @@ const saveConfig = async (negocioId, datos) => {
     );
   }
 
+  // Sedes propias de la red interna (traslados sin cuenta). Una sede que ENTRA
+  // a la lista tiene que llegar con su cuenta con la bodega en $0 y nada en
+  // camino: si no, su deuda quedaría colgando de una sucursal que ya no paga.
+  if (datosProcesados.red_interna_sedes_propias !== undefined) {
+    const { rows: actual } = await pool.query(
+      `SELECT clave, valor FROM config_negocio
+       WHERE negocio_id = $1 AND clave IN ('red_interna_sedes_propias', 'red_interna_bodega_id')`,
+      [negocioId],
+    );
+    const leida = Object.fromEntries(actual.map((r) => [r.clave, r.valor]));
+    let actuales = [];
+    try { actuales = JSON.parse(leida.red_interna_sedes_propias || '[]'); } catch { actuales = []; }
+    datosProcesados.red_interna_sedes_propias = await require('../red-interna/redInterna.traslados')
+      .validarSedesPropias(negocioId, datosProcesados.red_interna_sedes_propias, {
+        bodegaId: Number(datosProcesados.red_interna_bodega_id ?? leida.red_interna_bodega_id) || null,
+        actuales: Array.isArray(actuales) ? actuales : [],
+      });
+  }
+  if (datosProcesados.red_interna_traslados_rutas !== undefined
+      && !['bodega', 'entre_sedes'].includes(String(datosProcesados.red_interna_traslados_rutas))) {
+    throw { status: 400, message: 'Las rutas de los traslados no son válidas' };
+  }
+  if (datosProcesados.red_interna_traslados_confirmar !== undefined
+      && !['0', '1'].includes(String(datosProcesados.red_interna_traslados_confirmar))) {
+    throw { status: 400, message: 'El valor de «confirmar traslados» no es válido' };
+  }
+
   // Hashear las claves privadas antes de persistir
   for (const clave of CLAVES_A_HASHEAR) {
     if (clave in datosProcesados && datosProcesados[clave] !== '') {

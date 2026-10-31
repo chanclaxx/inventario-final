@@ -22,6 +22,12 @@ router.use(requireModulo('red_interna'), requireRedInterna);
 // apagar los pedidos sin apagar la red interna. Ver redInterna.pedidos.routes.js.
 router.use('/pedidos', require('./redInterna.pedidos.routes'));
 
+// ── Traslados entre sedes propias (sin cuenta) ──────────────────────────────
+// Sub-router por la misma razón: sus rutas no chocan con `/remisiones/:id`, y
+// llevan su propio permiso (el módulo «Traslados»). Recibir un traslado va por
+// `/remisiones/:id/recibir`, la ruta de siempre. Ver redInterna.traslados.routes.js.
+router.use('/traslados', require('./redInterna.traslados.routes'));
+
 // ── Lectura ──────────────────────────────────────────────────────────────────
 router.get('/panel',                    ctrl.getPanel);
 router.get('/sucursales',               ctrl.getSucursales);
